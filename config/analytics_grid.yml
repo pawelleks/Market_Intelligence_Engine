@@ -1,0 +1,4 @@
+state_modes: [tri, binary]
+thresholds_bps: [5, 10, 15, 20]
+orders: [1, 2, 3, 4]
+windows: [1Y, 2Y, 5Y, 10Y, 20Y, MAX]

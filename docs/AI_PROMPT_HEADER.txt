@@ -1,0 +1,13 @@
+Read docs/ARCHITECT_BIBLE.md before any change and follow it strictly.
+
+Rules you must acknowledge and obey:
+1) Architecture: keep modules, folders, naming, and configs exactly as defined.
+2) Scope: implement only the requested task; do not refactor or touch other files.
+3) UI: no heavy compute; UI only renders precomputed Parquet/CSV; dark theme via config/ui.yml + app/ui/theme.py.
+4) Determinism: outputs must be idempotent and reproducible.
+5) Performance: vectorized ops; no unnecessary imports at module import time; cache where specified.
+6) Tests: add/adjust tests for each change; all tests must pass.
+7) Logging/metadata: use existing helpers and update registry/metadata as defined.
+8) Imports: keep absolute package imports (e.g., from app.ui.theme import …); do not alter PYTHONPATH in code except the provided bootstrap shim for pages.
+
+If a task conflicts with ARCHITECT_BIBLE.md or these rules, STOP and ask me before proceeding.

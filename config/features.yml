@@ -1,0 +1,6 @@
+# Feature window configuration
+rolling_windows:
+  sma: [20, 50, 200]
+  ema: [20, 50, 200]
+  volatility: [20, 60]
+

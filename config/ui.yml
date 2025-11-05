@@ -1,0 +1,34 @@
+theme:
+  colors:
+    page_bg: "#0B1220"
+    card_bg: "#0E1525"
+    grid: "#203049"
+    text: "#D7E3F3"
+    accent_blue: "#9EC4FF"
+    green: "#4CAF50"
+    red: "#F44336"
+    neutral: "#9E9E9E"
+    bull: "#16a34a"
+    bear: "#ef4444"
+    blue: "#3b82f6"
+    fg: "#D7E3F3"
+    bg: "#0B1220"
+  font:
+    family: "system-ui"
+    size_title: 18
+    size_body: 13
+    size_small: 11
+  spacing:
+    pad_sm: 8
+    pad_md: 12
+    pad_lg: 16
+  radii:
+    card: 12
+  chart:
+    max_points: 2500
+    default_width: 640
+    default_height: 340
+behavior:
+  cache_ttl_seconds: 600
+  show_download_buttons: true
+

@@ -1,0 +1,8 @@
+# Example pipeline parameters
+markov:
+  order: 1
+  threshold_bps: 10
+  state_mode: tri
+  min_samples_per_state: 10
+pipeline_version: 1
+

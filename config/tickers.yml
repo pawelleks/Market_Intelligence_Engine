@@ -1,0 +1,7 @@
+# Example ticker list
+tickers:
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+

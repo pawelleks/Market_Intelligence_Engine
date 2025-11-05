@@ -1,0 +1,17 @@
+# Test + config
+pytest>=7.0
+pyyaml>=6.0
+
+# Runtime dependencies for ingestion
+pandas>=1.5
+pyarrow>=9.0
+yfinance>=0.2.18
+
+# Analytics: HMM
+hmmlearn>=0.3.2
+scipy>=1.9
+scikit-learn>=1.2
+
+# UI
+streamlit>=1.35
+matplotlib>=3.7

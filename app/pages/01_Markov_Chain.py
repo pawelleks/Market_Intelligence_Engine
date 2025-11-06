@@ -27,6 +27,10 @@ from app.ui.components import SectionHeader, DataStatus, plot_mpl
 from app.ui.components import read_parquet_safe, read_csv_safe, read_json_safe, fmt_percent_one_decimal
 # Lightweight stdlib for fs checks
 import os
+import hashlib as _hashlib
+
+# Temporary debug flag for binary threshold panel
+DEBUG_BINARY_THRESHOLD = True
 
 
 def _get_ticker_from_state(default: str = "SPY") -> str:
@@ -123,6 +127,111 @@ def _safe_width(width):
     if isinstance(width, str):
         return width
     return "stretch"
+
+
+def _normalize_mode(mode_in) -> str:
+    """Map various inputs to canonical 'binary' or 'tri'. Raise ValueError if unsupported."""
+    m = str(mode_in).strip().lower() if not isinstance(mode_in, int) else mode_in
+    if m in (0, "0", "bin", "binary"):
+        return "binary"
+    if m in (1, "1", "tri", "tri-state", "tri_state", "ternary"):
+        return "tri"
+    if isinstance(mode_in, str) and mode_in.strip().lower() in {"binary", "tri"}:
+        return mode_in.strip().lower()
+    raise ValueError(f"Unsupported mode: {mode_in}")
+
+
+def _matrix_exact_path(ticker: str, mode: str, thr: int, order: int, window: str) -> Path:
+    mode = str(mode).lower().strip()
+    window = str(window).upper().strip()
+    return DATA/"analytics"/"markov"/ticker/"matrices"/mode/f"thr{int(thr)}"/f"order{int(order)}"/f"{window}.parquet"
+
+
+def _nearest_available_threshold(ticker: str, mode: str, order: int, window: str, requested_thr: int) -> int | None:
+    # Look up by scanning threshold directories under matrices/{mode}
+    mdir = DATA/"analytics"/"markov"/ticker/"matrices"/str(mode).lower()
+    if not mdir.exists():
+        return None
+    candidates: list[tuple[int,int]] = []  # (absdiff, thr)
+    for thr_dir in mdir.glob("thr*/"):
+        try:
+            tnum = int(thr_dir.name.replace("thr", ""))
+        except Exception:
+            continue
+        p = thr_dir/f"order{int(order)}"/f"{str(window).upper()}.parquet"
+        if p.exists():
+            candidates.append((abs(int(requested_thr)-tnum), tnum))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]))
+    return candidates[0][1]
+
+
+@st.cache_data(show_spinner=False)
+def _load_matrix_cached_by_params(
+    ticker: str,
+    mode: str,
+    thr: int,
+    order: int,
+    window: str,
+    path_str: str,
+    mtime: float,
+    cache_version: str = "v1",
+):
+    import pandas as pd
+    return pd.read_parquet(path_str)
+
+
+def _load_matrix_for_selection(
+    ticker: str,
+    mode: str,
+    thr: int,
+    order: int,
+    window: str,
+    allow_fallback: bool = True,
+):
+    """Resolve and load matrix for (ticker, mode, thr, order, window) with optional nearest-threshold fallback.
+
+    Returns (df, info) where info includes:
+      - path (Path)
+      - requested: dict
+      - resolved: dict
+      - fallback_used: bool
+    """
+    mode_l = str(mode).lower().strip()
+    thr_i = int(thr)
+    win_u = str(window).upper().strip()
+    # Exact path
+    p = _matrix_exact_path(ticker, mode_l, thr_i, order, win_u)
+    used_thr = thr_i
+    fallback_used = False
+    if not p.exists() and allow_fallback:
+        near = _nearest_available_threshold(ticker, mode_l, order, win_u, thr_i)
+        if near is not None and near != thr_i:
+            used_thr = near
+            p = _matrix_exact_path(ticker, mode_l, used_thr, order, win_u)
+            fallback_used = p.exists()
+    if not p.exists():
+        raise FileNotFoundError(str(p))
+    st_stat = p.stat()
+    df = _load_matrix_cached_by_params(
+        ticker=ticker,
+        mode=mode_l,
+        thr=used_thr,
+        order=int(order),
+        window=win_u,
+        path_str=str(p),
+        mtime=float(st_stat.st_mtime),
+        cache_version="v1",
+    )
+    info = {
+        "path": p,
+        "requested": {"ticker": ticker, "mode": mode_l, "thr": thr_i, "order": int(order), "window": win_u},
+        "resolved": {"ticker": ticker, "mode": mode_l, "thr": used_thr, "order": int(order), "window": win_u},
+        "fallback_used": bool(fallback_used and used_thr != thr_i),
+        "legacy_fallback_used": False,
+    }
+    return df, info
 
 
 from src.analytics.markov.states_model import (
@@ -260,6 +369,7 @@ def _build_cli_for_combo(ticker: str, order: int, state_mode: str, thr_bps: int,
 
 def _resolve_built_coverage(ticker: str, mode: str) -> dict:
     base = DATA / "analytics" / "markov" / ticker
+    mode = _normalize_mode(mode)
     # thresholds with states
     thrs = []
     for p in (base.glob(f"states_thr*_{mode}.parquet")):
@@ -358,8 +468,11 @@ def _window_dates_from_features(ticker: str, window: str, features_dir: Path = D
     start_all, end_all = s.min(), s.max()
     if window in ("Max", None):
         return start_all, end_all
-    if window.endswith("Y") and window[:-1].isdigit():
-        years = int(window[:-1])
+    win = str(window).upper().strip()
+    if win in ("MAX", "", None):
+        return start_all, end_all
+    if win.endswith("Y") and win[:-1].isdigit():
+        years = int(win[:-1])
         start = max(start_all, end_all - _dt.timedelta(days=365 * years))
         return start, end_all
     return start_all, end_all
@@ -710,6 +823,7 @@ def main():
     st.session_state.setdefault("mk_order", 1)
     st.session_state.setdefault("mk_state_mode", "tri")
     st.session_state.setdefault("mk_threshold", 10)
+    st.session_state.setdefault("mk_window", "1Y")
 
     # Apply transient threshold preset from previous run (if any), then clear flags
     if st.session_state.get("mk_apply_threshold"):
@@ -722,7 +836,7 @@ def main():
     ticker = _get_ticker_from_state("SPY")
     assert isinstance(ticker, str) and ticker, "ticker must be a string symbol"
     # Optional: assert ticker in supported set (from config if desired)
-    raw_window = st.sidebar.selectbox("Time range", ["1Y", "2Y", "5Y", "10Y", "20Y", "Max", "Custom"], index=0)
+    raw_window = st.sidebar.selectbox("Time range", ["1Y", "2Y", "5Y", "10Y", "20Y", "Max", "Custom"], index=0, key="mk_window")
     window = _normalize_window_value(raw_window)
     raw_norm = str(raw_window).upper().strip()
     if window == "1Y" and raw_norm not in {"1Y","1"}:
@@ -735,6 +849,16 @@ def main():
     if st.sidebar.button("🔄 Clear data cache & reload", width="content"):
         st.cache_data.clear()
         st.rerun()
+
+    # Guard rendering until a valid ticker and state mode are selected
+    try:
+        mode_ok = _normalize_mode(ctrl_state_mode) in {"binary", "tri"}
+    except Exception:
+        mode_ok = False
+    ticker_ok = isinstance(ticker, str) and bool(ticker.strip())
+    if not (ticker_ok and mode_ok):
+        st.info("Select a ticker and state mode to display analysis.")
+        return
 
     # Load grid thresholds for nearest suggestion
     try:
@@ -759,17 +883,18 @@ def main():
     # Precompute feature-based range for header fallback
     fstart, fend = _window_dates_from_features(ticker, window)
 
+    # Determine normalized window key once for downstream path resolution
+    win_key = window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX"
+
     # Read-only: do not compute in UI; only attempt to load derived/cached matrix, else show CLI hint
     try:
-        win_key = window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX"
-        mpath = _matrix_file_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
-        mat = _load_matrix_df(mpath)
+        mat, mat_info = _load_matrix_for_selection(ticker, eff_state_mode, int(eff_thr), int(eff_order), win_key, allow_fallback=False)
     except Exception:
         # Header lines even if matrix missing
         # Determine last updated as max of features mtime and existing matrix (if present)
         last_iso = meta.get("mtime")
         try:
-            mp = _matrix_file_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
+            mp = _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
             if Path(mp).exists():
                 mtime2 = pd.Timestamp.fromtimestamp(Path(mp).stat().st_mtime, tz="UTC").isoformat()
                 # pick the later iso by comparison of pandas Timestamps
@@ -782,8 +907,15 @@ def main():
         st.caption(f"Data set for {ticker}: {d0} – {d1}.  Last updated: {last_iso}")
         mode_name = eff_state_mode
         st.caption(f"Ticker: {ticker} • Time range: {window.upper()} • Source: offline • State mode: {mode_name} • Threshold: {eff_thr}bps • Order: {eff_order}")
-        msg = _format_missing_matrix_msg(ticker, eff_state_mode, eff_thr, eff_order, window.upper())
-        DataStatus(msg, "warning")
+        # Use ensure-markov-available hint with requested params
+        ensure_cli = (
+            f"python cli/mie.py ensure-markov-available --ticker {ticker} "
+            f"--order {eff_order} --state-mode {eff_state_mode} --threshold-bps {int(eff_thr)} --window {win_key}"
+        )
+        DataStatus(
+            "Markov matrix unavailable\nCLI hint:\n" + ensure_cli + "\nRe-run the command to generate the matrix, then reload this page.",
+            "warning",
+        )
         st.dataframe(pd.DataFrame())
         return
 
@@ -807,7 +939,7 @@ def main():
     # Last updated is the later of features mtime and matrix file mtime (if present)
     last_iso = meta.get("mtime")
     try:
-        mp = _matrix_file_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
+        mp = mat_info["path"] if 'mat_info' in locals() else _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
         if Path(mp).exists():
             mtime2 = pd.Timestamp.fromtimestamp(Path(mp).stat().st_mtime, tz="UTC").isoformat()
             if last_iso is None or pd.Timestamp(mtime2) > pd.Timestamp(last_iso):
@@ -843,6 +975,47 @@ def main():
     if fig is not None:
         plot_mpl(fig, caption="Transition probabilities (row-wise)")
 
+    # Temporary Binary Threshold Debug panel
+    if DEBUG_BINARY_THRESHOLD and _normalize_mode(eff_state_mode) == "binary":
+        try:
+            pth = mat_info.get("path")
+            stat = Path(pth).stat()
+            size = int(stat.st_size)
+            mtime = float(stat.st_mtime)
+            # Quick checksum: sha1 of file bytes (streamed)
+            sha1 = _hashlib.sha1()
+            with open(pth, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha1.update(chunk)
+            checksum = sha1.hexdigest()[:12]
+            # First row (raw matrix) rounded to 3 decimals
+            first_row = None
+            cols_dbg = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in mat.columns]
+            if not cols_dbg and not mat.empty:
+                cols_dbg = [c for c in mat.columns if c.startswith("mc_prob_")]
+            if not mat.empty and cols_dbg:
+                r0 = mat.iloc[0][cols_dbg].astype(float).round(3).to_dict()
+                first_row = r0
+            # Active cache key
+            cache_key = (ticker, _normalize_mode(eff_state_mode), int(eff_thr), int(eff_order), win_key)
+            legacy_fallback = bool(mat_info.get("legacy_fallback_used", False))
+            with st.expander("Binary Threshold Debug", expanded=False):
+                st.text("\n".join([
+                    f"resolved_path: {pth}",
+                    f"fingerprint: size={size} mtime={mtime:.0f} sha1={checksum}",
+                    f"first_row: {first_row}",
+                    f"cache_key: {cache_key}",
+                    f"legacy_fallback_used: {legacy_fallback}",
+                ]))
+            # Warn if checksums identical across threshold changes
+            prev = st.session_state.get("mk_debug_prev")
+            cur_sig = {"thr": int(eff_thr), "checksum": checksum}
+            if prev and prev.get("thr") != cur_sig["thr"] and prev.get("checksum") == cur_sig["checksum"]:
+                DataStatus("Matrix files for previous and current thresholds appear byte-identical; check offline build.", "warning")
+            st.session_state["mk_debug_prev"] = cur_sig
+        except Exception:
+            pass
+
     # Context-aware summary
     ctx_gnr, seq = _build_context(s_for.rename(columns={"state": "mc_state_today"}) if s_for is not None else None, eff_order, _dt.date.fromisoformat(dates[0]), _dt.date.fromisoformat(dates[1]))
     row = _safe_pick_context_row(mat_mode, _as_context_key(ctx_gnr))
@@ -870,8 +1043,14 @@ def main():
 
     # recompute k=1 from cache for current window to drive multi-step
     try:
-        mat_k1_path = _matrix_file_path(ticker, eff_state_mode, eff_thr, 1, window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX")
-        mat_k1 = _load_matrix_df(mat_k1_path)
+        mat_k1, _mi2 = _load_matrix_for_selection(
+            ticker,
+            eff_state_mode,
+            int(eff_thr),
+            1,
+            window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX",
+            allow_fallback=False,
+        )
     except Exception:
         mat_k1 = None
     if mat_k1 is not None and not mat_k1.empty:

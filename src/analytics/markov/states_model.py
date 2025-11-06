@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 
 import pandas as pd
@@ -24,6 +24,10 @@ def _meta_states_path(ticker: str) -> Path:
 
 def _matrix_cache_path(ticker: str, mode: str, thr_bps: int, order: int, window_key: str) -> Path:
     return AN_MKV_DIR / ticker / "matrices" / mode / f"thr{int(thr_bps)}" / f"order{int(order)}" / f"{window_key}.parquet"
+
+
+def _matrix_meta_path(ticker: str, mode: str, thr_bps: int, order: int) -> Path:
+    return AN_MKV_DIR / ticker / "matrices" / mode / f"thr{int(thr_bps)}" / f"order{int(order)}" / "matrix_metadata.json"
 
 
 def _window_key_from_arg(window: str | Tuple[str, str]) -> str:
@@ -112,7 +116,8 @@ def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     if mode == "tri":
         st = pd.Series(np.where(df["ret_1d"] > th, "U", np.where(df["ret_1d"] < -th, "D", "N")), index=df.index)
     else:
-        st = pd.Series(np.where(df["ret_1d"] >= th, "U", np.where(df["ret_1d"] <= -th, "D", np.where(df["ret_1d"] >= 0, "U", "D"))), index=df.index)
+        # Binary depends on threshold: classify Up only if return >= +th, otherwise Down
+        st = pd.Series(np.where(df["ret_1d"] >= th, "U", "D"), index=df.index)
     out = pd.DataFrame({
         "date": df["date"],
         "state": st.astype(str),
@@ -163,7 +168,16 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
     if cache_p.exists():
         return pd.read_parquet(cache_p)
 
-    st_df = states_for(ticker, thr_bps, mode)
+    # Load thresholded states; if missing, raise clear ValueError with CLI hint
+    try:
+        st_df = states_for(ticker, thr_bps, mode)
+    except FileNotFoundError as e:
+        hint = (
+            f"States missing for (ticker={ticker}, mode={mode}, thr={thr_bps}).\n"
+            f"Run: python cli/mie.py build-markov --ticker {ticker} --order {int(order)} --state-mode {mode} --threshold-bps {int(thr_bps)} --window {window_key}"
+        )
+        raise ValueError(hint) from e
+
     start, end = _window_dates_from_states(st_df, window_key)
     mask = (st_df["date"] >= start) & (st_df["date"] <= end)
     sl = st_df.loc[mask].reset_index(drop=True)
@@ -204,6 +218,30 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
 
     cache_p.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(cache_p, index=False)
+
+    # Write/append matrix metadata JSON alongside
+    meta_p = _matrix_meta_path(ticker, mode, thr_bps, order)
+    meta = {}
+    if meta_p.exists():
+        try:
+            meta = json.loads(meta_p.read_text())
+        except Exception:
+            meta = {}
+    meta[window_key] = {
+        "ticker": ticker,
+        "mode": mode,
+        "threshold_bps": int(thr_bps),
+        "order": int(order),
+        "window": window_key,
+        "date_range": {
+            "start": str(start.date()),
+            "end": str(end.date()),
+        },
+        "build_version": "states-first-v1",
+        "generated_timestamp": datetime.now(timezone.utc).isoformat(),
+        "matrix_path": str(cache_p),
+    }
+    meta_p.write_text(json.dumps(meta, indent=2))
     return out
 
 

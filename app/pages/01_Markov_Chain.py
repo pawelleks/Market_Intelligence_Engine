@@ -30,7 +30,7 @@ import os
 import hashlib as _hashlib
 
 # Temporary debug flag for binary threshold panel
-DEBUG_BINARY_THRESHOLD = True
+DEBUG_BINARY_THRESHOLD = False
 
 
 def _get_ticker_from_state(default: str = "SPY") -> str:
@@ -1055,11 +1055,9 @@ def main():
         mat_k1 = None
     if mat_k1 is not None and not mat_k1.empty:
         mat_k1m = _project_matrix_for_mode(mat_k1, eff_state_mode)
-        pi_df = _find_context_row(mat_k1m, ctx_gnr)
-        if pi_df is None and mat_k1m is not None and not mat_k1m.empty:
-            pi_df = mat_k1m.iloc[0]
-        pi_df = _safe_pick_context_row(mat_k1m, _as_context_key(ctx_gnr))
-        mult = _compute_multistep(pi_df, mat_k1m, horizons, eff_state_mode)
+        # Compute multi-horizon probabilities via p0 @ P^h
+        ctx_key = _as_context_key(ctx_gnr)
+        mult = compute_horizon_probs(mat_k1m, ctx_key, horizons, eff_state_mode)
         if not mult.empty:
             # format and display
             disp = mult.rename(columns={
@@ -1083,5 +1081,122 @@ def _build_markov_base_path(ticker: str) -> Path:
     return base
 
 
+# Update __all__ to export helpers for tests
+try:
+    __all__  # type: ignore[name-defined]
+except NameError:
+    __all__ = []  # type: ignore[assignment]
+__all__ = sorted(set(list(__all__) + ["compute_horizon_probs", "_compute_horizon_probs"]))
+
+
+import numpy as np  # for pure helpers
+
+
+def _context_key_to_symbol(ctx_display: str, mode: str) -> str:
+    """Map display context (G/N/R, possibly hyphenated like 'G-R') to raw symbol for current state.
+    - Uses the LAST token after splitting by '-'.
+    - Mapping: G->U, N->N, R->D.
+    - Validates against mode ('binary' => [U,D]; 'tri' => [U,N,D]); falls back to first state.
+    Pure helper; no Streamlit.
+    """
+    mode_l = str(mode).lower().strip()
+    states = ["U", "D"] if mode_l == "binary" else ["U", "N", "D"]
+    last = str(ctx_display or "").upper().split("-")[-1].strip()
+    mp = {"G": "U", "N": "N", "R": "D"}
+    raw = mp.get(last, last)
+    return raw if raw in states else states[0]
+
+
+def _build_transition_matrix_from_k1(df_k1: pd.DataFrame, mode: str) -> tuple[np.ndarray, list[str]]:
+    """Build a dense order-1 transition matrix P from df_k1.
+    - binary: states rows ['U','D'], columns [U,D] mapped from ['mc_prob_up','mc_prob_down']
+    - tri:    states rows ['U','N','D'], columns [U,N,D] mapped from ['mc_prob_up','mc_prob_neutral','mc_prob_down']
+    - Missing rows default to uniform (0.5/0.5 or 1/3 each).
+    Returns (P, states).
+    Pure helper; no Streamlit.
+    """
+    mode_l = str(mode).lower().strip()
+    if df_k1 is None or len(df_k1) == 0:
+        return np.zeros((0, 0), dtype=float), ([] if mode_l == "binary" else [])
+    if mode_l == "binary":
+        states = ["U", "D"]
+        cols = ["mc_prob_up", "mc_prob_down"]
+    elif mode_l == "tri":
+        states = ["U", "N", "D"]
+        cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
+    else:
+        raise ValueError("mode must be 'binary' or 'tri'")
+    df = df_k1.copy()
+    if "context" not in df.columns:
+        df["context"] = ""
+    df["context"] = df["context"].astype(str)
+    rows = []
+    for s in states:
+        row = df.loc[df["context"] == s, cols]
+        if row.empty:
+            rows.append(np.full(len(states), 1.0 / len(states)))
+        else:
+            r = row.iloc[0].astype(float).to_numpy()
+            ssum = float(r.sum())
+            rows.append((r / ssum) if ssum > 0 and np.isfinite(ssum) else np.full(len(states), 1.0 / len(states)))
+    P = np.vstack(rows).astype(float)
+    return P, states
+
+
+def _compute_horizon_probs(df_k1: pd.DataFrame, context_key: str, horizons: list[int], mode: str) -> pd.DataFrame:
+    """Compute p(h) = p0 @ (P ** h) for each horizon using order-1 transition matrix.
+    - context_key: display context like 'G', 'N', 'R' or hyphenated 'G-R-...'; uses LAST token as current state.
+    - mode: 'binary' or 'tri'
+    Returns DataFrame indexed by horizon with columns:
+      binary -> ['mc_prob_up','mc_prob_down']
+      tri    -> ['mc_prob_up','mc_prob_neutral','mc_prob_down']
+    Pure helper; no Streamlit.
+    """
+    mode_l = str(mode).lower().strip()
+    horizons = [int(h) for h in (horizons or [])]
+    if not horizons:
+        return pd.DataFrame()
+    P, states = _build_transition_matrix_from_k1(df_k1, mode_l)
+    if P.size == 0:
+        return pd.DataFrame()
+    # Build p0 as one-hot for current symbol
+    s0 = _context_key_to_symbol(context_key, mode_l)
+    S = len(states)
+    p0 = np.zeros(S, dtype=float)
+    p0[states.index(s0)] = 1.0
+    if mode_l == "binary":
+        prob_cols = ["mc_prob_up", "mc_prob_down"]
+    else:
+        prob_cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
+    out = []
+    for h in horizons:
+        if h < 1:
+            raise ValueError("horizons must be >= 1")
+        Ph = np.linalg.matrix_power(P, int(h))
+        ph = (p0 @ Ph).astype(float)
+        rec = {"horizon": int(h)}
+        for i, col in enumerate(prob_cols):
+            rec[col] = float(ph[i])
+        out.append(rec)
+    res = pd.DataFrame(out).set_index("horizon")
+    for c in prob_cols:
+        res[c] = res[c].astype(float)
+    return res
+
+
+# Export public alias list
+try:
+    __all__
+except NameError:
+    __all__ = []
+__all__ = sorted(set(list(__all__) + ["_compute_horizon_probs"]))
+# Keep backward-compatible public alias if needed elsewhere
+try:
+    compute_horizon_probs
+except NameError:
+    compute_horizon_probs = _compute_horizon_probs
+__all__ = sorted(set(list(__all__) + ["compute_horizon_probs"]))
+
+# Run the page when executed by Streamlit, stay import-safe for tests
 if __name__ == "__main__":
     main()

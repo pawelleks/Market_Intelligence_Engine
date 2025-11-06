@@ -67,6 +67,7 @@ def build_parser():
     p_mk.add_argument("--order", type=int, default=1)
     p_mk.add_argument("--state-mode", choices=["tri", "binary"], default="tri")
     p_mk.add_argument("--threshold-bps", type=int, default=10)
+    p_mk.add_argument("--window", default="MAX", help="1Y|2Y|5Y|10Y|20Y|MAX or CUSTOM_YYYYMMDD_YYYYMMDD")
 
     # Markov order sweep command
     p_mks = sub.add_parser("build-markov-sweep", help="Run Markov order sweep and write a compact CSV")
@@ -241,10 +242,20 @@ def main(argv=None):
             sys.exit(5)
     elif args.command == "build-markov":
         try:
-            cfg = MarkovConfig(order=args.order, state_mode=args.state_mode, threshold_bps=args.threshold_bps)
-            out = build_markov_for_ticker(args.ticker, cfg)
-            print(out)
-            LOG.info("build-markov: %s", out)
+            # States-first implementation to ensure threshold-specific artifacts
+            t = args.ticker.upper()
+            mode = args.state_mode
+            thr = int(args.threshold_bps)
+            K = int(args.order)
+            win = str(args.window).upper()
+            # Build states for (mode,thr)
+            sp = build_states_from_features(t, thr, mode)
+            # Derive windowed matrix for order K
+            df = derive_matrix(t, thr, mode, K, win)
+            base = Path("data")/"analytics"/"markov"/t/"matrices"/mode/f"thr{thr}"/f"order{K}"
+            mp = base/f"{win}.parquet"
+            print({"ticker": t, "mode": mode, "thr": thr, "order": K, "window": win, "states": sp, "matrix": str(mp), "rows": len(df)})
+            LOG.info("build-markov: %s", mp)
             sys.exit(0)
         except Exception as e:
             print(f"build-markov ERROR: {e}")

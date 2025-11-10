@@ -133,8 +133,8 @@ def _write_meta_states(ticker: str, thr_bps: int, mode: str, states: pd.DataFram
 def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     """Compute full-history states from features and write the cache parquet + meta.
     Returns path to states parquet.
-    Binary mode logic is symmetric: Up if ret_1d >= +th, Down if ret_1d <= -th, else sign fallback (Up if >=0 else Down).
-    Tri mode keeps neutral band: Up if > +th, Down if < -th else Neutral.
+    Tri mode (three-state): Up if ret_1d > +th, Down if ret_1d < -th, else Neutral (including exact ±th).
+    Binary mode (two-state): Up if ret_1d >= +th, otherwise Down. This keeps thresholds impactful for binary.
     """
     from src.analytics.markov.markov_engine import _load_features
     df = _load_features(ticker)
@@ -142,7 +142,6 @@ def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     if mode == "tri":
         st = pd.Series(np.where(df["ret_1d"] > th, "U", np.where(df["ret_1d"] < -th, "D", "N")), index=df.index)
     else:
-        # Binary mode per spec: Up if ret_1d >= +threshold, Down otherwise (threshold-dependent classification)
         ret = df["ret_1d"].astype(float).to_numpy()
         st_arr = np.where(ret >= th, "U", "D")
         st = pd.Series(st_arr, index=df.index)

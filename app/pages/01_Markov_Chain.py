@@ -908,6 +908,92 @@ def _format_state_label(state_code: str, tokens: dict) -> str:
     return f"<span style='color:{col};font-weight:600'>{label}</span>"
 
 
+# REFACTORED: configuration-aware previous state anchor selection
+# Replaces earlier implementation that ignored threshold and window_key, causing stale anchors.
+# Pure helper: no Streamlit calls; deterministic; reads states parquet for provided configuration only.
+# Path pattern: data/analytics/markov/{ticker}/states_thr{threshold_bps}_{state_mode}.parquet
+# Window filtering based on provided window_start/window_end ISO strings.
+
+def _select_previous_state_anchor(
+    ticker: str,
+    threshold_bps: int,
+    window_key: str,
+    window_start_iso: str,
+    window_end_iso: str,
+    state_mode: str,
+) -> tuple[str | None, str | None]:
+    """Return (raw_state, display_code) for most recent state within window for the exact configuration.
+
+    raw_state: 'U','N','D' (tri) or 'U','D' (binary)
+    display_code: 'G','N','R' mapped from raw_state (U->G, N->N, D->R)
+
+    Rules (per ARCHITECT_BIBLE & unified discretization):
+      - Load only threshold/mode-specific states parquet (no silent fallback).
+      - Restrict to inclusive window [window_start_iso, window_end_iso] if parse succeeds.
+      - Anchor = last available state in that window.
+      - If window slice empty, fallback to last state <= end.
+      - On any failure, return (None, None).
+    """
+    try:
+        # Basic validations
+        if not isinstance(ticker, str) or not ticker.strip():
+            return None, None
+        mode = str(state_mode).lower().strip()
+        if mode not in {"binary", "tri"}:
+            return None, None
+        thr = int(threshold_bps)
+        # Build states path
+        states_path = DATA / "analytics" / "markov" / ticker / f"states_thr{thr}_{mode}.parquet"
+        if not states_path.exists():
+            return None, None
+        try:
+            df = pd.read_parquet(states_path)
+        except Exception:
+            return None, None
+        if df is None or df.empty or "date" not in df.columns or "state" not in df.columns:
+            return None, None
+        # Normalize dates to date objects
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+        df = df.dropna(subset=["date"]).sort_values("date")
+        if df.empty:
+            return None, None
+        # Parse window bounds
+        try:
+            w_start = _dt.date.fromisoformat(str(window_start_iso))
+            w_end = _dt.date.fromisoformat(str(window_end_iso))
+        except Exception:
+            # Fallback: derive from window_key if possible
+            w_end = df["date"].max()
+            # Approximate window start based on key (1Y,2Y,5Y,10Y,20Y,MAX)
+            today = w_end
+            span_map = {"1Y": 365, "2Y": 730, "5Y": 5*365, "10Y": 10*365, "20Y": 20*365}
+            if window_key.upper() == "MAX" or window_key.upper() == "CUSTOM":
+                w_start = df["date"].min()
+            else:
+                days_back = span_map.get(window_key.upper(), 365)
+                w_start = today - _dt.timedelta(days=days_back)
+        # Constrain to window
+        window_df = df[(df["date"] >= w_start) & (df["date"] <= w_end)]
+        if window_df.empty:
+            window_df = df[df["date"] <= w_end]
+        if window_df.empty:
+            return None, None
+        raw_state = str(window_df.iloc[-1]["state"]).upper().strip()
+        # Validate against mode-specific allowed states
+        allowed = ["U", "D"] if mode == "binary" else ["U", "N", "D"]
+        if raw_state not in allowed:
+            # Attempt fallback: last valid in slice
+            valid_slice = window_df[window_df["state"].isin(allowed)]
+            if valid_slice.empty:
+                return None, None
+            raw_state = str(valid_slice.iloc[-1]["state"]).upper().strip()
+        disp_map = {"U": "G", "N": "N", "D": "R"}
+        return raw_state, disp_map.get(raw_state)
+    except Exception:
+        return None, None
+
+
 def main():
     tokens = get_tokens()
     css_inject(tokens)
@@ -1055,7 +1141,22 @@ def main():
         d1 = min(fend, aend)
         dates = (d0.isoformat(), d1.isoformat())
     else:
-        dates = (fstart.isoformat(), fend.isoformat()) if isinstance(fstart, _dt.date) and isinstance(fend, _dt.date) else ("unknown", "unknown")
+        try:
+            dates = (fstart.isoformat(), fend.isoformat())
+        except Exception:
+            dates = ("unknown", "unknown")
+
+    # Unified anchor (previous state) selection (configuration-aware)
+    anchor_raw, anchor_disp_letter = _select_previous_state_anchor(
+        ticker=ticker,
+        threshold_bps=eff_thr,
+        window_key=win_key,
+        window_start_iso=dates[0],
+        window_end_iso=dates[1],
+        state_mode=eff_state_mode,
+    )
+    # Provide legacy ctx_gnr variable (display context) for downstream helpers expecting it
+    ctx_gnr = anchor_disp_letter  # may be None
 
     # Two-line human-friendly header under title
     # Last updated is the later of features mtime and matrix file mtime (if present)
@@ -1076,26 +1177,25 @@ def main():
 
     # Optional: surface recent data gaps (UI-only; detect missing weekdays in last ~30 days)
     try:
-        import datetime as _dt
         def _missing_weekday_ranges(dates_list: list[_dt.date]) -> list[tuple[_dt.date,_dt.date]]:
-            if not dates_list:
-                return []
-            ds = sorted(set(dates_list))
-            gaps: list[tuple[_dt.date,_dt.date]] = []
-            for i in range(1, len(ds)):
-                prev = ds[i-1]
-                cur = ds[i]
-                # if difference > 1 day and span includes weekdays, mark a gap
-                delta = (cur - prev).days
-                if delta > 1:
-                    # compute first missing day
-                    start = prev + _dt.timedelta(days=1)
-                    end = cur - _dt.timedelta(days=1)
-                    # Ensure at least one weekday in the range
-                    has_weekday = any((start + _dt.timedelta(days=k)).weekday() < 5 for k in range((end-start).days + 1))
-                    if has_weekday:
-                        gaps.append((start, end))
-            return gaps
+             if not dates_list:
+                 return []
+             ds = sorted(set(dates_list))
+             gaps: list[tuple[_dt.date,_dt.date]] = []
+             for i in range(1, len(ds)):
+                 prev = ds[i-1]
+                 cur = ds[i]
+                 # if difference > 1 day and span includes weekdays, mark a gap
+                 delta = (cur - prev).days
+                 if delta > 1:
+                     # compute first missing day
+                     start = prev + _dt.timedelta(days=1)
+                     end = cur - _dt.timedelta(days=1)
+                     # Ensure at least one weekday in the range
+                     has_weekday = any((start + _dt.timedelta(days=k)).weekday() < 5 for k in range((end-start).days + 1))
+                     if has_weekday:
+                         gaps.append((start, end))
+             return gaps
         # derive recent dates from states/matrix if available
         mat_dates = []
         try:
@@ -1118,7 +1218,8 @@ def main():
         pass
 
     # Ensure projected matrix DataFrame exists for current mode before first use
-    if 'mat_mode' not in locals():
+    mat_mode = mat
+    if 'mat_mode' not in locals() or mat_mode is None:
         try:
             mat_mode = _project_matrix_for_mode(mat, eff_state_mode)
         except Exception:
@@ -1132,8 +1233,8 @@ def main():
     tbl = _make_matrix_table(mat_mode)
     if tbl is not None and not tbl.empty:
         st.dataframe(tbl)
-        # Updated summary wiring using new _matrix_transition_summary signature
-        summary_text = _matrix_transition_summary(mat_mode, eff_state_mode, tokens)
+        # Updated summary wiring using unified anchor
+        summary_text = _matrix_transition_summary(mat_mode, eff_state_mode, tokens, anchor_raw)
         if summary_text:
             st.markdown(summary_text, unsafe_allow_html=True)
     else:
@@ -1160,35 +1261,87 @@ def main():
         st.markdown("---")
 
     # Compute context/row for One-Step without rendering stray debug above the section
-    ctx_gnr, seq = _build_context(s_for.rename(columns={"state": "mc_state_today"}) if s_for is not None else None, eff_order, _dt.date.fromisoformat(dates[0]), _dt.date.fromisoformat(dates[1]))
-    row = _safe_pick_context_row(mat_mode, _as_context_key(ctx_gnr))
-    state_name, pmax, pcont = _most_likely_next(row, eff_state_mode)
+    # Use unified anchor instead of prior sequence logic
+    one_step_row = None
+    if anchor_raw and mat_mode is not None and not mat_mode.empty and "context" in mat_mode.columns:
+        try:
+            one_step_row = mat_mode.loc[mat_mode["context"].astype(str) == anchor_raw].iloc[0]
+        except Exception:
+            one_step_row = None
+
+    def _compute_one_step_next_state_table(mat_k1: pd.DataFrame, state_mode: str, anchor_raw_state: str | None) -> pd.DataFrame:
+        """Build a one-row DataFrame of next-state probabilities for the unified previous state anchor.
+        Pure helper; no Streamlit calls.
+        """
+        if mat_k1 is None or mat_k1.empty or not anchor_raw_state:
+            return pd.DataFrame()
+        mode = str(state_mode or '').strip().lower()
+        cols = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in mat_k1.columns]
+        if not cols:
+            return pd.DataFrame()
+        if mode == "binary" and "mc_prob_neutral" in cols:
+            cols = ["mc_prob_up", "mc_prob_down"]
+        row = mat_k1.loc[mat_k1["context"].astype(str) == anchor_raw_state]
+        if row.empty:
+            return pd.DataFrame()
+        sel = row.iloc[0]
+        mapping = {
+            "mc_prob_up": ("Next: Green (bullish)", "Green"),
+            "mc_prob_neutral": ("Next: Neutral", "Neutral"),
+            "mc_prob_down": ("Next: Red (bearish)", "Red"),
+        }
+        out_cols = [mapping[c][0] for c in cols]
+        prev_label = {"U":"Green","N":"Neutral","D":"Red"}.get(anchor_raw_state, "")
+        data = {"Prev state": [prev_label]}
+        for c in cols:
+            try:
+                data[mapping[c][0]] = [float(sel[c])]
+            except Exception:
+                data[mapping[c][0]] = [np.nan]
+        return pd.DataFrame(data)
 
     # === Section: One-Step Next-State Summary ===
     st.subheader("One-Step Next-State Summary")
     st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
-    if row is not None and ctx_gnr and state_name:
-        prev_state_letter = (seq[-1] if seq else "")
-        letter_map = {"G":"Green","N":"Neutral","R":"Red"}
-        prev_disp = letter_map.get(prev_state_letter, prev_state_letter)
-        best_disp = state_name
-        stay_pct = fmt_percent_one_decimal(pcont)
-        best_pct = fmt_percent_one_decimal(pmax)
-        tri_extra = ""
-        if eff_state_mode == "tri" and row is not None:
-            cols_chk = [c for c in ["mc_prob_up","mc_prob_neutral","mc_prob_down"] if c in row.index]
-            vals = [(c, float(row[c])) for c in cols_chk]
-            vals_sorted = sorted(vals, key=lambda x: -x[1])
-            if len(vals_sorted) >= 2 and (vals_sorted[0][1] - vals_sorted[1][1]) < 0.02:
-                second_name = {"mc_prob_up":"Green","mc_prob_neutral":"Neutral","mc_prob_down":"Red"}.get(vals_sorted[1][0], vals_sorted[1][0])
-                tri_extra = f" Second-best: {_format_state_label(second_name, tokens)} ({fmt_percent_one_decimal(vals_sorted[1][1])})."
-        st.markdown(
-            f"Given previous state was {_format_state_label(prev_disp, tokens)}, next day is most likely {_format_state_label(best_disp, tokens)} ({best_pct}). "
-            f"Continuation (stay {_format_state_label(prev_disp, tokens)}) = {stay_pct}.{tri_extra}",
-            unsafe_allow_html=True,
+    try:
+        _one_mat_k1, _one_info = _load_matrix_for_selection(
+            ticker,
+            eff_state_mode,
+            int(eff_thr),
+            1,
+            win_key,
+            allow_fallback=False,
         )
+    except Exception:
+        _one_mat_k1 = None
+    if _one_mat_k1 is not None and not _one_mat_k1.empty:
+        _one_mat_k1m = _project_matrix_for_mode(_one_mat_k1, eff_state_mode)
+        one_tbl = _compute_one_step_next_state_table(_one_mat_k1m, eff_state_mode, anchor_raw)
+        if not one_tbl.empty:
+            fmt_cols = [c for c in one_tbl.columns if c != "Prev state"]
+            one_tbl_fmt = one_tbl.copy()
+            for c in fmt_cols:
+                one_tbl_fmt[c] = one_tbl_fmt[c].map(fmt_percent_one_decimal)
+            st.dataframe(one_tbl_fmt)
+    if anchor_raw and one_step_row is not None:
+        # Narrative summary aligned with anchor
+        prev_disp = {"U":"Green","N":"Neutral","D":"Red"}.get(anchor_raw, anchor_raw)
+        # Determine best next state & continuation
+        prob_map = {"mc_prob_up":"Green","mc_prob_neutral":"Neutral","mc_prob_down":"Red"}
+        avail = [(lab, float(one_step_row[col])) for col, lab in prob_map.items() if col in one_step_row.index]
+        if avail:
+            best_lab, best_val = max(avail, key=lambda x: x[1])
+            stay_col = {"U":"mc_prob_up","N":"mc_prob_neutral","D":"mc_prob_down"}.get(anchor_raw)
+            stay_val = float(one_step_row.get(stay_col, float("nan"))) if stay_col else float("nan")
+            st.markdown(
+                f"Given previous state was {_format_state_label(prev_disp, tokens)}, next day is most likely {_format_state_label(best_lab, tokens)} ({fmt_percent_one_decimal(best_val)}). "
+                f"Continuation (stay {_format_state_label(prev_disp, tokens)}) = {fmt_percent_one_decimal(stay_val)}.",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Summary unavailable for this configuration.")
     else:
-        st.caption("Summary unavailable for this configuration.")
+        st.caption("One-step context unavailable for this configuration.")
 
     try:
         st.divider()
@@ -1198,7 +1351,6 @@ def main():
     # === Section: Multi-Horizon Probability Table ===
     st.subheader("Multi-Horizon Probability Table")
     st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
-    # recompute k=1 from cache for current window to drive multi-step
     try:
         mat_k1, _mi2 = _load_matrix_for_selection(
             ticker,
@@ -1210,10 +1362,9 @@ def main():
         )
     except Exception:
         mat_k1 = None
-    if mat_k1 is not None and not mat_k1.empty:
+    if mat_k1 is not None and not mat_k1.empty and anchor_raw:
         mat_k1m = _project_matrix_for_mode(mat_k1, eff_state_mode)
-        # Compute multi-horizon probabilities via p0 @ P^h
-        ctx_key = _as_context_key(ctx_gnr)
+        ctx_key = {"U":"G","N":"N","D":"R"}.get(anchor_raw, "")
         mult = _compute_horizon_probs(mat_k1m, ctx_key, horizons, eff_state_mode)
         if not mult.empty:
             # format and display
@@ -1417,54 +1568,41 @@ def _compute_horizon_probs(df_k1: pd.DataFrame, context_key: str, horizons: list
     return res
 
 
-def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict | None = None) -> str | None:
-    """Return two-line markdown summary for the K=1 transition matrix.
-
-    Line 1: Given previous state was <colored>, next day is most likely <colored> (<pct>%).
-    Line 2: Global context: strongest transition = <colored> → <colored> (<pct>%); weakest = <colored> → <colored> (<pct>%).
-
-    Pure helper: no Streamlit calls. Falls back to None if data insufficient.
-    Compatible with prior single-string usage (caller may render via st.caption or st.markdown).
-    """
+def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict | None = None, anchor_raw: str | None = None) -> str | None:
+    """Return two-line markdown summary for the K=1 transition matrix using unified anchor if available."""
     if mat is None or mat.empty:
         return None
     mode = str(state_mode or "").strip().lower()
-    # Determine probability columns present
     cols_all = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
     prob_cols = [c for c in cols_all if c in mat.columns]
     if not prob_cols:
         return None
-    if mode == "binary":  # drop neutral if accidentally present
+    if mode == "binary":
         prob_cols = [c for c in prob_cols if c != "mc_prob_neutral"]
     if "context" not in mat.columns:
         return None
     df = mat[["context"] + prob_cols].copy()
-
-    # Mapping helpers
     ctx_map = {"U": "Green", "N": "Neutral", "D": "Red"}
     col_to_label = {"mc_prob_up": "Green", "mc_prob_neutral": "Neutral", "mc_prob_down": "Red"}
-
-    def _disp_ctx(raw_ctx: str) -> str:
-        raw_ctx = str(raw_ctx or "").strip().upper()
-        # For multi-character contexts (e.g., G-R-N) take last token mapping via U/N/D
-        if "-" in raw_ctx or len(raw_ctx) > 1:
-            # Use last character that matches U/N/D for previous single-state context
-            for ch in reversed(raw_ctx):
-                if ch in ctx_map:
-                    return ctx_map[ch]
-        return ctx_map.get(raw_ctx, "State")
-
-    # Anchor row for the "Given previous state" sentence: prefer pure 'U'
+    # Anchor row selection prioritized over legacy logic
+    anchor_row = None
+    if anchor_raw and anchor_raw in set(df["context"].astype(str)):
+        try:
+            anchor_row = df.loc[df["context"].astype(str) == anchor_raw].iloc[0]
+        except Exception:
+            anchor_row = None
+    if anchor_row is None:
+        # fallback old behavior: prefer 'U'
+        try:
+            anchor_row = df.loc[df["context"].astype(str) == "U"].iloc[0]
+        except Exception:
+            anchor_row = df.iloc[0]
+    line1 = None
     try:
-        anchor_idx = df.index[df["context"].astype(str) == "U"][0]
-    except Exception:
-        anchor_idx = df.index[0]
-    anchor = df.loc[anchor_idx]
-    try:
-        anchor_vals = anchor[prob_cols].astype(float)
-        amax_col = anchor_vals.idxmax()
-        amax_val = float(anchor_vals[amax_col])
-        prev_label = _disp_ctx(anchor["context"])
+        av = anchor_row[prob_cols].astype(float)
+        amax_col = av.idxmax()
+        amax_val = float(av[amax_col])
+        prev_label = ctx_map.get(str(anchor_row["context"]), "State")
         next_label = col_to_label.get(amax_col, amax_col)
         line1 = (
             f"Given previous state was {_format_state_label(prev_label, tokens)}, next day is most likely "
@@ -1472,15 +1610,13 @@ def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict 
         )
     except Exception:
         line1 = None
-
-    # Scan strongest / weakest transitions across matrix
-    best = None
-    worst = None
+    # Global best/worst transitions
+    best = None; worst = None
     counts_series = mat["counts"] if "counts" in mat.columns else None
-    for ridx, row in df.iterrows():
-        # Skip rows with zero counts if counts column available
+    for _, row in df.iterrows():
         if counts_series is not None:
             try:
+                ridx = df.index[df["context"]==row["context"]][0]
                 if float(counts_series.iloc[ridx]) <= 0:
                     continue
             except Exception:
@@ -1493,27 +1629,21 @@ def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict 
             if pd.isna(val):
                 continue
             if best is None or val > best[0]:
-                best = (val, ridx, col)
+                best = (val, row["context"], col)
             if worst is None or val < worst[0]:
-                worst = (val, ridx, col)
+                worst = (val, row["context"], col)
+    line2 = None
     if best and worst:
-        best_from = _disp_ctx(df.loc[best[1], "context"])
-        best_to = col_to_label.get(best[2], best[2])
-        worst_from = _disp_ctx(df.loc[worst[1], "context"])
-        worst_to = col_to_label.get(worst[2], worst[2])
+        bf, bt_col = best[1], best[2]
+        wf, wt_col = worst[1], worst[2]
         line2 = (
-            f"Global context: strongest transition = {_format_state_label(best_from, tokens)} → {_format_state_label(best_to, tokens)} "
-            f"({fmt_percent_one_decimal(best[0])}); weakest = {_format_state_label(worst_from, tokens)} → "
-            f"{_format_state_label(worst_to, tokens)} ({fmt_percent_one_decimal(worst[0])})."
+            f"Global context: strongest transition = {_format_state_label(ctx_map.get(str(bf), 'State'), tokens)} → {_format_state_label(col_to_label.get(bt_col, bt_col), tokens)} "
+            f"({fmt_percent_one_decimal(best[0])}); weakest = {_format_state_label(ctx_map.get(str(wf), 'State'), tokens)} → {_format_state_label(col_to_label.get(wt_col, wt_col), tokens)} "
+            f"({fmt_percent_one_decimal(worst[0])})."
         )
-    else:
-        line2 = None
-
     if not line1 and not line2:
         return None
-    # Join lines with blank line to allow caller markdown/render separation
-    lines = [l for l in (line1, line2) if l]
-    return "\n\n".join(lines)
+    return "\n\n".join([l for l in (line1, line2) if l])
 
 
 # Remove duplicate _select_window_key_from_label (already defined above)

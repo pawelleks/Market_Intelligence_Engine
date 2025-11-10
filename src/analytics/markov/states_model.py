@@ -5,9 +5,33 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta, timezone
 import json
+import os
 
 import pandas as pd
 import numpy as np
+
+# Atomic parquet writer (idempotent, same-dir temp file)
+def _atomic_write_parquet(df: pd.DataFrame, path: Path):
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(tmp, index=False)
+    try:
+        os.replace(tmp, path)
+        try:
+            dfd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except Exception:
+            pass
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
 
 # Base dirs (relative to repo root per Bible)
 DATA_DIR = Path("data")
@@ -109,6 +133,8 @@ def _write_meta_states(ticker: str, thr_bps: int, mode: str, states: pd.DataFram
 def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     """Compute full-history states from features and write the cache parquet + meta.
     Returns path to states parquet.
+    Binary mode logic is symmetric: Up if ret_1d >= +th, Down if ret_1d <= -th, else sign fallback (Up if >=0 else Down).
+    Tri mode keeps neutral band: Up if > +th, Down if < -th else Neutral.
     """
     from src.analytics.markov.markov_engine import _load_features
     df = _load_features(ticker)
@@ -116,8 +142,10 @@ def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     if mode == "tri":
         st = pd.Series(np.where(df["ret_1d"] > th, "U", np.where(df["ret_1d"] < -th, "D", "N")), index=df.index)
     else:
-        # Binary depends on threshold: classify Up only if return >= +th, otherwise Down
-        st = pd.Series(np.where(df["ret_1d"] >= th, "U", "D"), index=df.index)
+        # Binary mode per spec: Up if ret_1d >= +threshold, Down otherwise (threshold-dependent classification)
+        ret = df["ret_1d"].astype(float).to_numpy()
+        st_arr = np.where(ret >= th, "U", "D")
+        st = pd.Series(st_arr, index=df.index)
     out = pd.DataFrame({
         "date": df["date"],
         "state": st.astype(str),
@@ -127,7 +155,7 @@ def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
     })
     p = _states_path(ticker, thr_bps, mode)
     p.parent.mkdir(parents=True, exist_ok=True)
-    out.to_parquet(p, index=False)
+    _atomic_write_parquet(out, p)
     _write_meta_states(ticker, thr_bps, mode, out)
     return str(p)
 
@@ -161,12 +189,11 @@ def states_stale(ticker: str, thr_bps: int, mode: str) -> bool:
 
 def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str | Tuple[str, str]) -> pd.DataFrame:
     """Derive K-order Markov matrix from cached states within a window; cache and return DataFrame.
+    Always recomputes (overwrites) cache to avoid stale threshold collisions.
     Includes: context, mc_prob_up, mc_prob_neutral (tri), mc_prob_down, row_sum, counts.
     """
     window_key = _window_key_from_arg(window)
     cache_p = _matrix_cache_path(ticker, mode, thr_bps, order, window_key)
-    if cache_p.exists():
-        return pd.read_parquet(cache_p)
 
     # Load thresholded states; if missing, raise clear ValueError with CLI hint
     try:
@@ -189,7 +216,6 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
 
     # counts per (context,next)
     ct = pd.crosstab(ctx.dropna(), next_state[ctx.notna()])
-    # Ensure all state columns present per mode
     states = ["U", "N", "D"] if mode == "tri" else ["U", "D"]
     for s in states:
         if s not in ct.columns:
@@ -198,7 +224,6 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
     ct.index.name = "context"
     ct = ct.reset_index()
 
-    # total counts and Laplace smoothing
     ct["counts"] = ct[states].sum(axis=1)
     sm = ct.copy()
     for s in states:
@@ -211,13 +236,12 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
     if mode == "tri":
         out["mc_prob_neutral"] = probs.get("N", pd.Series(0.0, index=out.index)).astype(float)
     out["mc_prob_down"] = probs["D"].astype(float)
-    # row_sum
     prob_cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if mode == "tri" else ["mc_prob_up", "mc_prob_down"]
     out["row_sum"] = out[prob_cols].sum(axis=1)
     out["counts"] = ct["counts"].astype(int)
 
     cache_p.parent.mkdir(parents=True, exist_ok=True)
-    out.to_parquet(cache_p, index=False)
+    _atomic_write_parquet(out, cache_p)
 
     # Write/append matrix metadata JSON alongside
     meta_p = _matrix_meta_path(ticker, mode, thr_bps, order)
@@ -233,10 +257,7 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window: str 
         "threshold_bps": int(thr_bps),
         "order": int(order),
         "window": window_key,
-        "date_range": {
-            "start": str(start.date()),
-            "end": str(end.date()),
-        },
+        "date_range": {"start": str(start.date()), "end": str(end.date())},
         "build_version": "states-first-v1",
         "generated_timestamp": datetime.now(timezone.utc).isoformat(),
         "matrix_path": str(cache_p),

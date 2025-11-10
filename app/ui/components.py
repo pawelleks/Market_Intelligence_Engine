@@ -131,3 +131,43 @@ def fmt_percent_one_decimal(x) -> str:
         return f"{float(x) * 100:.1f}%"
     except Exception:
         return "NA%"
+
+
+def section_header(title: str):
+    st.markdown(f"<div class='title'>{title}</div>", unsafe_allow_html=True)
+
+
+def settings_line(*, ticker: str, window: str, mode: str, thr_bps: int, order: int, start: str, end: str, last_updated: str) -> str:
+    """Return a compact settings line for screenshot-friendly context."""
+    return (
+        f"Settings: Ticker: {ticker} • Time range: {window} • Source: offline • State mode: {mode} "
+        f"• Threshold: {thr_bps}bps • Order: {order} • Data set for {ticker}: {start} – {end} • Last updated: {last_updated}"
+    )
+
+
+def badge_state(name: str) -> str:
+    """Return an inline HTML span for Green/Neutral/Red labels with theme colors.
+    Avoid inline hex literals (all colors sourced from theme tokens).
+    """
+    tokens = get_tokens()
+    colors = tokens["theme"]["colors"]
+    # Source semantic colors with safe fallbacks referencing existing token keys only
+    green = colors.get("green") or colors.get("bull") or colors.get("accent_blue") or colors.get("text")
+    neutral = colors.get("blue") or colors.get("accent_blue") or colors.get("neutral") or colors.get("text")
+    red = colors.get("red") or colors.get("bear") or colors.get("accent_blue") or colors.get("text")
+    fg = colors.get("text")
+    card_bg = colors.get("card_bg") or colors.get("page_bg") or fg
+    name_l = (name or "").strip().lower()
+    if name_l.startswith("green"):
+        col = green; label = "Green"
+    elif name_l.startswith("neutral"):
+        col = neutral; label = "Neutral"
+    elif name_l.startswith("red") or name_l.startswith("bear"):
+        col = red; label = "Red"
+    else:
+        col = fg; label = name or ""
+    return (
+        f"<span style='display:inline-block;padding:1px 6px;border-radius:6px;" \
+        f"background:{card_bg};border:1px solid rgba(255,255,255,0.08);color:{col};font-weight:600;'>" \
+        f"{label}</span>"
+    )

@@ -23,14 +23,18 @@ import numpy as _np
 from matplotlib.patches import Rectangle as _Rect
 
 from app.ui.theme import css_inject, get_tokens, mpl_style
-from app.ui.components import SectionHeader, DataStatus, plot_mpl
+from app.ui.components import DataStatus, plot_mpl
 from app.ui.components import read_parquet_safe, read_csv_safe, read_json_safe, fmt_percent_one_decimal
 # Lightweight stdlib for fs checks
 import os
 import hashlib as _hashlib
 
+from app.version import get_version
+from app.ui.components import settings_line, badge_state, section_header
+
 # Temporary debug flag for binary threshold panel
 DEBUG_BINARY_THRESHOLD = False
+DEBUG_UI = False  # new flag controlling any optional debug panels
 
 
 def _get_ticker_from_state(default: str = "SPY") -> str:
@@ -115,6 +119,25 @@ def _normalize_window_value(x) -> str:
         return "CUSTOM"
     if s == "MAX":
         return "MAX"
+    return "1Y"
+
+
+def _select_window_key_from_label(label: str) -> str:
+    """Map the sidebar label to canonical window_key used by offline matrices.
+    Accepted labels: 1Y, 2Y, 5Y, 10Y, 20Y, MAX (case-insensitive), and 'Custom'/'CUSTOM'.
+    Returns a canonical key among {1Y,2Y,5Y,10Y,20Y,MAX}. For Custom, return MAX (display-only fallback).
+    """
+    if label is None:
+        return "1Y"
+    s = str(label).strip().upper()
+    if s in {"1Y","2Y","5Y","10Y","20Y","MAX"}:
+        return s
+    if s in {"1","2"}:
+        return f"{s}Y"
+    if s in {"CUSTOM","CUSTOM RANGE","CUSTOM_DATE","CUSTOM DATES","CUSTOM RANGE"}:
+        # UI currently uses feature-based dates for header; matrices are precomputed by fixed presets only
+        return "MAX"
+    # graceful fallback
     return "1Y"
 
 
@@ -235,9 +258,6 @@ def _load_matrix_for_selection(
 
 
 from src.analytics.markov.states_model import (
-    build_states_from_features,
-    derive_matrix,
-    states_stale,
     states_for,
 )
 
@@ -605,7 +625,7 @@ def _make_matrix_table(df: pd.DataFrame):
         s = str(s or "")
         if not s:
             return s
-        mp = {"U": "G", "N": "N", "D": "R"}
+        mp = {"U": "Green", "N": "N", "D": "Red"}
         parts = [mp.get(ch, ch) for ch in list(s)]
         return "-".join(parts)
     if "context" in sub.columns:
@@ -656,7 +676,7 @@ def _plot_heatmap(df: pd.DataFrame, tokens: dict):
     # Map y labels from raw context to display G-N-R with dashes
     def _ctx_disp(s: str) -> str:
         s = str(s or "")
-        mp = {"U": "G", "N": "N", "D": "R"}
+        mp = {"U": "Green", "N": "N", "D": "Red"}
         return "-".join([mp.get(ch, ch) for ch in list(s)]) if s else s
     ylabels = []
     if "context" in df.columns:
@@ -720,7 +740,6 @@ def _load_features_meta_cached(ticker: str, mtime: float | None, path_str: str) 
     - order (int): order (if available, else None)
     """
     import pandas as pd
-    from os import PathLike
 
     fp = DATA / "features" / f"{ticker}.parquet"
     meta = {"exists": False, "has_ret_1d": False, "path": str(fp), "mtime": None}
@@ -761,7 +780,6 @@ def _load_features_cached(arg):
     Read-only; never writes or computes features.
     """
     import pandas as pd
-    from os import PathLike
     # ticker-style path
     if isinstance(arg, str):
         fp = DATA / "features" / f"{arg}.parquet"
@@ -771,7 +789,7 @@ def _load_features_cached(arg):
             mtime = None
         return _load_features_meta_cached(arg, mtime, str(fp))
     # Path-like behavior for legacy tests
-    if isinstance(arg, (Path, PathLike)):
+    if isinstance(arg, Path):
         fp = Path(arg)
         if not fp.exists() or os.path.getsize(fp) <= 0:
             raise FileNotFoundError(str(fp))
@@ -797,11 +815,105 @@ def _load_features_cached(arg):
     return _load_features_cached(str(arg))
 
 
+def _section_settings_line(
+    ticker: str,
+    window_label: str,
+    source_label: str,
+    state_mode_label: str,
+    threshold_bps: int | None,
+    order: int | None,
+    data_start: str | None,
+    data_end: str | None,
+    last_updated: str | None,
+) -> str:
+    """Format a single compact settings line.
+    Skips empty/None components gracefully. Pure string builder; no I/O / Streamlit.
+    Example:
+    Settings: Ticker: SPY • Time range: 5Y • Source: offline • State mode: tri • Threshold: 15bps • Order: 2 • Data set for SPY: 2020-11-01 – 2025-11-07 • Last updated: 2025-11-07 13:24
+    """
+    parts = []
+    if ticker: parts.append(f"Ticker: {ticker}")
+    if window_label: parts.append(f"Time range: {window_label}")
+    if source_label: parts.append(f"Source: {source_label}")
+    if state_mode_label: parts.append(f"State mode: {state_mode_label}")
+    if threshold_bps is not None: parts.append(f"Threshold: {int(threshold_bps)}bps")
+    if order is not None: parts.append(f"Order: {int(order)}")
+    if data_start and data_end and data_start != "unknown" and data_end != "unknown":
+        parts.append(f"Data set for {ticker}: {data_start} – {data_end}")
+    if last_updated: parts.append(f"Last updated: {last_updated}")
+    return "Settings: " + " • ".join(parts)
+
+
+# === Timestamp & label helpers (pure, import-safe) ===
+import datetime as _datetime
+
+def _to_mtime_seconds(value) -> float:
+    """Normalize a meta['mtime'] or datetime-like value to epoch seconds (float).
+    Returns 0.0 on any invalid or missing input; never raises.
+    Accepted input types: int, float, datetime, ISO string, None."""
+    if value is None:
+        return 0.0
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, _datetime.datetime):
+            return value.timestamp()
+        if isinstance(value, str):
+            try:
+                dt = _datetime.datetime.fromisoformat(value)
+            except Exception:
+                return 0.0
+            return dt.timestamp()
+    except Exception:
+        return 0.0
+    return 0.0
+
+def _fmt_human_ts(ts_any) -> str | None:
+    """Format epoch seconds or ISO-like input as 'YYYY-MM-DD HH:MM'. Return None if invalid/epoch<=0."""
+    try:
+        if ts_any is None:
+            return None
+        if isinstance(ts_any, (int, float)):
+            if float(ts_any) <= 0:
+                return None
+            return pd.Timestamp.fromtimestamp(float(ts_any)).strftime("%Y-%m-%d %H:%M")
+        t = pd.Timestamp(ts_any)
+        if t.tz is not None:
+            t = t.tz_convert(None)
+        if t.value <= 0:
+            return None
+        return t.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return None
+
+def _format_state_label(state_code: str, tokens: dict) -> str:
+    """Return colored HTML span for a state code or name.
+    Mapping codes: G/U->Green, R/D->Red, N->Neutral.
+    Falls back to plain text if tokens/colors missing. Pure helper."""
+    if state_code is None:
+        return ""
+    raw = str(state_code).strip()
+    mp = {"G": "Green", "U": "Green", "R": "Red", "D": "Red", "N": "Neutral"}
+    label = mp.get(raw, raw.title())
+    colors = tokens.get("theme", {}).get("colors", {}) if isinstance(tokens, dict) else {}
+    # Prefer theme tokens only; if missing, render unstyled label to avoid inline hex outside theme.
+    color_map = {
+        "Green": colors.get("bull") or colors.get("green"),
+        "Red": colors.get("bear") or colors.get("red"),
+        "Neutral": colors.get("neutral") or colors.get("blue"),
+    }
+    col = color_map.get(label) or colors.get("fg")
+    if not col:
+        return label
+    return f"<span style='color:{col};font-weight:600'>{label}</span>"
+
+
 def main():
     tokens = get_tokens()
     css_inject(tokens)
 
-    st.title("📈 Markov Chain (discretized returns)")
+    st.title("Markov Chains Analysis")
+    app_version = get_version()
 
     # Controls (lightweight)
     # Default ticker from config/tickers.yml if present
@@ -838,9 +950,7 @@ def main():
     # Optional: assert ticker in supported set (from config if desired)
     raw_window = st.sidebar.selectbox("Time range", ["1Y", "2Y", "5Y", "10Y", "20Y", "Max", "Custom"], index=0, key="mk_window")
     window = _normalize_window_value(raw_window)
-    raw_norm = str(raw_window).upper().strip()
-    if window == "1Y" and raw_norm not in {"1Y","1"}:
-        st.caption("Unsupported window selection; fell back to 1Y.")
+    window_key = _select_window_key_from_label(raw_window if window != 'CUSTOM' else 'MAX')
     ctrl_state_mode = st.sidebar.selectbox("State mode", ["binary", "tri"], key="mk_state_mode")
     ctrl_thr = st.sidebar.number_input("Threshold (bps)", min_value=0, max_value=1000, step=5, key="mk_threshold")
     ctrl_order = st.sidebar.slider("Order", min_value=1, max_value=4, key="mk_order")
@@ -884,30 +994,42 @@ def main():
     fstart, fend = _window_dates_from_features(ticker, window)
 
     # Determine normalized window key once for downstream path resolution
-    win_key = window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX"
+    win_key = window_key  # unify naming; use win_key for all artifact path resolutions
 
     # Read-only: do not compute in UI; only attempt to load derived/cached matrix, else show CLI hint
     try:
         mat, mat_info = _load_matrix_for_selection(ticker, eff_state_mode, int(eff_thr), int(eff_order), win_key, allow_fallback=False)
     except Exception:
         # Header lines even if matrix missing
-        # Determine last updated as max of features mtime and existing matrix (if present)
-        last_iso = meta.get("mtime")
+        # derive best-available mtime (seconds)
+        last_mtime = _to_mtime_seconds(meta.get("mtime"))
         try:
             mp = _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
             if Path(mp).exists():
-                mtime2 = pd.Timestamp.fromtimestamp(Path(mp).stat().st_mtime, tz="UTC").isoformat()
-                # pick the later iso by comparison of pandas Timestamps
-                if last_iso is None or pd.Timestamp(mtime2) > pd.Timestamp(last_iso):
-                    last_iso = mtime2
+                mt = Path(mp).stat().st_mtime
+                if last_mtime is None or mt > last_mtime:
+                    last_mtime = mt
         except Exception:
             pass
-        # Use feature-based window dates for header when matrix is unavailable
         d0, d1 = (fstart.isoformat(), fend.isoformat())
-        st.caption(f"Data set for {ticker}: {d0} – {d1}.  Last updated: {last_iso}")
-        mode_name = eff_state_mode
-        st.caption(f"Ticker: {ticker} • Time range: {window.upper()} • Source: offline • State mode: {mode_name} • Threshold: {eff_thr}bps • Order: {eff_order}")
-        # Use ensure-markov-available hint with requested params
+        last_human_missing = _fmt_human_ts(last_mtime)
+        st.caption(
+            "Release: "
+            f"{app_version} • Data set for {ticker}: {d0} – {d1}"
+            + (f" • Last updated: {last_human_missing}" if last_human_missing else "")
+        )
+        settings_text_missing = _section_settings_line(
+            ticker=ticker,
+            window_label=str(raw_window),
+            source_label="offline",
+            state_mode_label=eff_state_mode,
+            threshold_bps=eff_thr,
+            order=eff_order,
+            data_start=d0,
+            data_end=d1,
+            last_updated=last_human_missing,
+        )
+        st.caption(settings_text_missing)
         ensure_cli = (
             f"python cli/mie.py ensure-markov-available --ticker {ticker} "
             f"--order {eff_order} --state-mode {eff_state_mode} --threshold-bps {int(eff_thr)} --window {win_key}"
@@ -937,110 +1059,145 @@ def main():
 
     # Two-line human-friendly header under title
     # Last updated is the later of features mtime and matrix file mtime (if present)
-    last_iso = meta.get("mtime")
+    last_mtime = _to_mtime_seconds(meta.get("mtime"))
     try:
         mp = mat_info["path"] if 'mat_info' in locals() else _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
         if Path(mp).exists():
-            mtime2 = pd.Timestamp.fromtimestamp(Path(mp).stat().st_mtime, tz="UTC").isoformat()
-            if last_iso is None or pd.Timestamp(mtime2) > pd.Timestamp(last_iso):
-                last_iso = mtime2
+            mt = Path(mp).stat().st_mtime
+            if last_mtime is None or mt > last_mtime:
+                last_mtime = mt
     except Exception:
         pass
-    st.caption(f"Data set for {ticker}: {dates[0]} – {dates[1]}.  Last updated: {last_iso}")
-    mode_name = eff_state_mode
-    st.caption(f"Ticker: {ticker} • Time range: {window.upper()} • Source: offline • State mode: {mode_name} • Threshold: {eff_thr}bps • Order: {eff_order}")
-    # Small features status line
-    rows = meta.get("rows"); cols = meta.get("cols"); mti = meta.get("mtime")
-    if rows is not None or mti is not None:
-        st.caption(f"Features: rows={rows if rows is not None else '?'} • cols={cols if cols is not None else '?'} • mtime={mti if mti else '?'}")
+    last_human = _fmt_human_ts(last_mtime)
+    st.caption(
+        f"Release: {app_version} • Data set for {dates[0]} – {dates[1]}"
+        + (f" • Last updated: {last_human}" if last_human else "")
+    )
 
-    # Project matrix per mode
-    mat_mode = _project_matrix_for_mode(mat, eff_state_mode)
-    # Validate row sums approx 1
-    prob_cols = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in mat_mode.columns]
-    if prob_cols:
-        sums = mat_mode[prob_cols].astype(float).sum(axis=1)
-        if (sums - 1.0).abs().max() > 1e-3:
-            DataStatus("warning: matrix rows do not sum to ~1.0", "warning")
+    # Optional: surface recent data gaps (UI-only; detect missing weekdays in last ~30 days)
+    try:
+        import datetime as _dt
+        def _missing_weekday_ranges(dates_list: list[_dt.date]) -> list[tuple[_dt.date,_dt.date]]:
+            if not dates_list:
+                return []
+            ds = sorted(set(dates_list))
+            gaps: list[tuple[_dt.date,_dt.date]] = []
+            for i in range(1, len(ds)):
+                prev = ds[i-1]
+                cur = ds[i]
+                # if difference > 1 day and span includes weekdays, mark a gap
+                delta = (cur - prev).days
+                if delta > 1:
+                    # compute first missing day
+                    start = prev + _dt.timedelta(days=1)
+                    end = cur - _dt.timedelta(days=1)
+                    # Ensure at least one weekday in the range
+                    has_weekday = any((start + _dt.timedelta(days=k)).weekday() < 5 for k in range((end-start).days + 1))
+                    if has_weekday:
+                        gaps.append((start, end))
+            return gaps
+        # derive recent dates from states/matrix if available
+        mat_dates = []
+        try:
+            if mat is not None and not mat.empty and "date" in mat.columns:
+                mat_dates = list(pd.to_datetime(mat["date"]).dt.date)
+        except Exception:
+            pass
+        # fallback to features coverage if needed
+        recent_dates = mat_dates
+        if recent_dates:
+            cutoff = _dt.date.fromisoformat(dates[1]) - _dt.timedelta(days=30)
+            recent = [d for d in recent_dates if d >= cutoff]
+            ranges = _missing_weekday_ranges(recent)
+            if ranges:
+                # coalesce adjacent ranges already grouped; show first few ranges succinctly
+                segs = [f"{r[0].isoformat()} – {r[1].isoformat()}" if r[0] != r[1] else r[0].isoformat() for r in ranges[:2]]
+                more = "" if len(ranges) <= 2 else f" (+{len(ranges)-2} more)"
+                st.caption(f"⚠️ Data gap detected: missing weekdays in {', '.join(segs)}{more}; analytics may under-represent the latest regime.")
+    except Exception:
+        pass
+
+    # Ensure projected matrix DataFrame exists for current mode before first use
+    if 'mat_mode' not in locals():
+        try:
+            mat_mode = _project_matrix_for_mode(mat, eff_state_mode)
+        except Exception:
+            mat_mode = mat
+
+    # === Section: K=1 Transition Matrix ===
+    st.subheader("K=1 Transition Matrix")
+    st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
 
     # Table
     tbl = _make_matrix_table(mat_mode)
     if tbl is not None and not tbl.empty:
         st.dataframe(tbl)
+        # Updated summary wiring using new _matrix_transition_summary signature
+        summary_text = _matrix_transition_summary(mat_mode, eff_state_mode, tokens)
+        if summary_text:
+            st.markdown(summary_text, unsafe_allow_html=True)
     else:
         DataStatus("offline data present, but no transition columns to show", "warning")
 
-    # Heatmap
+    # Visual separation
+    try:
+        st.divider()
+    except Exception:
+        st.markdown("---")
+
+    # === Section: Transition Probability Heatmap ===
+    st.subheader("Transition Probability Heatmap")
+    st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
     fig = _plot_heatmap(mat_mode, tokens)
     if fig is not None:
-        plot_mpl(fig, caption="Transition probabilities (row-wise)")
+        plot_mpl(fig, caption="Row-wise transition intensities")
+    else:
+        st.caption("Heatmap unavailable for this configuration.")
 
-    # Temporary Binary Threshold Debug panel
-    if DEBUG_BINARY_THRESHOLD and _normalize_mode(eff_state_mode) == "binary":
-        try:
-            pth = mat_info.get("path")
-            stat = Path(pth).stat()
-            size = int(stat.st_size)
-            mtime = float(stat.st_mtime)
-            # Quick checksum: sha1 of file bytes (streamed)
-            sha1 = _hashlib.sha1()
-            with open(pth, "rb") as f:
-                for chunk in iter(lambda: f.read(8192), b""):
-                    sha1.update(chunk)
-            checksum = sha1.hexdigest()[:12]
-            # First row (raw matrix) rounded to 3 decimals
-            first_row = None
-            cols_dbg = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in mat.columns]
-            if not cols_dbg and not mat.empty:
-                cols_dbg = [c for c in mat.columns if c.startswith("mc_prob_")]
-            if not mat.empty and cols_dbg:
-                r0 = mat.iloc[0][cols_dbg].astype(float).round(3).to_dict()
-                first_row = r0
-            # Active cache key
-            cache_key = (ticker, _normalize_mode(eff_state_mode), int(eff_thr), int(eff_order), win_key)
-            legacy_fallback = bool(mat_info.get("legacy_fallback_used", False))
-            with st.expander("Binary Threshold Debug", expanded=False):
-                st.text("\n".join([
-                    f"resolved_path: {pth}",
-                    f"fingerprint: size={size} mtime={mtime:.0f} sha1={checksum}",
-                    f"first_row: {first_row}",
-                    f"cache_key: {cache_key}",
-                    f"legacy_fallback_used: {legacy_fallback}",
-                ]))
-            # Warn if checksums identical across threshold changes
-            prev = st.session_state.get("mk_debug_prev")
-            cur_sig = {"thr": int(eff_thr), "checksum": checksum}
-            if prev and prev.get("thr") != cur_sig["thr"] and prev.get("checksum") == cur_sig["checksum"]:
-                DataStatus("Matrix files for previous and current thresholds appear byte-identical; check offline build.", "warning")
-            st.session_state["mk_debug_prev"] = cur_sig
-        except Exception:
-            pass
+    try:
+        st.divider()
+    except Exception:
+        st.markdown("---")
 
-    # Context-aware summary
+    # Compute context/row for One-Step without rendering stray debug above the section
     ctx_gnr, seq = _build_context(s_for.rename(columns={"state": "mc_state_today"}) if s_for is not None else None, eff_order, _dt.date.fromisoformat(dates[0]), _dt.date.fromisoformat(dates[1]))
     row = _safe_pick_context_row(mat_mode, _as_context_key(ctx_gnr))
     state_name, pmax, pcont = _most_likely_next(row, eff_state_mode)
-    if ctx_gnr and state_name:
-        colors = tokens["theme"]["colors"]
-        col_map = {"Green": colors.get("bull"), "Neutral": colors.get("neutral"), "Red": colors.get("bear")}
-        colored = f"<span style='color:{col_map.get(state_name, colors.get('fg'))}'>{state_name}</span>"
-        last_state = seq[-1] if seq else ""
+
+    # === Section: One-Step Next-State Summary ===
+    st.subheader("One-Step Next-State Summary")
+    st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
+    if row is not None and ctx_gnr and state_name:
+        prev_state_letter = (seq[-1] if seq else "")
+        letter_map = {"G":"Green","N":"Neutral","R":"Red"}
+        prev_disp = letter_map.get(prev_state_letter, prev_state_letter)
+        best_disp = state_name
+        stay_pct = fmt_percent_one_decimal(pcont)
+        best_pct = fmt_percent_one_decimal(pmax)
+        tri_extra = ""
+        if eff_state_mode == "tri" and row is not None:
+            cols_chk = [c for c in ["mc_prob_up","mc_prob_neutral","mc_prob_down"] if c in row.index]
+            vals = [(c, float(row[c])) for c in cols_chk]
+            vals_sorted = sorted(vals, key=lambda x: -x[1])
+            if len(vals_sorted) >= 2 and (vals_sorted[0][1] - vals_sorted[1][1]) < 0.02:
+                second_name = {"mc_prob_up":"Green","mc_prob_neutral":"Neutral","mc_prob_down":"Red"}.get(vals_sorted[1][0], vals_sorted[1][0])
+                tri_extra = f" Second-best: {_format_state_label(second_name, tokens)} ({fmt_percent_one_decimal(vals_sorted[1][1])})."
         st.markdown(
-            f"<div class='small'>Given previous context: <span class='accent'>{ctx_gnr}</span>, most likely next day is {colored} ({fmt_percent_one_decimal(pmax)}). "
-            f"Continuation (stay {last_state}) = {fmt_percent_one_decimal(pcont)}; switch = {fmt_percent_one_decimal(1 - pcont if pcont==pcont else 0)}.</div>",
+            f"Given previous state was {_format_state_label(prev_disp, tokens)}, next day is most likely {_format_state_label(best_disp, tokens)} ({best_pct}). "
+            f"Continuation (stay {_format_state_label(prev_disp, tokens)}) = {stay_pct}.{tri_extra}",
             unsafe_allow_html=True,
         )
+    else:
+        st.caption("Summary unavailable for this configuration.")
 
-    # One-step next-state table for active context
-    if row is not None:
-        cols = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in row.index]
-        if eff_state_mode == "binary" and "mc_prob_neutral" in cols:
-            cols = ["mc_prob_up", "mc_prob_down"]
-        vals = [fmt_percent_one_decimal(float(row[c])) for c in cols]
-        names = ["Green (bullish)", "Neutral", "Red (bearish)"][: len(cols)]
-        st.dataframe(pd.DataFrame([vals], columns=names))
-        st.caption(f"Given {ctx_gnr}, tomorrow is most likely {state_name} ({fmt_percent_one_decimal(pmax)}).")
+    try:
+        st.divider()
+    except Exception:
+        st.markdown("---")
 
+    # === Section: Multi-Horizon Probability Table ===
+    st.subheader("Multi-Horizon Probability Table")
+    st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
     # recompute k=1 from cache for current window to drive multi-step
     try:
         mat_k1, _mi2 = _load_matrix_for_selection(
@@ -1048,7 +1205,7 @@ def main():
             eff_state_mode,
             int(eff_thr),
             1,
-            window if window in {"1Y","2Y","5Y","10Y","20Y","MAX"} else "MAX",
+            win_key,
             allow_fallback=False,
         )
     except Exception:
@@ -1057,15 +1214,91 @@ def main():
         mat_k1m = _project_matrix_for_mode(mat_k1, eff_state_mode)
         # Compute multi-horizon probabilities via p0 @ P^h
         ctx_key = _as_context_key(ctx_gnr)
-        mult = compute_horizon_probs(mat_k1m, ctx_key, horizons, eff_state_mode)
+        mult = _compute_horizon_probs(mat_k1m, ctx_key, horizons, eff_state_mode)
         if not mult.empty:
             # format and display
             disp = mult.rename(columns={
-                "mc_prob_up": "Green (bullish)",
+                "mc_prob_up": "Green",
                 "mc_prob_neutral": "Neutral",
-                "mc_prob_down": "Red (bearish)",
-            }).applymap(fmt_percent_one_decimal)
-            st.dataframe(disp)
+                "mc_prob_down": "Red",
+            })
+            disp_fmt = disp.applymap(fmt_percent_one_decimal)
+            st.dataframe(disp_fmt)
+            try:
+                # summary bias
+                last_h = max(mult.index); first_h = min(mult.index)
+                up_col = mult.get("mc_prob_up"); red_col = mult.get("mc_prob_down")
+                neu_col = mult.get("mc_prob_neutral") if "mc_prob_neutral" in mult.columns else None
+                if eff_state_mode == "binary" and up_col is not None and red_col is not None:
+                    bias_state = "Green" if up_col.mean() >= red_col.mean() else "Red"
+                    other_state = "Red" if bias_state == "Green" else "Green"
+                    bias_pct = fmt_percent_one_decimal((up_col.mean() if bias_state=="Green" else red_col.mean()))
+                    other_pct = fmt_percent_one_decimal((red_col.mean() if bias_state=="Green" else up_col.mean()))
+                elif eff_state_mode == "tri" and up_col is not None and red_col is not None and neu_col is not None:
+                    avg_map = {"Green": float(up_col.mean()), "Neutral": float(neu_col.mean()), "Red": float(red_col.mean())}
+                    sorted_avg = sorted(avg_map.items(), key=lambda x: -x[1])
+                    bias_state, bias_pct = sorted_avg[0][0], fmt_percent_one_decimal(sorted_avg[0][1])
+                    other_state, other_pct = sorted_avg[1][0], fmt_percent_one_decimal(sorted_avg[1][1])
+                else:
+                    bias_state = other_state = bias_pct = other_pct = None
+                g1 = fmt_percent_one_decimal(mult.iloc[0]["mc_prob_up"]) if "mc_prob_up" in mult.columns else ""
+                g_last = fmt_percent_one_decimal(mult.loc[last_h]["mc_prob_up"]) if "mc_prob_up" in mult.columns else ""
+                g_wins = 0; r_wins = 0
+                for h, row_h in mult.iterrows():
+                    uval = float(row_h.get("mc_prob_up", 0)); rval = float(row_h.get("mc_prob_down", 0))
+                    if uval > rval: g_wins += 1
+                    elif rval > uval: r_wins += 1
+                if bias_state:
+                    st.markdown(
+                        f"Summary: overall {_format_state_label(bias_state, tokens)} bias ({_format_state_label(bias_state, tokens)} ≈ {bias_pct} > {_format_state_label(other_state, tokens)} ≈ {other_pct}). "
+                        f"{_format_state_label('Green', tokens)} probability changes {g1} → {g_last} over {first_h}–{last_h} days. Green favored in {g_wins}/{len(mult)} horizons, Red in {r_wins}/{len(mult)}.",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption("Summary unavailable for this configuration.")
+            except Exception:
+                st.caption("Summary unavailable for this configuration.")
+            # === Section: Multi-Horizon Chart ===
+            st.subheader("Multi-Horizon Probability Chart")
+            st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
+            try:
+                # Build grouped bar chart from mult
+                fig_h, ax_h = plt.subplots(figsize=(7,3), dpi=140)
+                mpl_style(fig_h, ax_h, tokens)
+                bars = []
+                x = range(len(mult.index))
+                width = 0.25 if eff_state_mode=="tri" else 0.35
+                # Offsets per state
+                def _vals(col):
+                    return [float(mult.loc[h][col]) * 100 for h in mult.index]
+                if "mc_prob_up" in mult.columns:
+                    ax_h.bar([i - (width if eff_state_mode=="tri" else width/2) for i in x], _vals("mc_prob_up"), width=width, color=tokens["theme"]["colors"].get("green"), label="Green")
+                if eff_state_mode=="tri" and "mc_prob_neutral" in mult.columns:
+                    ax_h.bar(list(x), _vals("mc_prob_neutral"), width=width, color=tokens["theme"]["colors"].get("blue", tokens["theme"]["colors"].get("neutral")), label="Neutral")
+                if "mc_prob_down" in mult.columns:
+                    ax_h.bar([i + (width if eff_state_mode=="tri" else width/2) for i in x], _vals("mc_prob_down"), width=width, color=tokens["theme"]["colors"].get("red"), label="Red")
+                ax_h.set_xticks(list(x))
+                ax_h.set_xticklabels([str(h) for h in mult.index])
+                ax_h.set_ylabel("Probability (%)")
+                ax_h.set_title("Next-Day State Probability by Horizon")
+                ax_h.legend(loc="upper right", fontsize=8)
+                fig_h.tight_layout(); plot_mpl(fig_h, caption="Next-Day State Probability by Horizon (from P^h).")
+            except Exception:
+                st.caption("Chart unavailable for this configuration.")
+        else:
+            st.caption("Multi-horizon probabilities unavailable for this configuration.")
+    else:
+        st.caption("Multi-horizon probabilities unavailable for this configuration.")
+
+    try:
+        st.divider()
+    except Exception:
+        st.markdown("---")
+
+    # Debug UI (disabled by default)
+    if DEBUG_UI:
+        with st.expander("Developer Debug", expanded=False):
+            st.json({"matrix_info": mat_info})
 
 
 def _build_markov_base_path(ticker: str) -> Path:
@@ -1184,18 +1417,115 @@ def _compute_horizon_probs(df_k1: pd.DataFrame, context_key: str, horizons: list
     return res
 
 
+def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict | None = None) -> str | None:
+    """Return two-line markdown summary for the K=1 transition matrix.
+
+    Line 1: Given previous state was <colored>, next day is most likely <colored> (<pct>%).
+    Line 2: Global context: strongest transition = <colored> → <colored> (<pct>%); weakest = <colored> → <colored> (<pct>%).
+
+    Pure helper: no Streamlit calls. Falls back to None if data insufficient.
+    Compatible with prior single-string usage (caller may render via st.caption or st.markdown).
+    """
+    if mat is None or mat.empty:
+        return None
+    mode = str(state_mode or "").strip().lower()
+    # Determine probability columns present
+    cols_all = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
+    prob_cols = [c for c in cols_all if c in mat.columns]
+    if not prob_cols:
+        return None
+    if mode == "binary":  # drop neutral if accidentally present
+        prob_cols = [c for c in prob_cols if c != "mc_prob_neutral"]
+    if "context" not in mat.columns:
+        return None
+    df = mat[["context"] + prob_cols].copy()
+
+    # Mapping helpers
+    ctx_map = {"U": "Green", "N": "Neutral", "D": "Red"}
+    col_to_label = {"mc_prob_up": "Green", "mc_prob_neutral": "Neutral", "mc_prob_down": "Red"}
+
+    def _disp_ctx(raw_ctx: str) -> str:
+        raw_ctx = str(raw_ctx or "").strip().upper()
+        # For multi-character contexts (e.g., G-R-N) take last token mapping via U/N/D
+        if "-" in raw_ctx or len(raw_ctx) > 1:
+            # Use last character that matches U/N/D for previous single-state context
+            for ch in reversed(raw_ctx):
+                if ch in ctx_map:
+                    return ctx_map[ch]
+        return ctx_map.get(raw_ctx, "State")
+
+    # Anchor row for the "Given previous state" sentence: prefer pure 'U'
+    try:
+        anchor_idx = df.index[df["context"].astype(str) == "U"][0]
+    except Exception:
+        anchor_idx = df.index[0]
+    anchor = df.loc[anchor_idx]
+    try:
+        anchor_vals = anchor[prob_cols].astype(float)
+        amax_col = anchor_vals.idxmax()
+        amax_val = float(anchor_vals[amax_col])
+        prev_label = _disp_ctx(anchor["context"])
+        next_label = col_to_label.get(amax_col, amax_col)
+        line1 = (
+            f"Given previous state was {_format_state_label(prev_label, tokens)}, next day is most likely "
+            f"{_format_state_label(next_label, tokens)} ({fmt_percent_one_decimal(amax_val)})."
+        )
+    except Exception:
+        line1 = None
+
+    # Scan strongest / weakest transitions across matrix
+    best = None
+    worst = None
+    counts_series = mat["counts"] if "counts" in mat.columns else None
+    for ridx, row in df.iterrows():
+        # Skip rows with zero counts if counts column available
+        if counts_series is not None:
+            try:
+                if float(counts_series.iloc[ridx]) <= 0:
+                    continue
+            except Exception:
+                pass
+        for col in prob_cols:
+            try:
+                val = float(row[col])
+            except Exception:
+                continue
+            if pd.isna(val):
+                continue
+            if best is None or val > best[0]:
+                best = (val, ridx, col)
+            if worst is None or val < worst[0]:
+                worst = (val, ridx, col)
+    if best and worst:
+        best_from = _disp_ctx(df.loc[best[1], "context"])
+        best_to = col_to_label.get(best[2], best[2])
+        worst_from = _disp_ctx(df.loc[worst[1], "context"])
+        worst_to = col_to_label.get(worst[2], worst[2])
+        line2 = (
+            f"Global context: strongest transition = {_format_state_label(best_from, tokens)} → {_format_state_label(best_to, tokens)} "
+            f"({fmt_percent_one_decimal(best[0])}); weakest = {_format_state_label(worst_from, tokens)} → "
+            f"{_format_state_label(worst_to, tokens)} ({fmt_percent_one_decimal(worst[0])})."
+        )
+    else:
+        line2 = None
+
+    if not line1 and not line2:
+        return None
+    # Join lines with blank line to allow caller markdown/render separation
+    lines = [l for l in (line1, line2) if l]
+    return "\n\n".join(lines)
+
+
+# Remove duplicate _select_window_key_from_label (already defined above)
+# Export helpers
+compute_horizon_probs = _compute_horizon_probs
+
 # Export public alias list
 try:
     __all__
 except NameError:
     __all__ = []
-__all__ = sorted(set(list(__all__) + ["_compute_horizon_probs"]))
-# Keep backward-compatible public alias if needed elsewhere
-try:
-    compute_horizon_probs
-except NameError:
-    compute_horizon_probs = _compute_horizon_probs
-__all__ = sorted(set(list(__all__) + ["compute_horizon_probs"]))
+__all__ = sorted(set(list(__all__) + ["_compute_horizon_probs", "compute_horizon_probs"]))
 
 # Run the page when executed by Streamlit, stay import-safe for tests
 if __name__ == "__main__":

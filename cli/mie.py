@@ -6,6 +6,7 @@ No business logic implemented — scaffolding only.
 import argparse
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 # Ensure project root is on sys.path so `src` is importable when running cli scripts
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,64 @@ from src.analytics.markov.states_model import states_stale
 import yaml
 
 LOG = get_logger("cli")
+
+# ---------- Default Markov grid configuration (authoritative) ----------
+DEFAULT_MARKOV_GRID_STATE_MODES = ["binary", "tri"]
+DEFAULT_MARKOV_GRID_THRESHOLDS = [i for i in range(0, 151, 5)]  # 0..150 by 5
+DEFAULT_MARKOV_GRID_WINDOWS = ["1Y", "2Y", "5Y", "10Y", "20Y", "MAX"]
+DEFAULT_MARKOV_GRID_ORDERS = [1, 2, 3, 4]
+DEFAULT_MARKOV_GRID_TICKERS_FALLBACK = ["SPY", "QQQ", "DIA", "IWM"]
+
+
+def _default_markov_tickers() -> list[str]:
+    """Resolve default tickers for Markov grid: prefer config tickers intersecting
+    the core universe (SPY,QQQ,DIA,IWM); fallback to the core list if none found."""
+    try:
+        cfg = [t.strip().upper() for t in read_tickers() if str(t).strip()]
+    except Exception:
+        cfg = []
+    core = set(DEFAULT_MARKOV_GRID_TICKERS_FALLBACK)
+    sel = [t for t in cfg if t in core]
+    return sel if sel else DEFAULT_MARKOV_GRID_TICKERS_FALLBACK
+
+
+def _parse_csv_int_list(val: str | None, default: list[int]) -> list[int]:
+    if not val:
+        return list(default)
+    out = []
+    for x in str(val).split(","):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            out.append(int(x))
+        except ValueError:
+            LOG.warning("build-markov-grid: skip invalid int '%s' in list", x)
+    return out or list(default)
+
+
+def _parse_csv_str_list(val: str | None, default: list[str]) -> list[str]:
+    if not val:
+        return list(default)
+    out = [s.strip() for s in str(val).split(",") if s.strip()]
+    return out or list(default)
+
+
+def _grid_log_path() -> Path:
+    p = Path("data") / "logs" / "markov_grid.log"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _grid_log_append(msg: str):
+    line = f"{datetime.now(timezone.utc).isoformat()} {msg}\n"
+    try:
+        _grid_log_path().write_text(_grid_log_path().read_text() + line) if _grid_log_path().exists() else _grid_log_path().write_text(line)
+    except Exception:
+        # Best-effort file logging; still print to stdout
+        pass
+    print(msg)
+    LOG.info(msg)
 
 
 def build_parser():
@@ -108,12 +167,19 @@ def build_parser():
     p_mks_matrix.add_argument("--order", required=True, type=int)
     p_mks_matrix.add_argument("--window", required=True, help="1Y|2Y|5Y|10Y|20Y|MAX or CUSTOM_YYYYMMDD_YYYYMMDD")
 
-    p_mks_grid = sub.add_parser("build-markov-grid", help="Build states then derive matrices for a grid of params")
-    p_mks_grid.add_argument("--tickers", required=True, help="@config or comma list")
-    p_mks_grid.add_argument("--state-modes", required=True)
-    p_mks_grid.add_argument("--thresholds", required=True)
-    p_mks_grid.add_argument("--windows", required=True, help="comma list e.g. 1Y,2Y,5Y,10Y,20Y,MAX")
-    p_mks_grid.add_argument("--orders", required=True, help="comma list e.g. 1,2,3,4")
+    p_mks_grid = sub.add_parser(
+        "build-markov-grid",
+        help=(
+            "Build states then derive matrices for a grid of params. "
+            "Defaults: tickers from config (SPY,QQQ,DIA,IWM core), modes=\"binary,tri\", "
+            f"thresholds=0..150 step 5, windows={','.join(DEFAULT_MARKOV_GRID_WINDOWS)}, orders=1,2,3,4"
+        ),
+    )
+    p_mks_grid.add_argument("--tickers", help="@config or comma list; default = core from config or SPY,QQQ,DIA,IWM")
+    p_mks_grid.add_argument("--state-modes", help="comma list tri,binary; default = binary,tri")
+    p_mks_grid.add_argument("--thresholds", help="comma list of thresholds e.g. 0,5,10,...; default = 0..150 step 5")
+    p_mks_grid.add_argument("--windows", help="comma list e.g. 1Y,2Y,5Y,10Y,20Y,MAX; default = all")
+    p_mks_grid.add_argument("--orders", help="comma list e.g. 1,2,3,4; default = 1,2,3,4")
 
     # Orchestration commands
     sub.add_parser("update-all-analytics", help="Update raw->features then Markov states/matrices and HMM grid using config/analytics_grid.yml")
@@ -401,26 +467,50 @@ def main(argv=None):
             print(f"derive-markov-matrix ERROR: {e}")
             sys.exit(3)
     elif args.command == "build-markov-grid":
-        if str(args.tickers).strip() == "@config":
-            tickers = read_tickers()
+        # Resolve tickers
+        if not getattr(args, "tickers", None) or str(args.tickers).strip() == "@config":
+            tickers = _default_markov_tickers()
         else:
             tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-        modes = [m.strip() for m in str(args.state_modes).split(",") if m.strip()]
-        thrs = [int(x.strip()) for x in str(args.thresholds).split(",") if x.strip()]
-        windows = [w.strip() for w in str(args.windows).split(",") if w.strip()]
-        orders = [int(x.strip()) for x in str(args.orders).split(",") if x.strip()]
+        modes = _parse_csv_str_list(getattr(args, "state_modes", None), DEFAULT_MARKOV_GRID_STATE_MODES)
+        thrs = _parse_csv_int_list(getattr(args, "thresholds", None), DEFAULT_MARKOV_GRID_THRESHOLDS)
+        windows = _parse_csv_str_list(getattr(args, "windows", None), DEFAULT_MARKOV_GRID_WINDOWS)
+        orders = _parse_csv_int_list(getattr(args, "orders", None), DEFAULT_MARKOV_GRID_ORDERS)
+
+        from src.analytics.markov.markov_engine import FEATURES_DIR as MK_FEATURES_DIR
+
+        banner = {
+            "event": "build-markov-grid:start",
+            "tickers": tickers,
+            "modes": modes,
+            "thresholds": thrs[:5] + (["..."] if len(thrs) > 5 else []),
+            "windows": windows,
+            "orders": orders,
+        }
+        _grid_log_append(str(banner))
+
         for t in tickers:
-            feat_path = FEATURES_DIR / f"{t}.parquet"
+            feat_path = MK_FEATURES_DIR / f"{t}.parquet"
             if not feat_path.exists():
-                print(f"build-markov-grid SKIP {t}: missing features {feat_path}")
+                _grid_log_append(f"SKIP {t}: missing features {feat_path}")
                 continue
             for m in modes:
                 for thr in thrs:
-                    build_states_from_features(t, thr, m)
+                    try:
+                        build_states_from_features(t, thr, m)
+                    except Exception as e:
+                        _grid_log_append(f"states WARN {t} {m} thr={thr}: {e}")
+                        continue
                     for w in windows:
                         for K in orders:
-                            df = derive_matrix(t, thr, m, K, w)
-                            print({"ticker": t, "mode": m, "thr": thr, "window": w, "order": K, "rows": len(df)})
+                            try:
+                                df = derive_matrix(t, thr, m, K, w)
+                                _grid_log_append(str({
+                                    "ticker": t, "mode": m, "thr": thr, "window": w, "order": K, "rows": len(df)
+                                }))
+                            except Exception as e:
+                                _grid_log_append(f"matrix SKIP {t} {m} thr={thr} order={K} window={w}: {e}")
+        _grid_log_append("build-markov-grid:finish")
         sys.exit(0)
     elif args.command == "build-hmm":
         try:

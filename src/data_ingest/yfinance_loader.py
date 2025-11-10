@@ -11,7 +11,7 @@ This module follows ARCHITECT_BIBLE rules: Parquet primary, CSV fallback, never 
 """
 from pathlib import Path
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date as _date
 from typing import List, Dict, Optional
 
 from src.utils.logging import get_logger
@@ -214,10 +214,50 @@ def fetch_full_history(ticker: str) -> Dict[str, any]:
     return {"ticker": ticker, "rows": len(df), "start_date": str(df["date"].min().date()), "end_date": str(df["date"].max().date()), "parquet": str(p_parquet), "csv": str(p_csv)}
 
 
+# Gap detection & intraday safety helpers
+
+def _detect_missing_weekdays(last_date: _date, new_dates: list[_date]) -> list[_date]:
+    """Return list of missing *weekday* dates between last_date and the first new date.
+    Only checks the gap between last_date+1 and min(new_dates)-1. Weekends are ignored.
+    Holidays are not modeled; this is intentionally simple per task spec.
+    Pure helper: no IO, no logging.
+    """
+    if last_date is None or not new_dates:
+        return []
+    start_expected = last_date + timedelta(days=1)
+    first_new = min(new_dates)
+    if first_new <= start_expected:
+        return []  # contiguous or overlapping
+    missing: list[_date] = []
+    cursor = start_expected
+    while cursor < first_new:
+        if cursor.weekday() < 5:  # Mon-Fri only
+            missing.append(cursor)
+        cursor += timedelta(days=1)
+    return missing
+
+
+def _filter_intraday_rows(df):
+    """Filter out any rows whose date >= today (local date). Returns filtered copy and count skipped."""
+    try:
+        import pandas as pd
+    except Exception:
+        return df, 0
+    if df is None or df.empty or "date" not in df.columns:
+        return df, 0
+    today = datetime.now().date()
+    f = df.copy()
+    f["date"] = pd.to_datetime(f["date"]).dt.tz_localize(None)
+    before = len(f)
+    f = f[f["date"].dt.date < today].reset_index(drop=True)
+    skipped = before - len(f)
+    return f, skipped
+
+
 def update_ticker_incremental(ticker: str) -> Dict[str, any]:
     """Update ticker by fetching only new rows since last saved date.
-    Appends new rows, dedupes by date, sorts, and writes parquet+csv.
-    Returns dict with rows_added etc.
+    Appends new rows unless a weekday gap is detected between existing last date and first new date.
+    Filters out intraday (today's) partial rows. Returns dict including possible gap status.
     """
     ensure_dirs()
     LOG.info("Incremental update for %s", ticker)
@@ -240,20 +280,48 @@ def update_ticker_incremental(ticker: str) -> Dict[str, any]:
     existing["date"] = pd.to_datetime(existing["date"]).dt.tz_localize(None)
     last_date = existing["date"].max().date()
     start_fetch = last_date + timedelta(days=1)
-    # yfinance start param as ISO date
     start_str = start_fetch.isoformat()
 
-    new_df = _df_from_yfinance(ticker, start=start_str)
-    if new_df.empty:
+    new_df_raw = _df_from_yfinance(ticker, start=start_str)
+    if new_df_raw.empty:
         LOG.info("No new rows for %s since %s", ticker, last_date)
-        return {"ticker": ticker, "rows_added": 0, "last_date": str(last_date)}
+        return {"ticker": ticker, "rows_added": 0, "last_date": str(last_date), "status": "no_new"}
 
-    # concatenate and dedupe
-    combined = pd.concat([existing, new_df], ignore_index=True)
+    # Intraday safety: filter out today's partial row(s)
+    new_df_filtered, skipped_intraday = _filter_intraday_rows(new_df_raw)
+    if skipped_intraday > 0:
+        LOG.info("[ingest] Skipped %d intraday row(s) for %s (today)", skipped_intraday, ticker)
+    if new_df_filtered.empty:
+        return {"ticker": ticker, "rows_added": 0, "last_date": str(last_date), "status": "intraday_only"}
+
+    # Gap detection between last existing date and first new date
+    first_new_date = pd.to_datetime(new_df_filtered["date"]).dt.date.min()
+    new_dates_list = list(pd.to_datetime(new_df_filtered["date"]).dt.date.unique())
+    missing_weekdays = _detect_missing_weekdays(last_date, new_dates_list)
+    if missing_weekdays:
+        LOG.warning(
+            "[ingest] Data gap detected for %s: last=%s, new_start=%s (missing %d weekday(s)). Skipping append; manual backfill required.",
+            ticker,
+            last_date,
+            first_new_date,
+            len(missing_weekdays),
+        )
+        return {
+            "ticker": ticker,
+            "rows_added": 0,
+            "last_date": str(last_date),
+            "status": "gap_detected",
+            "gap_start": str(missing_weekdays[0]),
+            "gap_end": str(missing_weekdays[-1]),
+            "missing_weekdays": [str(d) for d in missing_weekdays[:10]],  # truncate for log simplicity
+        }
+
+    # Safe to append
+    combined = pd.concat([existing, new_df_filtered], ignore_index=True)
     combined["date"] = pd.to_datetime(combined["date"]).dt.tz_localize(None)
     combined = combined.drop_duplicates(subset=["date"]).sort_values(by="date").reset_index(drop=True)
 
-    p_parquet, p_csv = _write_outputs(combined, ticker)
+    p_parquet_out, p_csv_out = _write_outputs(combined, ticker)
 
     # Update registry
     reg = load_registry()
@@ -268,7 +336,13 @@ def update_ticker_incremental(ticker: str) -> Dict[str, any]:
 
     rows_added = len(combined) - len(existing)
     LOG.info("Appended %d rows for %s (now %d rows).", rows_added, ticker, len(combined))
-    return {"ticker": ticker, "rows_added": int(rows_added), "parquet": str(p_parquet), "csv": str(p_csv)}
+    return {
+        "ticker": ticker,
+        "rows_added": int(rows_added),
+        "parquet": str(p_parquet_out),
+        "csv": str(p_csv_out),
+        "status": "ok",
+    }
 
 
 def validate_raw(ticker: str) -> Dict[str, any]:

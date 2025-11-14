@@ -12,10 +12,8 @@ def _write_parquet(df: pd.DataFrame, path: Path):
 
 def test_binary_thresholds_load_distinct_matrices(monkeypatch, tmp_path):
     # Arrange tmp data root with two binary matrices for different thresholds
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
 
+    mod = importlib.import_module("mie_lib.pages.m_chain")
     # Assert cache loader signature includes all key params
     sig = inspect.signature(mod._load_matrix_cached_by_params)
     assert all(k in sig.parameters for k in [

@@ -1,3 +1,11 @@
+> **⚠️ DEPRECATED as of 2025-11-14**
+> This file is superseded by:
+> - **[docs/UI_SYSTEM/](../../UI_SYSTEM/)** for current page specifications
+> 
+> See [legacy/README.md](../README.md) for migration guide. This file will be deleted after **2026-05-14**.
+>
+> ---
+
 # PAGES SPEC — Market Intelligence Engine
 
 ## Shared Controls

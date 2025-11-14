@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import timezone
 
-from src.features.build_features import build_features_for_ticker, FEATURES_DIR, RAW_DIR
+from mie_lib.features.build_features import build_features_for_ticker, FEATURES_DIR, RAW_DIR
 
 
 def _make_raw_one_day(ticker: str = "TZT"):

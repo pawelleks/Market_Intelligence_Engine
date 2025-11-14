@@ -42,9 +42,9 @@ def test_build_markov_grid_basic(monkeypatch, tmp_path):
         _write_features(tmp_data, t, rows=300, seed=seed)
 
     # Patch analytics modules to use tmp data roots
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    me = importlib.import_module("src.analytics.markov.markov_engine")
-    sm = importlib.import_module("src.analytics.markov.states_model")
+
+    me = importlib.import_module("mie_lib.analytics.markov.markov_engine")
+    sm = importlib.import_module("mie_lib.analytics.markov.states_model")
     me.DATA_DIR = tmp_data
     me.FEATURES_DIR = tmp_data / "features"
     me.ANALYTICS_DIR = tmp_data / "analytics" / "markov"
@@ -52,7 +52,7 @@ def test_build_markov_grid_basic(monkeypatch, tmp_path):
     sm.AN_MKV_DIR = tmp_data / "analytics" / "markov"
 
     # Run CLI build-markov-grid over a small grid
-    from cli.mie import main as mie_main
+    from mie_lib.cli.mie import main as mie_main
     args = [
         "build-markov-grid",
         "--tickers", "TK1,TK2",

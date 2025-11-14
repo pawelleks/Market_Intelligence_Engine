@@ -1,4 +1,4 @@
-from app.ui.theme import get_metric_labels
+from mie_lib.ui.theme import get_metric_labels
 
 
 def test_metric_labels_have_human_friendly_names():

@@ -2,14 +2,12 @@ from pathlib import Path
 from importlib import import_module
 
 
-def test_missing_combo_returns_cli_build_hint(tmp_path, monkeypatch):
+def test_missing_combo_returns_cli_build_hint(tmp_path):
     # Prepare empty markov dir
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
     base = tmp_path / "data/analytics/markov/ZZZZ"
     base.mkdir(parents=True, exist_ok=True)
 
-    mod = import_module("app.pages.01_Markov_Chain")
+    mod = import_module("mie_lib.pages.m_chain")
     ticker = "ZZZZ"
     eff_order, eff_state_mode, eff_thr = 2, "tri", 10
     matrix_path = tmp_path / f"data/analytics/markov/{ticker}/matrix_order{eff_order}.parquet"

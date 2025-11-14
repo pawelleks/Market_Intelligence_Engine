@@ -1,4 +1,4 @@
-from app.ui.theme import get_metric_labels
+from mie_lib.ui.theme import get_metric_labels
 
 
 def test_get_metric_labels_smoke():

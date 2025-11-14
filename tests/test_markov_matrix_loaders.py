@@ -10,9 +10,7 @@ def _write_parquet(df, path: Path):
 
 
 def test_matrix_loader_exact_and_fallback(monkeypatch, tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    mod = importlib.import_module("mie_lib.pages.m_chain")
 
     data_root = tmp_path / "data"
     # Build three distinct matrices

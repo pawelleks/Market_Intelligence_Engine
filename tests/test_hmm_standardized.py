@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from src.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker
+from mie_lib.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker
 
 
 def _write_features(tmp_path: Path, tkr: str = "HX", rows: int = 700):
@@ -30,7 +30,6 @@ def _write_features(tmp_path: Path, tkr: str = "HX", rows: int = 700):
 def test_standardized_hmm_grid_and_idempotency(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(root))
 
     _write_features(tmp_path, "HX", 700)
 
@@ -61,4 +60,3 @@ def test_standardized_hmm_grid_and_idempotency(tmp_path, monkeypatch):
     # Idempotent write: second run should be skipped
     out2b = build_hmm_standardized_for_ticker("HX", n_states=2, train_window_years=5)
     assert out2b.get("skipped") is True
-

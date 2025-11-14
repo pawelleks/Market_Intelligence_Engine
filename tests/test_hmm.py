@@ -3,8 +3,8 @@ import pandas as pd
 import pytest
 from pathlib import Path
 
-from src.features.build_features import RAW_DIR, FEATURES_DIR, build_features_for_ticker
-from src.analytics.hmm.hmm_engine import build_hmm_for_ticker, HMMConfig, ANALYTICS_DIR
+from mie_lib.features.build_features import RAW_DIR, FEATURES_DIR, build_features_for_ticker
+from mie_lib.analytics.hmm.hmm_engine import build_hmm_for_ticker, HMMConfig, ANALYTICS_DIR
 
 
 def _make_features_for_test(ticker: str = "HMMT", days: int = 1300):

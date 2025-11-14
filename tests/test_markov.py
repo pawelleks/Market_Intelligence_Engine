@@ -4,8 +4,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.features.build_features import RAW_DIR, FEATURES_DIR, build_features_for_ticker
-from src.analytics.markov.markov_engine import MarkovConfig, build_markov_for_ticker, ANALYTICS_DIR
+from mie_lib.features.build_features import build_features_for_ticker
+from mie_lib.analytics.markov.markov_engine import MarkovConfig, build_markov_for_ticker
+
+# Project paths
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT / "data"
+RAW_DIR = DATA_DIR / "raw"
+FEATURES_DIR = DATA_DIR / "features"
 
 
 def _make_features_for_test(ticker: str = "MKV", days: int = 300):
@@ -75,4 +81,3 @@ def test_markov_outputs_and_probs_sum():
         out_dir.rmdir()
     except OSError:
         pass
-

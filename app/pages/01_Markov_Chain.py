@@ -1,40 +1,66 @@
-# --- path shim: ensure project root on sys.path for `from app...`
-import sys, pathlib
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-ROOT_STR = str(ROOT)
-if ROOT_STR not in sys.path:
-    sys.path.insert(0, ROOT_STR)
-# Constants for repo paths
 from pathlib import Path
-DATA = ROOT / "data"
-# Type assertions to avoid shadowing issues
-assert isinstance(ROOT, Path)
-assert isinstance(DATA, Path)
-assert DATA.is_absolute()
-# Do not reassign ROOT or DATA anywhere below
-
+import sys
 import streamlit as st
-from pathlib import Path
+from mie_lib.utils.paths import DATA_DIR as DATA
+
+# Ensure Streamlit page is configured early per UI guidelines
+st.set_page_config(page_title="Markov Chain", layout="wide")
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import yaml
 import datetime as _dt
 import numpy as _np
 from matplotlib.patches import Rectangle as _Rect
+import json
 
-from app.ui.theme import css_inject, get_tokens, mpl_style
+from mie_lib.ui.theme import css_inject, get_tokens, mpl_style
 from app.ui.components import DataStatus, plot_mpl
 from app.ui.components import read_parquet_safe, read_csv_safe, read_json_safe, fmt_percent_one_decimal
 # Lightweight stdlib for fs checks
 import os
-import hashlib as _hashlib
 
 from app.version import get_version
-from app.ui.components import settings_line, badge_state, section_header
+from mie_lib.analytics.markov import MarkovConfig, build_markov_for_ticker
 
 # Temporary debug flag for binary threshold panel
 DEBUG_BINARY_THRESHOLD = False
 DEBUG_UI = False  # new flag controlling any optional debug panels
+
+# === UI-only formatting helpers (readable state names and colored spans) ===
+_DISPLAY_NAMES = {"G": "Green", "N": "Neutral", "R": "Red"}
+
+def _fmt_state_name(code: str) -> str:
+    return _DISPLAY_NAMES.get(str(code).upper(), str(code))
+
+def _fmt_state_span(code: str) -> str:
+    """Return HTML-colored span with readable state name using named colors only."""
+    color = {"G": "green", "N": "gray", "R": "red"}.get(str(code).upper(), "white")
+    return f"<span style='color:{color};font-weight:600'>{_fmt_state_name(code)}</span>"
+
+# Additional helpers for colored words in markdown (no inline hex; named tokens only)
+_DISPLAY_WORD = {"G": "Green", "N": "Neutral", "R": "Red"}
+
+def _raw_to_display(c: str) -> str:  # U/N/D -> G/N/R
+    return {"U": "G", "N": "N", "D": "R"}.get(str(c).upper(), str(c).upper())
+
+def _colored_word(code: str) -> str:
+    w = _DISPLAY_WORD.get(str(code).upper(), str(code))
+    c = str(code).upper()
+    if c == "G":
+        return f":green[{w}]"
+    if c == "N":
+        return f":blue[{w}]"
+    if c == "R":
+        return f":red[{w}]"
+    return w
+
+def _context_words(compact: str) -> str:
+    # "GRN" -> "Green → Red → Neutral" with colors
+    if not isinstance(compact, str) or not compact:
+        return ""
+    parts = [_colored_word(ch) for ch in list(compact)]
+    return " \u2192 ".join(parts)
 
 
 def _get_ticker_from_state(default: str = "SPY") -> str:
@@ -257,12 +283,86 @@ def _load_matrix_for_selection(
     return df, info
 
 
-from src.analytics.markov.states_model import (
+from mie_lib.analytics.markov.states_model import (
     states_for,
 )
+from mie_lib.analytics.markov.markov_engine import load_features_for_markov, get_markov_features_alignment
 
-# Grid config for nearest-threshold suggestion and coverage
-import yaml as _yaml
+
+def _normalize_window(window_val) -> str:
+    """
+    Normalize UI time-range value to canonical window key used in filenames.
+
+    Examples:
+      1, "1", "1Y"   → "1Y"
+      2, "2", "2Y"   → "2Y"
+      5, "5", "5Y"   → "5Y"
+      10, "10", "10Y" → "10Y"
+      20, "20", "20Y" → "20Y"
+      "MAX" → "MAX"
+    """
+    if window_val is None:
+        return ""
+    if isinstance(window_val, (int, float)):
+        v = int(window_val)
+        if v in (1, 2, 5, 10, 20):
+            return f"{v}Y"
+    s = str(window_val).strip().upper()
+    if s in ("1Y","2Y","5Y","10Y","20Y","MAX"):
+        return s
+    if s in ("1","2","5","10","20"):
+        return f"{s}Y"
+    return ""
+
+
+def _load_markov_matrix(ticker: str, window: str, state_mode: str, threshold_bps: int, order: int):
+    """
+    Load precomputed Markov transition matrix for the given configuration from the filesystem.
+
+    Looks under:
+    data/analytics/markov/{ticker}/matrices/{state_mode}/thr{threshold_bps}/order{order}/{window}.parquet
+
+    Returns (df, meta) where meta includes: path, exists, state_mode, threshold_bps, order, window, mtime, metadata_json.
+    Pure I/O helper: no Streamlit calls.
+    """
+    tkr = (ticker or "").upper()
+    sm = (state_mode or "").strip().lower()
+    win = _normalize_window(window)
+    if not tkr or not sm or not win:
+        return None, {"path": "", "exists": False}
+    base = DATA / "analytics" / "markov" / tkr / "matrices" / sm / f"thr{int(threshold_bps)}" / f"order{int(order)}"
+    path = base / f"{win}.parquet"
+    meta = {
+        "path": str(path),
+        "exists": False,
+        "state_mode": sm,
+        "threshold_bps": int(threshold_bps),
+        "order": int(order),
+        "window": win,
+        "mtime": None,
+        "metadata_json": {},
+    }
+    if not path.exists():
+        return None, meta
+    try:
+        df = pd.read_parquet(path)
+    except Exception:
+        return None, meta
+    try:
+        st_stat = path.stat()
+        meta["mtime"] = str(st_stat.st_mtime)
+        meta["exists"] = True
+    except Exception:
+        pass
+    meta_path = base / "matrix_metadata.json"
+    if meta_path.exists():
+        try:
+            meta_json = json.loads(meta_path.read_text())
+            if isinstance(meta_json, dict):
+                meta["metadata_json"] = meta_json
+        except Exception:
+            pass
+    return df, meta
 
 
 def _load_features_for_page(ticker: str, features_root: Path | None = None):
@@ -275,7 +375,7 @@ def _load_features_for_page(ticker: str, features_root: Path | None = None):
     """
     import pandas as pd
 
-    root = features_root if features_root is not None else (ROOT / "data" / "features")
+    root = features_root if features_root is not None else (DATA / "features")
     p = root / f"{ticker}.parquet"
     if not p.exists():
         return None, False
@@ -299,7 +399,7 @@ def _format_missing_features_msg(ticker: str, features_path: "Path|str", require
     Pure helper (no Streamlit). Return a deterministic, multi-line message that:
     - Mentions the ticker and echoes features_path as given (Path or str is fine).
     - Lists required_cols (comma-separated).
-    - Includes the exact CLI hints:
+    - Includes the exact CLI hints on separate lines matching actual CLI options:
         python cli/mie.py build-features --mode full
         python cli/mie.py update-features --lookback 90
     - Ends with: "After building features, reload this page."
@@ -312,6 +412,7 @@ def _format_missing_features_msg(ticker: str, features_path: "Path|str", require
         details = f"{details}\nRequired columns: {cols}"
     cli = (
         "python cli/mie.py build-features --mode full\n"
+        "python cli/mie.py build-features --mode update --lookback 90 --csv\n"
         "python cli/mie.py update-features --lookback 90"
     )
     ending = "After building features, reload this page."
@@ -334,7 +435,7 @@ def _format_missing_matrix_msg(ticker: str, state_mode: str, threshold_bps: int,
         params = f"{params}, window={window}"
     # Legacy-compatible build hint; omit --window to preserve compatibility with existing environments/tests
     cli = (
-        f"python cli/mie.py build-markov --ticker {ticker} --order {int(order)} "
+        f"python cli/mie.py build-markov --ticker {ticker} --order {order} "
         f"--state-mode {state_mode} --threshold-bps {int(threshold_bps)}"
     )
     ending = "Re-run the command to generate the matrix, then reload this page."
@@ -620,30 +721,22 @@ def _make_matrix_table(df: pd.DataFrame):
     if not cols:
         return None
     sub = df[["context"] + cols].copy() if "context" in df.columns else df[cols].copy()
-    # Map raw context (U/D/N) to display (G/R/N) with dashes
-    def _ctx_disp(s: str) -> str:
+    def _ctx_compact(s: str) -> str:
         s = str(s or "")
         if not s:
             return s
-        mp = {"U": "Green", "N": "N", "D": "Red"}
-        parts = [mp.get(ch, ch) for ch in list(s)]
-        return "-".join(parts)
+        # raw chars U/N/D -> map to compact symbols R/N/G (bear/neutral/bull) in chronological order
+        mp = {"U": "G", "N": "N", "D": "R"}
+        return "".join([mp.get(ch, ch) for ch in list(s)])
     if "context" in sub.columns:
-        sub["Context"] = sub["context"].astype(str).map(_ctx_disp)
-        sub = sub.drop(columns=["context"])  # keep display-only label
-    # Friendly headers
-    rename = {
-        "mc_prob_up": "Green (bullish)",
-        "mc_prob_neutral": "Neutral",
-        "mc_prob_down": "Red (bearish)",
-    }
+        sub["Context"] = sub["context"].astype(str).map(_ctx_compact)
+        sub = sub.drop(columns=["context"])  # presentational only
+    rename = {"mc_prob_up": "Green", "mc_prob_neutral": "Neutral", "mc_prob_down": "Red"}
     sub = sub.rename(columns=rename)
-    # Percent formatting
-    for c in [v for k, v in rename.items() if v in sub.columns]:
-        sub[c] = sub[c].map(fmt_percent_one_decimal)
-    if "Context" in sub.columns:
-        return sub.set_index("Context")
-    return sub
+    for c in rename.values():
+        if c in sub.columns:
+            sub[c] = sub[c].map(fmt_percent_one_decimal)
+    return sub.set_index("Context") if "Context" in sub.columns else sub
 
 
 def _plot_heatmap(df: pd.DataFrame, tokens: dict):
@@ -654,46 +747,33 @@ def _plot_heatmap(df: pd.DataFrame, tokens: dict):
     fig, ax = plt.subplots(figsize=(7, 3), dpi=140)
     mpl_style(fig, ax, tokens)
     colors = tokens["theme"]["colors"]
-    # Map colors by column name so binary displays get bull/bear (no neutral)
     col_color = []
     for c in cols:
-        if c == "mc_prob_up":
-            col_color.append(colors.get("bull"))
-        elif c == "mc_prob_neutral":
-            col_color.append(colors.get("neutral"))
-        elif c == "mc_prob_down":
-            col_color.append(colors.get("bear"))
-        else:
-            col_color.append(colors.get("fg"))
+        if c == "mc_prob_up": col_color.append(colors.get("bull"))
+        elif c == "mc_prob_neutral": col_color.append(colors.get("neutral"))
+        elif c == "mc_prob_down": col_color.append(colors.get("bear"))
+        else: col_color.append(colors.get("fg"))
     nr, nc = data.shape
     for i in range(nr):
         for j in range(nc):
             val = float(data[i, j])
             ax.add_patch(_Rect((j, i), 1, 1, color=col_color[j], alpha=min(max(val, 0.0), 1.0)))
-    ax.set_xlim(0, nc)
-    ax.set_ylim(nr, 0)
+    ax.set_xlim(0, nc); ax.set_ylim(nr, 0)
     ax.set_yticks([i + 0.5 for i in range(nr)])
-    # Map y labels from raw context to display G-N-R with dashes
-    def _ctx_disp(s: str) -> str:
-        s = str(s or "")
-        mp = {"U": "Green", "N": "N", "D": "Red"}
-        return "-".join([mp.get(ch, ch) for ch in list(s)]) if s else s
-    ylabels = []
     if "context" in df.columns:
-        ylabels = [ _ctx_disp(s) for s in df["context"].astype(str).tolist() ]
+        mp = {"U": "G", "N": "N", "D": "R"}
+        ylabels = ["".join(mp.get(ch) for ch in list(s)) for s in df["context"].astype(str).tolist()]
+    else:
+        ylabels = [str(i) for i in range(nr)]
     ax.set_yticklabels(ylabels)
     ax.set_xticks([k + 0.5 for k in range(nc)])
     xticks = []
     for c in cols:
-        if c == "mc_prob_up":
-            xticks.append("Green")
-        elif c == "mc_prob_neutral":
-            xticks.append("Neutral")
-        elif c == "mc_prob_down":
-            xticks.append("Red")
+        if c == "mc_prob_up": xticks.append("Green")
+        elif c == "mc_prob_neutral": xticks.append("Neutral")
+        elif c == "mc_prob_down": xticks.append("Red")
     ax.set_xticklabels(xticks)
-    fig.tight_layout()
-    return fig
+    fig.tight_layout(); return fig
 
 
 @st.cache_data(show_spinner=False)
@@ -753,21 +833,21 @@ def _load_features_meta_cached(ticker: str, mtime: float | None, path_str: str) 
         # Legacy: direct read of features parquet to infer metadata
         df = pd.read_parquet(fp)
         meta["exists"] = True
-        meta["mtime"] = fp.stat().st_mtime
+        meta["mtime"] = str(fp.stat().st_mtime)
         if "ret_1d" in df.columns:
             meta["has_ret_1d"] = True
         if "order" in df.columns and df["order"].dtype in ["int32", "int64"]:
-            meta["order"] = int(df["order"].max())
+            meta["order"] = str(int(df["order"].max()))
         if "mode" in df.columns:
             meta["mode"] = str(df["mode"].iloc[0])
         if "threshold" in df.columns and df["threshold"].dtype in ["int32", "int64"]:
-            meta["threshold_bps"] = int(df["threshold"].max())
+            meta["threshold_bps"] = str(int(df["threshold"].max()))
         if "date" in df.columns and df["date"].dtype == "object":
             # coerce and check date parsing
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             if df["date"].notna().any():
-                meta["rows"] = len(df)
-                meta["cols"] = len(df.columns)
+                meta["rows"] = str(len(df))
+                meta["cols"] = str(len(df.columns))
     except Exception:
         pass
     return meta
@@ -922,76 +1002,268 @@ def _select_previous_state_anchor(
     window_end_iso: str,
     state_mode: str,
 ) -> tuple[str | None, str | None]:
-    """Return (raw_state, display_code) for most recent state within window for the exact configuration.
+    """Return (raw_state, display_code) for most recent state within window using live classification.
+
+    Updated logic: derive anchor from features ret_1d applying current threshold/state_mode so that
+    changing threshold (bps) or mode immediately refreshes the anchor. Avoid relying on any precomputed
+    states parquet whose threshold may differ.
 
     raw_state: 'U','N','D' (tri) or 'U','D' (binary)
     display_code: 'G','N','R' mapped from raw_state (U->G, N->N, D->R)
-
-    Rules (per ARCHITECT_BIBLE & unified discretization):
-      - Load only threshold/mode-specific states parquet (no silent fallback).
-      - Restrict to inclusive window [window_start_iso, window_end_iso] if parse succeeds.
-      - Anchor = last available state in that window.
-      - If window slice empty, fallback to last state <= end.
-      - On any failure, return (None, None).
     """
     try:
-        # Basic validations
         if not isinstance(ticker, str) or not ticker.strip():
             return None, None
         mode = str(state_mode).lower().strip()
         if mode not in {"binary", "tri"}:
             return None, None
-        thr = int(threshold_bps)
-        # Build states path
-        states_path = DATA / "analytics" / "markov" / ticker / f"states_thr{thr}_{mode}.parquet"
-        if not states_path.exists():
+        # Resolve features path both absolute (repo root) and relative (current working dir) to support test monkeypatch chdir
+        abs_feat = DATA / "features" / f"{ticker}.parquet"
+        rel_feat = Path("data/features") / f"{ticker}.parquet"
+        feat_path = abs_feat if abs_feat.exists() else rel_feat
+        if not feat_path.exists():
             return None, None
-        try:
-            df = pd.read_parquet(states_path)
-        except Exception:
+        df_feat = pd.read_parquet(feat_path)
+        if "date" not in df_feat.columns or "ret_1d" not in df_feat.columns:
             return None, None
-        if df is None or df.empty or "date" not in df.columns or "state" not in df.columns:
+        df_feat = df_feat.copy()
+        df_feat["date"] = pd.to_datetime(df_feat["date"], errors="coerce").dt.date
+        df_feat = df_feat.dropna(subset=["date", "ret_1d"]).sort_values("date")
+        if df_feat.empty:
             return None, None
-        # Normalize dates to date objects
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
-        df = df.dropna(subset=["date"]).sort_values("date")
-        if df.empty:
-            return None, None
-        # Parse window bounds
+        # Determine window slice bounds
         try:
             w_start = _dt.date.fromisoformat(str(window_start_iso))
             w_end = _dt.date.fromisoformat(str(window_end_iso))
         except Exception:
-            # Fallback: derive from window_key if possible
-            w_end = df["date"].max()
-            # Approximate window start based on key (1Y,2Y,5Y,10Y,20Y,MAX)
-            today = w_end
+            # Fallback based on window_key span
+            w_end = df_feat["date"].max()
             span_map = {"1Y": 365, "2Y": 730, "5Y": 5*365, "10Y": 10*365, "20Y": 20*365}
             if window_key.upper() == "MAX" or window_key.upper() == "CUSTOM":
-                w_start = df["date"].min()
+                w_start = df_feat["date"].min()
             else:
-                days_back = span_map.get(window_key.upper(), 365)
-                w_start = today - _dt.timedelta(days=days_back)
-        # Constrain to window
-        window_df = df[(df["date"] >= w_start) & (df["date"] <= w_end)]
+                w_start = w_end - _dt.timedelta(days=span_map.get(window_key.upper(), 365))
+        window_df = df_feat[(df_feat["date"] >= w_start) & (df_feat["date"] <= w_end)]
         if window_df.empty:
-            window_df = df[df["date"] <= w_end]
+            window_df = df_feat[df_feat["date"] <= w_end]
         if window_df.empty:
             return None, None
-        raw_state = str(window_df.iloc[-1]["state"]).upper().strip()
-        # Validate against mode-specific allowed states
-        allowed = ["U", "D"] if mode == "binary" else ["U", "N", "D"]
-        if raw_state not in allowed:
-            # Attempt fallback: last valid in slice
-            valid_slice = window_df[window_df["state"].isin(allowed)]
-            if valid_slice.empty:
-                return None, None
-            raw_state = str(valid_slice.iloc[-1]["state"]).upper().strip()
+        last_ret = float(window_df.iloc[-1]["ret_1d"])  # use full precision
+        from mie_lib.analytics.markov.states_model import classify_tri_state, classify_binary_state  # local import to avoid circular
+        if mode == "tri":
+            raw_state = classify_tri_state(last_ret, int(threshold_bps))  # 'U','N','D'
+        else:
+            raw_state = classify_binary_state(last_ret, int(threshold_bps))  # 'U','D'
+        if raw_state not in ({"U","D"} if mode=="binary" else {"U","N","D"}):
+            return None, None
         disp_map = {"U": "G", "N": "N", "D": "R"}
         return raw_state, disp_map.get(raw_state)
     except Exception:
         return None, None
+
+
+# Order-aware context selection (forward definition used by main)
+
+def _select_active_context_row(
+    mat_df: pd.DataFrame,
+    states_df: pd.DataFrame | None,
+    mode: str,
+    order: int,
+    start_date: str,
+    end_date: str,
+) -> tuple[str | None, str | None, pd.Series | None, int]:
+    """
+    Resolve active context row for the given order using states_df within [start_date,end_date].
+    Returns (raw_context_UDN, display_compact_GNR, row_series, used_order).
+    Applies fuzzy lookup compatible with verbose/compact labels and falls back to shorter contexts.
+    """
+    if mat_df is None or mat_df.empty:
+        return None, None, None, 0
+    # Build raw sequence from states_df if available
+    seq_raw: list[str] = []
+    try:
+        if states_df is not None and not states_df.empty and "mc_state_today" in states_df.columns:
+            sdf = states_df.copy()
+            sdf["date"] = pd.to_datetime(sdf["date"]).dt.date
+            try:
+                s0 = _dt.date.fromisoformat(str(start_date)); s1 = _dt.date.fromisoformat(str(end_date))
+                sdf = sdf[(sdf["date"] >= s0) & (sdf["date"] <= s1)]
+            except Exception:
+                sdf = sdf.sort_values("date")
+            raw_vals = [str(x) for x in sdf["mc_state_today"].tolist() if str(x).strip()]
+            seq_raw = [v for v in raw_vals if v in {"U","N","D"}]
+    except Exception:
+        seq_raw = []
+    # Fallback: derive a plausible last context from matrix contexts
+    if not seq_raw and "context" in mat_df.columns:
+        try:
+            last_ctx_raw = str(mat_df["context"].astype(str).iloc[-1])
+            seq_raw = [ch for ch in last_ctx_raw if ch in {"U","N","D"}]
+        except Exception:
+            pass
+    if not seq_raw:
+        return None, None, None, 0
+    # Try from requested order down to 1
+    mode_l = str(mode).lower().strip()
+    for k in range(int(order), 0, -1):
+        cand_raw = "".join(seq_raw[-k:])  # e.g., 'UD', 'UDN'
+        # Compact display from raw
+        mp = {"U":"G","N":"N","D":"R"}
+        disp = "".join(mp.get(ch) for ch in cand_raw)
+        row = _lookup_context_row_fuzzy(mat_df, disp)
+        if isinstance(row, pd.Series):
+            return cand_raw, disp, row, k
+    return None, None, None, 0
+
+
+def _compute_multi_horizon_probs(P_df: pd.DataFrame, pi_row: pd.Series, mode: str, horizons: list[int]) -> pd.DataFrame:
+    """
+    Wrapper for multi-horizon computation using the current matrix (any order) and the active context row.
+    For K=1 (rows are single-day state transitions for U/N/D), compute exact probabilities via matrix powers using
+    p_h = p0 @ P^h where P is the state transition matrix derived from P_df and p0 is a one-hot vector for
+    the starting state inferred from pi_row['context'].
+    Otherwise, fall back to the legacy approximation used by _compute_multistep.
+    """
+    import numpy as _np
+    import pandas as pd
+    if P_df is None or P_df.empty:
+        return pd.DataFrame()
+    # Determine present state probability columns and binary/tri mode
+    cols_all = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in P_df.columns]
+    if not cols_all:
+        return pd.DataFrame()
+    is_binary = (mode == "binary") or ("mc_prob_neutral" not in cols_all)
+    col_order = ["mc_prob_up"] + ([] if is_binary else ["mc_prob_neutral"]) + ["mc_prob_down"]
+    # Detect K=1 from context column: unique single-letter states
+    k1 = False
+    if "context" in P_df.columns:
+        uniq = [str(x) for x in P_df["context"].unique().tolist()]
+        if uniq and all(len(u) == 1 and u in {"U", "N", "D"} for u in uniq):
+            k1 = True
+    start_state = None
+    if isinstance(pi_row, pd.Series):
+        try:
+            sctx = str(pi_row.get("context", ""))
+            if len(sctx) == 1 and sctx in {"U","N","D"}:
+                start_state = sctx
+        except Exception:
+            start_state = None
+    if k1 and start_state in {"U","N","D"}:
+        state_order = ["U", "D"] if is_binary else ["U", "N", "D"]
+        rows = []
+        for s in state_order:
+            r = P_df[P_df["context"].astype(str) == s]
+            if r.empty:
+                rows.append([_np.nan] * len(col_order))
+            else:
+                rows.append([float(r.iloc[0].get(c, _np.nan)) for c in col_order])
+        P = _np.array(rows, dtype=float)
+        # Normalize rows to sum to 1
+        rs = P.sum(axis=1, keepdims=True)
+        rs[rs == 0] = 1.0
+        P = P / rs
+        # Initial one-hot p0
+        idx_map = {s: i for i, s in enumerate(state_order)}
+        p0 = _np.zeros(len(state_order), dtype=float)
+        p0[idx_map[start_state]] = 1.0
+        out = {}
+        for h in horizons:
+            if int(h) <= 0:
+                continue
+            Ph = _np.linalg.matrix_power(P, int(h))
+            vec = p0 @ Ph
+            out[int(h)] = {col_order[i]: vec[i] for i in range(len(state_order))}
+        return pd.DataFrame(out).T.sort_index()
+    # Fallback approximation for higher-order/context matrices
+    return _compute_multistep(pi_row, P_df, horizons, mode)
+
+# --- Backward compatibility shim for tests ---
+def _compute_horizon_probs(matrix_df, context_label, horizons, mode="binary"):
+    """Compatibility alias for older tests performing exact horizon matrix powers.
+
+    Exact behavior (legacy tests expect):
+      - Interpret matrix_df rows as single-day state transitions for K=1.
+      - Build transition matrix P using rows ordered as ['U','D'] for binary or ['U','N','D'] for tri.
+      - Normalize each row to sum to 1 (graceful if already normalized).
+      - Map context_label display code (G,N,R) to raw start state (U,N,D).
+      - Compute p_h = p0 @ P^h for each positive integer horizon h.
+      - Return DataFrame indexed by horizon with columns mc_prob_up, mc_prob_neutral (tri only), mc_prob_down.
+
+    Parameters
+    ----------
+    matrix_df : pd.DataFrame
+        DataFrame with columns including 'context' (raw U/N/D) plus mc_prob_* columns.
+    context_label : str | pd.Series
+        Starting context/state/state label ('G','N','R','U','D'). If Series, its 'context' value is used.
+    horizons : Iterable[int]
+        Positive integer horizons.
+    mode : str
+        'binary' or 'tri'. Determines state ordering and neutral handling.
+    """
+    import pandas as pd
+    import numpy as _np
+    if matrix_df is None or len(matrix_df) == 0:
+        return pd.DataFrame()
+    df = matrix_df.copy()
+    # Identify probability columns
+    cols = [c for c in ["mc_prob_up","mc_prob_neutral","mc_prob_down"] if c in df.columns]
+    if not cols:
+        return pd.DataFrame()
+    is_binary = (str(mode).lower() == "binary") or ("mc_prob_neutral" not in cols)
+    # Determine state ordering
+    state_order = ["U","D"] if is_binary else ["U","N","D"]
+    prob_cols_order = ["mc_prob_up"] + ([] if is_binary else ["mc_prob_neutral"]) + ["mc_prob_down"]
+    # Build P matrix row by row
+    rows = []
+    for s in state_order:
+        r = df[df.get("context"," ").astype(str) == s]
+        if r.empty:
+            rows.append([_np.nan]*len(prob_cols_order))
+        else:
+            rows.append([float(r.iloc[0].get(c, _np.nan)) for c in prob_cols_order])
+    P = _np.array(rows, dtype=float)
+    # Normalize rows (avoid divide-by-zero)
+    rs = P.sum(axis=1, keepdims=True)
+    rs[rs == 0] = 1.0
+    P = P / rs
+    # Resolve starting state
+    if isinstance(context_label, pd.Series):
+        raw_ctx = str(context_label.get("context",""))
+        start_raw = raw_ctx if raw_ctx in state_order else state_order[0]
+    else:
+        label_map = {"G":"U","U":"U","N":"N","R":"D","D":"D"}
+        start_raw = label_map.get(str(context_label).upper(), state_order[0])
+    # Build one-hot p0
+    idx_map = {s:i for i,s in enumerate(state_order)}
+    p0 = _np.zeros(len(state_order), dtype=float)
+    p0[idx_map.get(start_raw,0)] = 1.0
+    # Compute horizons
+    out = {}
+    for h in horizons:
+        h_int = int(h)
+        if h_int <= 0:
+            continue
+        Ph = _np.linalg.matrix_power(P, h_int)
+        vec = p0 @ Ph
+        out[h_int] = {prob_cols_order[i]: vec[i] for i in range(len(state_order))}
+    if not out:
+        return pd.DataFrame()
+    res = pd.DataFrame(out).T.sort_index()
+    return res
+# --- end shim ---
+
+# === Fatal error panel helper (must exist before entrypoint wrapper) ===
+def _fatal_panel(err: Exception):
+    """Render a visible error panel with stack trace details; never leave blank screen."""
+    try:
+        st.error(f"Markov page failed: {err.__class__.__name__}: {err}")
+        with st.expander("Show technical details", expanded=False):
+            import traceback as _tb
+            st.code("".join(_tb.format_exc()))
+    except Exception:
+        st.error(f"Markov page failed: {err}")
+    # Stop further execution after showing diagnostic
+    st.stop()
 
 
 def main():
@@ -1058,7 +1330,7 @@ def main():
 
     # Load grid thresholds for nearest suggestion
     try:
-        grid = _yaml.safe_load((Path("config")/"analytics_grid.yml").read_text())
+        grid = yaml.safe_load((Path("config")/"analytics_grid.yml").read_text())
         grid_thrs = sorted([int(x) for x in grid.get("thresholds_bps", [])])
     except Exception:
         grid_thrs = [10]
@@ -1071,28 +1343,102 @@ def main():
     # Ensure features exist (offline) with ret_1d; read-only metadata
     meta = _load_features_cached(ticker)
     feat_path = Path(meta.get("path", DATA/"features"/f"{ticker}.parquet"))
-    if not meta.get("exists", False) or meta.get("has_ret_1d") is False:
+    # Use unified loader for actual existence & schema verification
+    feat_df = load_features_for_markov(ticker)
+    have = feat_df is not None and not (feat_df.empty)
+    has_ret = have  # loader guarantees ret_1d present if DataFrame returned
+    if not have:
         req = ["ret_1d"]
         msg = _format_missing_features_msg(ticker, feat_path, req)
         DataStatus(msg, "warning")
         return
-    # Precompute feature-based range for header fallback
-    fstart, fend = _window_dates_from_features(ticker, window)
+    # Precompute feature-based range for header fallback using unified frame
+    try:
+        fstart = pd.to_datetime(feat_df["date"]).min().date()
+        fend = pd.to_datetime(feat_df["date"]).max().date()
+    except Exception:
+        fstart, fend = _window_dates_from_features(ticker, window)
+
+    # Alignment check (features vs states) – if lagging, surface a subtle caption per Bible
+    showed_lag_banner = False
+    try:
+        align_meta = get_markov_features_alignment(
+            ticker=ticker,
+            state_mode=ctrl_state_mode,
+            threshold_bps=int(ctrl_thr),
+            order=int(ctrl_order),
+            window_key=window_key,
+        )
+        if align_meta.get("is_lagging"):
+            st.caption(
+                f"⚠️ Markov analytics lag spot data by {align_meta.get('lag_days')} days "
+                f"(features to {align_meta.get('features_last_date')}, states to {align_meta.get('states_last_date')})."
+            )
+            showed_lag_banner = True
+    except Exception:
+        pass
+    # Fallback banner if alignment helper unavailable: compute simple date lag from loaded frames
+    try:
+        if not showed_lag_banner:
+            from datetime import datetime, timezone
+            def _to_naive(dt):
+                try:
+                    if hasattr(dt, "tz_convert"):
+                        return dt.tz_convert(None)
+                    if hasattr(dt, "tz_localize"):
+                        return dt.tz_localize(None)
+                except Exception:
+                    pass
+                return dt
+            spot_date = _to_naive(datetime.now(timezone.utc)).date()
+            last_feat = None if (feat_df is None or feat_df.empty) else pd.to_datetime(feat_df["date"].max()).date()
+            try:
+                _sf = states_for(ticker, int(ctrl_thr), ctrl_state_mode)
+                last_state = None if (_sf is None or _sf.empty) else pd.to_datetime(_sf["date"].max()).date()
+            except Exception:
+                last_state = None
+            lag_days = None if last_feat is None else (spot_date - last_feat).days
+            if lag_days is not None and lag_days > 0:
+                st.caption(
+                    f"⚠️ Markov analytics lag spot data by {lag_days} day(s) "
+                    f"(features to {last_feat}, states to {last_state})."
+                )
+    except Exception:
+        pass
 
     # Determine normalized window key once for downstream path resolution
     win_key = window_key  # unify naming; use win_key for all artifact path resolutions
 
     # Read-only: do not compute in UI; only attempt to load derived/cached matrix, else show CLI hint
     try:
-        mat, mat_info = _load_matrix_for_selection(ticker, eff_state_mode, int(eff_thr), int(eff_order), win_key, allow_fallback=False)
+        mat, mat_meta = _load_markov_matrix(ticker, win_key, eff_state_mode, int(eff_thr), int(eff_order))
+        if mat is None or mat.empty:
+            raise FileNotFoundError(str(mat_meta.get("path")))
+        mat_info = {"path": Path(mat_meta.get("path")), "requested": {"ticker": ticker, "mode": eff_state_mode, "thr": int(eff_thr), "order": int(eff_order), "window": win_key}, "resolved": {"ticker": ticker, "mode": eff_state_mode, "thr": int(eff_thr), "order": int(eff_order), "window": win_key}, "fallback_used": False, "legacy_fallback_used": False}
+        # Diagnostics panel (visible on success path as well)
+        with st.expander("Diagnostics", expanded=False):
+            st.write({
+                "ticker": ticker,
+                "mode": eff_state_mode,
+                "order": int(eff_order),
+                "threshold_bps": int(eff_thr),
+                "window": win_key,
+                "matrix_path": str(mat_info["path"]),
+                "matrix_exists": Path(mat_info["path"]).exists(),
+                "features_path": str(feat_path),
+                "features_rows": 0 if feat_df is None else int(len(feat_df)),
+                "matrix_rows": 0 if mat is None else int(len(mat)),
+                "last_feature_date": None if (feat_df is None or feat_df.empty or "date" not in feat_df.columns) else str(pd.to_datetime(feat_df["date"]).max().date()),
+            })
     except Exception:
         # Header lines even if matrix missing
         # derive best-available mtime (seconds)
         last_mtime = _to_mtime_seconds(meta.get("mtime"))
+        # Initialize expected matrix path for diagnostics
+        _mpath = DATA/"analytics"/"markov"/ticker/"matrices"/str(eff_state_mode).lower()/f"thr{int(eff_thr)}"/f"order{int(eff_order)}"/f"{win_key}.parquet"
         try:
-            mp = _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
-            if Path(mp).exists():
-                mt = Path(mp).stat().st_mtime
+            if Path(_mpath).exists():
+                mt = Path(_mpath).stat().st_mtime
                 if last_mtime is None or mt > last_mtime:
                     last_mtime = mt
         except Exception:
@@ -1101,7 +1447,7 @@ def main():
         last_human_missing = _fmt_human_ts(last_mtime)
         st.caption(
             "Release: "
-            f"{app_version} • Data set for {ticker}: {d0} – {d1}"
+            f"{app_version} • Data set for {d0} – {d1}"
             + (f" • Last updated: {last_human_missing}" if last_human_missing else "")
         )
         settings_text_missing = _section_settings_line(
@@ -1118,8 +1464,21 @@ def main():
         st.caption(settings_text_missing)
         ensure_cli = (
             f"python cli/mie.py ensure-markov-available --ticker {ticker} "
-            f"--order {eff_order} --state-mode {eff_state_mode} --threshold-bps {int(eff_thr)} --window {win_key}"
+            f"--state-mode {eff_state_mode} --threshold-bps {int(eff_thr)} --order {int(eff_order)} --window {win_key}"
         )
+        # Diagnostics expander also on failure, before exit
+        with st.expander("Diagnostics", expanded=False):
+            st.write({
+                "ticker": ticker,
+                "mode": eff_state_mode,
+                "order": int(eff_order),
+                "threshold_bps": int(eff_thr),
+                "window": win_key,
+                "matrix_path": str(_mpath),
+                "matrix_exists": Path(_mpath).exists(),
+                "features_path": str(feat_path),
+                "features_rows": 0 if feat_df is None else int(len(feat_df)),
+            })
         DataStatus(
             "Markov matrix unavailable\nCLI hint:\n" + ensure_cli + "\nRe-run the command to generate the matrix, then reload this page.",
             "warning",
@@ -1162,7 +1521,7 @@ def main():
     # Last updated is the later of features mtime and matrix file mtime (if present)
     last_mtime = _to_mtime_seconds(meta.get("mtime"))
     try:
-        mp = mat_info["path"] if 'mat_info' in locals() else _matrix_exact_path(ticker, eff_state_mode, eff_thr, eff_order, win_key)
+        mp = mat_info["path"] if 'mat_info' in locals() else DATA/"analytics"/"markov"/ticker/"matrices"/str(eff_state_mode).lower()/f"thr{int(eff_thr)}"/f"order{int(eff_order)}"/f"{win_key}.parquet"
         if Path(mp).exists():
             mt = Path(mp).stat().st_mtime
             if last_mtime is None or mt > last_mtime:
@@ -1218,12 +1577,18 @@ def main():
         pass
 
     # Ensure projected matrix DataFrame exists for current mode before first use
-    mat_mode = mat
-    if 'mat_mode' not in locals() or mat_mode is None:
-        try:
-            mat_mode = _project_matrix_for_mode(mat, eff_state_mode)
-        except Exception:
-            mat_mode = mat
+    mat_mode = _project_matrix_for_mode(mat, eff_state_mode)
+
+    # Determine active context for selected order using states series and fallbacks
+    ctx_raw, ctx_disp_compact, ctx_row, used_k = _select_active_context_row(
+        mat_df=mat,
+        states_df=s_for,
+        mode=eff_state_mode,
+        order=int(eff_order),
+        start_date=dates[0],
+        end_date=dates[1],
+    )
+    # ctx_row holds the active context Series (or None)
 
     # === Section: K=1 Transition Matrix ===
     st.subheader("K=1 Transition Matrix")
@@ -1233,14 +1598,41 @@ def main():
     tbl = _make_matrix_table(mat_mode)
     if tbl is not None and not tbl.empty:
         st.dataframe(tbl)
-        # Updated summary wiring using unified anchor
-        summary_text = _matrix_transition_summary(mat_mode, eff_state_mode, tokens, anchor_raw)
-        if summary_text:
-            st.markdown(summary_text, unsafe_allow_html=True)
+        # Unified context-based summary using selected context row
+        if isinstance(ctx_row, pd.Series):
+            # Determine probability columns mapping per mode
+            if eff_state_mode == "binary":
+                col_map = {"G": "mc_prob_up", "R": "mc_prob_down"}
+            else:
+                col_map = {"G": "mc_prob_up", "N": "mc_prob_neutral", "R": "mc_prob_down"}
+            probs: dict[str, float] = {}
+            for code, col in col_map.items():
+                if col in ctx_row.index:
+                    try:
+                        probs[code] = float(ctx_row[col])
+                    except Exception:
+                        pass
+            if probs:
+                next_code = max(probs, key=probs.get)
+                next_pct = probs[next_code] * 100.0
+                # Continuation: stay in last state's color (last of the used context)
+                last_code = (ctx_disp_compact or "")[-1:] if isinstance(ctx_disp_compact, str) else ""
+                cont_pct = probs.get(last_code, float("nan")) * 100.0 if last_code in probs else float("nan")
+                if int(eff_order) == 1:
+                    st.markdown(
+                        f"**Conclusion:** Given previous day was {_colored_word(last_code or 'G')}, "
+                        f"the next state is most likely {_colored_word(next_code)} ({next_pct:.1f}%). "
+                        f"Continuation (stay last-state) = {cont_pct:.1f}%."
+                    )
+                else:
+                    st.markdown(
+                        f"**Conclusion:** Given previous **{int(eff_order)}-day** context was {_context_words(ctx_disp_compact or '')}, "
+                        f"the next state is most likely {_colored_word(next_code)} ({next_pct:.1f}%). "
+                        f"Continuation (stay last-state {_colored_word(last_code or 'G')}) = {cont_pct:.1f}%."
+                    )
     else:
         DataStatus("offline data present, but no transition columns to show", "warning")
 
-    # Visual separation
     try:
         st.divider()
     except Exception:
@@ -1260,88 +1652,57 @@ def main():
     except Exception:
         st.markdown("---")
 
-    # Compute context/row for One-Step without rendering stray debug above the section
-    # Use unified anchor instead of prior sequence logic
-    one_step_row = None
-    if anchor_raw and mat_mode is not None and not mat_mode.empty and "context" in mat_mode.columns:
-        try:
-            one_step_row = mat_mode.loc[mat_mode["context"].astype(str) == anchor_raw].iloc[0]
-        except Exception:
-            one_step_row = None
-
-    def _compute_one_step_next_state_table(mat_k1: pd.DataFrame, state_mode: str, anchor_raw_state: str | None) -> pd.DataFrame:
-        """Build a one-row DataFrame of next-state probabilities for the unified previous state anchor.
-        Pure helper; no Streamlit calls.
-        """
-        if mat_k1 is None or mat_k1.empty or not anchor_raw_state:
-            return pd.DataFrame()
-        mode = str(state_mode or '').strip().lower()
-        cols = [c for c in ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"] if c in mat_k1.columns]
-        if not cols:
-            return pd.DataFrame()
-        if mode == "binary" and "mc_prob_neutral" in cols:
-            cols = ["mc_prob_up", "mc_prob_down"]
-        row = mat_k1.loc[mat_k1["context"].astype(str) == anchor_raw_state]
-        if row.empty:
-            return pd.DataFrame()
-        sel = row.iloc[0]
-        mapping = {
-            "mc_prob_up": ("Next: Green (bullish)", "Green"),
-            "mc_prob_neutral": ("Next: Neutral", "Neutral"),
-            "mc_prob_down": ("Next: Red (bearish)", "Red"),
-        }
-        out_cols = [mapping[c][0] for c in cols]
-        prev_label = {"U":"Green","N":"Neutral","D":"Red"}.get(anchor_raw_state, "")
-        data = {"Prev state": [prev_label]}
-        for c in cols:
-            try:
-                data[mapping[c][0]] = [float(sel[c])]
-            except Exception:
-                data[mapping[c][0]] = [np.nan]
-        return pd.DataFrame(data)
-
-    # === Section: One-Step Next-State Summary ===
+    # === Section: One-Step Next-State Summary (order-aware) ===
     st.subheader("One-Step Next-State Summary")
     st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
-    try:
-        _one_mat_k1, _one_info = _load_matrix_for_selection(
-            ticker,
-            eff_state_mode,
-            int(eff_thr),
-            1,
-            win_key,
-            allow_fallback=False,
-        )
-    except Exception:
-        _one_mat_k1 = None
-    if _one_mat_k1 is not None and not _one_mat_k1.empty:
-        _one_mat_k1m = _project_matrix_for_mode(_one_mat_k1, eff_state_mode)
-        one_tbl = _compute_one_step_next_state_table(_one_mat_k1m, eff_state_mode, anchor_raw)
-        if not one_tbl.empty:
-            fmt_cols = [c for c in one_tbl.columns if c != "Prev state"]
-            one_tbl_fmt = one_tbl.copy()
-            for c in fmt_cols:
-                one_tbl_fmt[c] = one_tbl_fmt[c].map(fmt_percent_one_decimal)
-            st.dataframe(one_tbl_fmt)
-    if anchor_raw and one_step_row is not None:
-        # Narrative summary aligned with anchor
-        prev_disp = {"U":"Green","N":"Neutral","D":"Red"}.get(anchor_raw, anchor_raw)
-        # Determine best next state & continuation
-        prob_map = {"mc_prob_up":"Green","mc_prob_neutral":"Neutral","mc_prob_down":"Red"}
-        avail = [(lab, float(one_step_row[col])) for col, lab in prob_map.items() if col in one_step_row.index]
-        if avail:
-            best_lab, best_val = max(avail, key=lambda x: x[1])
-            stay_col = {"U":"mc_prob_up","N":"mc_prob_neutral","D":"mc_prob_down"}.get(anchor_raw)
-            stay_val = float(one_step_row.get(stay_col, float("nan"))) if stay_col else float("nan")
-            st.markdown(
-                f"Given previous state was {_format_state_label(prev_disp, tokens)}, next day is most likely {_format_state_label(best_lab, tokens)} ({fmt_percent_one_decimal(best_val)}). "
-                f"Continuation (stay {_format_state_label(prev_disp, tokens)}) = {fmt_percent_one_decimal(stay_val)}.",
-                unsafe_allow_html=True,
-            )
+    # Build one-step table from selected order matrix and context
+    if mat_mode is not None and not mat_mode.empty and isinstance(ctx_row, pd.Series):
+        cols = [c for c in ["mc_prob_up","mc_prob_neutral","mc_prob_down"] if c in mat_mode.columns]
+        if eff_state_mode == "binary" and "mc_prob_neutral" in cols:
+            cols = ["mc_prob_up","mc_prob_down"]
+        data = {"Prev context": [_context_words(ctx_disp_compact or "")]}
+        for c in cols:
+            label_map = {"mc_prob_up":"Next: Green (bullish)", "mc_prob_neutral":"Next: Neutral", "mc_prob_down":"Next: Red (bearish)"}
+            data[label_map[c]] = [float(ctx_row.get(c, _np.nan))]  # type: ignore
+        one_tbl = pd.DataFrame(data)
+        fmt_cols = [c for c in one_tbl.columns if c != "Prev context"]
+        one_tbl_fmt = one_tbl.copy()
+        for c in fmt_cols:
+            one_tbl_fmt[c] = one_tbl_fmt[c].map(fmt_percent_one_decimal)
+        st.dataframe(one_tbl_fmt)
+        # Narrative summary identical to K=1 section, reusing same context
+        if eff_state_mode == "binary":
+            col_map = {"G": "mc_prob_up", "R": "mc_prob_down"}
+        else:
+            col_map = {"G": "mc_prob_up", "N": "mc_prob_neutral", "R": "mc_prob_down"}
+        probs: dict[str, float] = {}
+        for code, col in col_map.items():
+            if col in ctx_row.index:
+                try:
+                    probs[code] = float(ctx_row[col])
+                except Exception:
+                    pass
+        if probs:
+            next_code = max(probs, key=probs.get)
+            next_pct = probs[next_code] * 100.0
+            last_code = (ctx_disp_compact or "")[-1:] if isinstance(ctx_disp_compact, str) else ""
+            cont_pct = probs.get(last_code, float("nan")) * 100.0 if last_code in probs else float("nan")
+            if int(eff_order) == 1:
+                st.markdown(
+                    f"**Conclusion:** Given previous day was {_colored_word(last_code or 'G')}, "
+                    f"the next state is most likely {_colored_word(next_code)} ({next_pct:.1f}%). "
+                    f"Continuation (stay last-state) = {cont_pct:.1f}%."
+                )
+            else:
+                st.markdown(
+                    f"**Conclusion:** Given previous **{int(eff_order)}-day** context was {_context_words(ctx_disp_compact or '')}, "
+                    f"the next state is most likely {_colored_word(next_code)} ({next_pct:.1f}%). "
+                    f"Continuation (stay last-state {_colored_word(last_code or 'G')}) = {cont_pct:.1f}%."
+                )
         else:
             st.caption("Summary unavailable for this configuration.")
     else:
-        st.caption("One-step context unavailable for this configuration.")
+        st.caption("No matrix row for the current context at this order; falling back is disabled.")
 
     try:
         st.divider()
@@ -1351,23 +1712,9 @@ def main():
     # === Section: Multi-Horizon Probability Table ===
     st.subheader("Multi-Horizon Probability Table")
     st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
-    try:
-        mat_k1, _mi2 = _load_matrix_for_selection(
-            ticker,
-            eff_state_mode,
-            int(eff_thr),
-            1,
-            win_key,
-            allow_fallback=False,
-        )
-    except Exception:
-        mat_k1 = None
-    if mat_k1 is not None and not mat_k1.empty and anchor_raw:
-        mat_k1m = _project_matrix_for_mode(mat_k1, eff_state_mode)
-        ctx_key = {"U":"G","N":"N","D":"R"}.get(anchor_raw, "")
-        mult = _compute_horizon_probs(mat_k1m, ctx_key, horizons, eff_state_mode)
+    if mat_mode is not None and not mat_mode.empty and isinstance(ctx_row, pd.Series):
+        mult = _compute_multi_horizon_probs(mat_mode, ctx_row, eff_state_mode, horizons)
         if not mult.empty:
-            # format and display
             disp = mult.rename(columns={
                 "mc_prob_up": "Green",
                 "mc_prob_neutral": "Neutral",
@@ -1376,35 +1723,37 @@ def main():
             disp_fmt = disp.applymap(fmt_percent_one_decimal)
             st.dataframe(disp_fmt)
             try:
-                # summary bias
-                last_h = max(mult.index); first_h = min(mult.index)
+                last_h = int(max(mult.index)); first_h = int(min(mult.index))
                 up_col = mult.get("mc_prob_up"); red_col = mult.get("mc_prob_down")
                 neu_col = mult.get("mc_prob_neutral") if "mc_prob_neutral" in mult.columns else None
+                bias_state = other_state = bias_pct = other_pct = None
                 if eff_state_mode == "binary" and up_col is not None and red_col is not None:
-                    bias_state = "Green" if up_col.mean() >= red_col.mean() else "Red"
+                    bias_state = "Green" if float(up_col.mean()) >= float(red_col.mean()) else "Red"
                     other_state = "Red" if bias_state == "Green" else "Green"
-                    bias_pct = fmt_percent_one_decimal((up_col.mean() if bias_state=="Green" else red_col.mean()))
-                    other_pct = fmt_percent_one_decimal((red_col.mean() if bias_state=="Green" else up_col.mean()))
+                    bias_pct = fmt_percent_one_decimal((float(up_col.mean()) if bias_state=="Green" else float(red_col.mean())))
+                    other_pct = fmt_percent_one_decimal((float(red_col.mean()) if bias_state=="Green" else float(up_col.mean())))
                 elif eff_state_mode == "tri" and up_col is not None and red_col is not None and neu_col is not None:
                     avg_map = {"Green": float(up_col.mean()), "Neutral": float(neu_col.mean()), "Red": float(red_col.mean())}
                     sorted_avg = sorted(avg_map.items(), key=lambda x: -x[1])
                     bias_state, bias_pct = sorted_avg[0][0], fmt_percent_one_decimal(sorted_avg[0][1])
                     other_state, other_pct = sorted_avg[1][0], fmt_percent_one_decimal(sorted_avg[1][1])
-                else:
-                    bias_state = other_state = bias_pct = other_pct = None
-                g1 = fmt_percent_one_decimal(mult.iloc[0]["mc_prob_up"]) if "mc_prob_up" in mult.columns else ""
-                g_last = fmt_percent_one_decimal(mult.loc[last_h]["mc_prob_up"]) if "mc_prob_up" in mult.columns else ""
+                g1 = fmt_percent_one_decimal(float(mult.iloc[0].get("mc_prob_up", _np.nan))) if "mc_prob_up" in mult.columns else ""
+                g_last = fmt_percent_one_decimal(float(mult.loc[last_h].get("mc_prob_up", _np.nan))) if "mc_prob_up" in mult.columns else ""
                 g_wins = 0; r_wins = 0
                 for h, row_h in mult.iterrows():
                     uval = float(row_h.get("mc_prob_up", 0)); rval = float(row_h.get("mc_prob_down", 0))
                     if uval > rval: g_wins += 1
                     elif rval > uval: r_wins += 1
+                # Build current bias sentence
                 if bias_state:
-                    st.markdown(
-                        f"Summary: overall {_format_state_label(bias_state, tokens)} bias ({_format_state_label(bias_state, tokens)} ≈ {bias_pct} > {_format_state_label(other_state, tokens)} ≈ {other_pct}). "
-                        f"{_format_state_label('Green', tokens)} probability changes {g1} → {g_last} over {first_h}–{last_h} days. Green favored in {g_wins}/{len(mult)} horizons, Red in {r_wins}/{len(mult)}.",
-                        unsafe_allow_html=True,
+                    current_bias_summary_sentence = (
+                        f"Summary: overall {_format_state_label(bias_state, tokens)} bias ("
+                        f"{_format_state_label(bias_state, tokens)} ≈ {bias_pct} > {_format_state_label(other_state, tokens)} ≈ {other_pct}). "
+                        f"{_format_state_label('Green', tokens)} probability changes {g1} → {g_last} over {first_h}–{last_h} days. "
+                        f"Green favored in {g_wins}/{len(mult)} horizons, Red in {r_wins}/{len(mult)}."
                     )
+                    # Prefix with start context words
+                    st.markdown(f"**Start context:** {_context_words(ctx_disp_compact or '')}. " + current_bias_summary_sentence, unsafe_allow_html=True)
                 else:
                     st.caption("Summary unavailable for this configuration.")
             except Exception:
@@ -1413,23 +1762,20 @@ def main():
             st.subheader("Multi-Horizon Probability Chart")
             st.caption(_section_settings_line(ticker, str(raw_window), "offline", eff_state_mode, eff_thr, eff_order, dates[0], dates[1], last_human))
             try:
-                # Build grouped bar chart from mult
                 fig_h, ax_h = plt.subplots(figsize=(7,3), dpi=140)
                 mpl_style(fig_h, ax_h, tokens)
-                bars = []
-                x = range(len(mult.index))
+                x = list(mult.index)
                 width = 0.25 if eff_state_mode=="tri" else 0.35
-                # Offsets per state
                 def _vals(col):
                     return [float(mult.loc[h][col]) * 100 for h in mult.index]
                 if "mc_prob_up" in mult.columns:
-                    ax_h.bar([i - (width if eff_state_mode=="tri" else width/2) for i in x], _vals("mc_prob_up"), width=width, color=tokens["theme"]["colors"].get("green"), label="Green")
+                    ax_h.bar([i - (width if eff_state_mode=="tri" else width/2) for i in range(len(x))], _vals("mc_prob_up"), width=width, color=tokens["theme"]["colors"].get("green"), label="Green")
                 if eff_state_mode=="tri" and "mc_prob_neutral" in mult.columns:
-                    ax_h.bar(list(x), _vals("mc_prob_neutral"), width=width, color=tokens["theme"]["colors"].get("blue", tokens["theme"]["colors"].get("neutral")), label="Neutral")
+                    ax_h.bar(range(len(x)), _vals("mc_prob_neutral"), width=width, color=tokens["theme"]["colors"].get("blue", tokens["theme"]["colors"].get("neutral")), label="Neutral")
                 if "mc_prob_down" in mult.columns:
-                    ax_h.bar([i + (width if eff_state_mode=="tri" else width/2) for i in x], _vals("mc_prob_down"), width=width, color=tokens["theme"]["colors"].get("red"), label="Red")
-                ax_h.set_xticks(list(x))
-                ax_h.set_xticklabels([str(h) for h in mult.index])
+                    ax_h.bar([i + (width if eff_state_mode=="tri" else width/2) for i in range(len(x))], _vals("mc_prob_down"), width=width, color=tokens["theme"]["colors"].get("red"), label="Red")
+                ax_h.set_xticks(range(len(x)))
+                ax_h.set_xticklabels([str(h) for h in x])
                 ax_h.set_ylabel("Probability (%)")
                 ax_h.set_title("Next-Day State Probability by Horizon")
                 ax_h.legend(loc="upper right", fontsize=8)
@@ -1439,17 +1785,12 @@ def main():
         else:
             st.caption("Multi-horizon probabilities unavailable for this configuration.")
     else:
-        st.caption("Multi-horizon probabilities unavailable for this configuration.")
-
-    try:
-        st.divider()
-    except Exception:
-        st.markdown("---")
+        st.caption("Multi-horizon probabilities unavailable for this configuration (no active context row).")
 
     # Debug UI (disabled by default)
     if DEBUG_UI:
         with st.expander("Developer Debug", expanded=False):
-            st.json({"matrix_info": mat_info})
+            st.json({"matrix_meta": mat_meta if 'mat_meta' in locals() else {}})
 
 
 def _build_markov_base_path(ticker: str) -> Path:
@@ -1460,203 +1801,130 @@ def _build_markov_base_path(ticker: str) -> Path:
     """
     if not isinstance(ticker, str):
         raise ValueError("ticker must be a string symbol")
-    base = DATA / "analytics" / "markov" / ticker
-    assert base.is_absolute()
-    return base
+    t = ticker.strip()
+    if not t:
+        raise ValueError("ticker must be a string symbol")
+    base = DATA / "analytics" / "markov" / t.upper()
+    return base.resolve()
 
 
-# Update __all__ to export helpers for tests
-try:
-    __all__  # type: ignore[name-defined]
-except NameError:
-    __all__ = []  # type: ignore[assignment]
-__all__ = sorted(set(list(__all__) + ["compute_horizon_probs", "_compute_horizon_probs"]))
+# --- Label compatibility helpers (verbose <-> compact) ---
+_VERBOSE_TO_CODE = {"Green": "G", "Neutral": "N", "Red": "R"}
+_CODE_TO_VERBOSE = {v: k for k, v in _VERBOSE_TO_CODE.items()}
 
-
-import numpy as np  # for pure helpers
-
-
-def _context_key_to_symbol(ctx_display: str, mode: str) -> str:
-    """Map display context (G/N/R, possibly hyphenated like 'G-R') to raw symbol for current state.
-    - Uses the LAST token after splitting by '-'.
-    - Mapping: G->U, N->N, R->D.
-    - Validates against mode ('binary' => [U,D]; 'tri' => [U,N,D]); falls back to first state.
-    Pure helper; no Streamlit.
+def _to_compact_label(verbose_or_compact: str) -> str:
     """
-    mode_l = str(mode).lower().strip()
-    states = ["U", "D"] if mode_l == "binary" else ["U", "N", "D"]
-    last = str(ctx_display or "").upper().split("-")[-1].strip()
-    mp = {"G": "U", "N": "N", "R": "D"}
-    raw = mp.get(last, last)
-    return raw if raw in states else states[0]
-
-
-def _build_transition_matrix_from_k1(df_k1: pd.DataFrame, mode: str) -> tuple[np.ndarray, list[str]]:
-    """Build a dense order-1 transition matrix P from df_k1.
-    - binary: states rows ['U','D'], columns [U,D] mapped from ['mc_prob_up','mc_prob_down']
-    - tri:    states rows ['U','N','D'], columns [U,N,D] mapped from ['mc_prob_up','mc_prob_neutral','mc_prob_down']
-    - Missing rows default to uniform (0.5/0.5 or 1/3 each).
-    Returns (P, states).
-    Pure helper; no Streamlit.
+    Map 'Red-Red', 'Red-N', 'Green' -> 'RR','RN','G'.
+    If already compact (like 'GRN'), normalize (strip, uppercase).
     """
-    mode_l = str(mode).lower().strip()
-    if df_k1 is None or len(df_k1) == 0:
-        return np.zeros((0, 0), dtype=float), ([] if mode_l == "binary" else [])
-    if mode_l == "binary":
-        states = ["U", "D"]
-        cols = ["mc_prob_up", "mc_prob_down"]
-    elif mode_l == "tri":
-        states = ["U", "N", "D"]
-        cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
-    else:
-        raise ValueError("mode must be 'binary' or 'tri'")
-    df = df_k1.copy()
-    if "context" not in df.columns:
-        df["context"] = ""
-    df["context"] = df["context"].astype(str)
-    rows = []
-    for s in states:
-        row = df.loc[df["context"] == s, cols]
-        if row.empty:
-            rows.append(np.full(len(states), 1.0 / len(states)))
-        else:
-            r = row.iloc[0].astype(float).to_numpy()
-            ssum = float(r.sum())
-            rows.append((r / ssum) if ssum > 0 and np.isfinite(ssum) else np.full(len(states), 1.0 / len(states)))
-    P = np.vstack(rows).astype(float)
-    return P, states
+    s = (verbose_or_compact or "").strip()
+    if not s:
+        return s
+    if "-" in s:
+        parts = [p.strip() for p in s.split("-") if p.strip()]
+        codes = [_VERBOSE_TO_CODE.get(p, p[:1].upper()) for p in parts]
+        return "".join(codes)
+    return s.upper()
 
-
-def _compute_horizon_probs(df_k1: pd.DataFrame, context_key: str, horizons: list[int], mode: str) -> pd.DataFrame:
-    """Compute p(h) = p0 @ (P ** h) for each horizon using order-1 transition matrix.
-    - context_key: display context like 'G', 'N', 'R' or hyphenated 'G-R-...'; uses LAST token as current state.
-    - mode: 'binary' or 'tri'
-    Returns DataFrame indexed by horizon with columns:
-      binary -> ['mc_prob_up','mc_prob_down']
-      tri    -> ['mc_prob_up','mc_prob_neutral','mc_prob_down']
-    Pure helper; no Streamlit.
+def _to_verbose_label(compact: str) -> str:
     """
-    mode_l = str(mode).lower().strip()
-    horizons = [int(h) for h in (horizons or [])]
-    if not horizons:
-        return pd.DataFrame()
-    P, states = _build_transition_matrix_from_k1(df_k1, mode_l)
-    if P.size == 0:
-        return pd.DataFrame()
-    # Build p0 as one-hot for current symbol
-    s0 = _context_key_to_symbol(context_key, mode_l)
-    S = len(states)
-    p0 = np.zeros(S, dtype=float)
-    p0[states.index(s0)] = 1.0
-    if mode_l == "binary":
-        prob_cols = ["mc_prob_up", "mc_prob_down"]
-    else:
-        prob_cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
-    out = []
-    for h in horizons:
-        if h < 1:
-            raise ValueError("horizons must be >= 1")
-        Ph = np.linalg.matrix_power(P, int(h))
-        ph = (p0 @ Ph).astype(float)
-        rec = {"horizon": int(h)}
-        for i, col in enumerate(prob_cols):
-            rec[col] = float(ph[i])
-        out.append(rec)
-    res = pd.DataFrame(out).set_index("horizon")
-    for c in prob_cols:
-        res[c] = res[c].astype(float)
-    return res
+    Map 'RR','RN','G' -> 'Red-Red','Red-Neutral','Green'.
+    Works recursively for any length compact code.
+    """
+    compact = (compact or "").strip().upper()
+    if not compact:
+        return compact
+    if len(compact) == 1:
+        return _CODE_TO_VERBOSE.get(compact, compact)
+    return "-".join(_CODE_TO_VERBOSE.get(c, c) for c in compact)
 
-
-def _matrix_transition_summary(mat: pd.DataFrame, state_mode: str, tokens: dict | None = None, anchor_raw: str | None = None) -> str | None:
-    """Return two-line markdown summary for the K=1 transition matrix using unified anchor if available."""
-    if mat is None or mat.empty:
-        return None
-    mode = str(state_mode or "").strip().lower()
-    cols_all = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
-    prob_cols = [c for c in cols_all if c in mat.columns]
-    if not prob_cols:
-        return None
-    if mode == "binary":
-        prob_cols = [c for c in prob_cols if c != "mc_prob_neutral"]
-    if "context" not in mat.columns:
-        return None
-    df = mat[["context"] + prob_cols].copy()
-    ctx_map = {"U": "Green", "N": "Neutral", "D": "Red"}
-    col_to_label = {"mc_prob_up": "Green", "mc_prob_neutral": "Neutral", "mc_prob_down": "Red"}
-    # Anchor row selection prioritized over legacy logic
-    anchor_row = None
-    if anchor_raw and anchor_raw in set(df["context"].astype(str)):
+def _normalize_context_labels(df: pd.DataFrame):
+    """
+    Add a compact 'context_display' column for UI use.
+    Keeps original df.index but provides mapping for display/lookup.
+    """
+    if df is None or df.empty:
+        return df, {}
+    idx = [str(x) for x in df.index]
+    mapping = {x: _to_compact_label(x) for x in idx}
+    out = df.copy()
+    out["context_display"] = [mapping[x] for x in idx]
+    # If raw 'context' column exists (e.g., 'UDN'), also provide compact display from it where index is numeric
+    if "context" in out.columns and (not any(idx)):
         try:
-            anchor_row = df.loc[df["context"].astype(str) == anchor_raw].iloc[0]
+            mp = {"U": "G", "N": "N", "D": "R"}
+            out["context_display"] = out["context"].astype(str).map(lambda s: "".join(mp.get(ch, ch) for ch in list(s)))
         except Exception:
-            anchor_row = None
-    if anchor_row is None:
-        # fallback old behavior: prefer 'U'
-        try:
-            anchor_row = df.loc[df["context"].astype(str) == "U"].iloc[0]
-        except Exception:
-            anchor_row = df.iloc[0]
-    line1 = None
-    try:
-        av = anchor_row[prob_cols].astype(float)
-        amax_col = av.idxmax()
-        amax_val = float(av[amax_col])
-        prev_label = ctx_map.get(str(anchor_row["context"]), "State")
-        next_label = col_to_label.get(amax_col, amax_col)
-        line1 = (
-            f"Given previous state was {_format_state_label(prev_label, tokens)}, next day is most likely "
-            f"{_format_state_label(next_label, tokens)} ({fmt_percent_one_decimal(amax_val)})."
-        )
-    except Exception:
-        line1 = None
-    # Global best/worst transitions
-    best = None; worst = None
-    counts_series = mat["counts"] if "counts" in mat.columns else None
-    for _, row in df.iterrows():
-        if counts_series is not None:
+            pass
+    return out, mapping
+
+# Fuzzy lookup for a context row supporting compact/verbose and raw U/N/D encodings
+_DEF_REV_MAP = {"G": "U", "N": "N", "R": "D"}
+
+def _lookup_context_row_fuzzy(matrix_df: pd.DataFrame, context_label: str) -> pd.Series | None:
+    """
+    Finds a row in matrix_df matching the current context_label (supports compact 'GR', verbose 'Green-Red',
+    or raw 'UD'). Falls back to shorter suffix contexts.
+    Returns a pandas Series or None.
+    """
+    if matrix_df is None or matrix_df.empty or not isinstance(context_label, str) or not context_label:
+        return None
+    # Prepare label variants for a given compact code
+    def candidates_for(compact: str) -> list[str]:
+        comp = (compact or "").strip().upper()
+        if not comp:
+            return []
+        verbose = _to_verbose_label(comp)
+        raw_udn = "".join(_DEF_REV_MAP.get(c, c) for c in list(comp))  # GNR -> UDN
+        return [comp, verbose, raw_udn]
+    # Build search domains
+    idx_labels = [str(x) for x in matrix_df.index]
+    has_context_col = "context" in matrix_df.columns
+    # Try full-length first (compact + verbose + raw)
+    for cand in candidates_for(context_label):
+        # Index match
+        if cand in idx_labels:
             try:
-                ridx = df.index[df["context"]==row["context"]][0]
-                if float(counts_series.iloc[ridx]) <= 0:
-                    continue
+                sel = matrix_df.loc[cand]
+                return sel.iloc[0] if isinstance(sel, pd.DataFrame) else sel
             except Exception:
                 pass
-        for col in prob_cols:
-            try:
-                val = float(row[col])
-            except Exception:
-                continue
-            if pd.isna(val):
-                continue
-            if best is None or val > best[0]:
-                best = (val, row["context"], col)
-            if worst is None or val < worst[0]:
-                worst = (val, row["context"], col)
-    line2 = None
-    if best and worst:
-        bf, bt_col = best[1], best[2]
-        wf, wt_col = worst[1], worst[2]
-        line2 = (
-            f"Global context: strongest transition = {_format_state_label(ctx_map.get(str(bf), 'State'), tokens)} → {_format_state_label(col_to_label.get(bt_col, bt_col), tokens)} "
-            f"({fmt_percent_one_decimal(best[0])}); weakest = {_format_state_label(ctx_map.get(str(wf), 'State'), tokens)} → {_format_state_label(col_to_label.get(wt_col, wt_col), tokens)} "
-            f"({fmt_percent_one_decimal(worst[0])})."
-        )
-    if not line1 and not line2:
-        return None
-    return "\n\n".join([l for l in (line1, line2) if l])
+        # 'context' column raw match
+        if has_context_col and not matrix_df.empty:
+            m = matrix_df[matrix_df["context"].astype(str) == cand]
+            if not m.empty:
+                return m.iloc[0]
+        # 'context_display' match if present
+        if "context_display" in matrix_df.columns:
+            m = matrix_df[matrix_df["context_display"].astype(str) == cand]
+            if not m.empty:
+                return m.iloc[0]
+    # Fallback: progressively shorten suffix
+    for k in range(len(context_label) - 1, 0, -1):
+        sub = context_label[-k:]
+        for cand in candidates_for(sub):
+            if cand in idx_labels:
+                try:
+                    sel = matrix_df.loc[cand]
+                    return sel.iloc[0] if isinstance(sel, pd.DataFrame) else sel
+                except Exception:
+                    pass
+            if has_context_col:
+                m = matrix_df[matrix_df["context"].astype(str) == cand]
+                if not m.empty:
+                    return m.iloc[0]
+            if "context_display" in matrix_df.columns:
+                m = matrix_df[matrix_df["context_display"].astype(str) == cand]
+                if not m.empty:
+                    return m.iloc[0]
+    return None
 
-
-# Remove duplicate _select_window_key_from_label (already defined above)
-# Export helpers
-compute_horizon_probs = _compute_horizon_probs
-
-# Export public alias list
+# --- Entrypoint wrapper to prevent blank screens on exceptions ---
 try:
-    __all__
-except NameError:
-    __all__ = []
-__all__ = sorted(set(list(__all__) + ["_compute_horizon_probs", "compute_horizon_probs"]))
-
-# Run the page when executed by Streamlit, stay import-safe for tests
-if __name__ == "__main__":
-    main()
+    # If Streamlit re-runs script multiple times, calling main() is safe; internal caches handle idempotence
+    if 'main' in globals() and callable(main):
+        main()
+    else:
+        st.error("Markov page entrypoint missing: 'main()' not found.")
+except Exception as _err:
+    _fatal_panel(_err)

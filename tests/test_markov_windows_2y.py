@@ -24,12 +24,7 @@ def _write_states(tmp_path: Path, ticker: str = "SPY", thr: int = 10, mode: str 
 
 
 def test_window_key_accepts_2y_and_path_format(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-
-    # point data dir to tmp by monkeypatching module-level DATA_DIR
-    sm = importlib.import_module("src.analytics.markov.states_model")
-    monkeypatch.setattr(sm, "DATA_DIR", tmp_path / "data", raising=True)
+    sm = importlib.import_module("mie_lib.analytics.markov.states_model")
     monkeypatch.setattr(sm, "AN_MKV_DIR", tmp_path / "data/analytics/markov", raising=True)
 
     ticker = "SPY"
@@ -46,12 +41,15 @@ def test_window_key_accepts_2y_and_path_format(tmp_path, monkeypatch):
     assert p_cache.exists()
 
 
-def test_cli_help_shows_2y(monkeypatch):
+def test_cli_help_shows_2y():
     # import CLI and check help text contains 2Y in derive-markov-matrix
     import subprocess, sys
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
+    out = subprocess.check_output([sys.executable, "-m", "mie_lib.cli.main", "derive-markov-matrix", "--help"])
+    assert b"1Y|2Y|5Y|10Y|20Y|MAX" in out
+    root = Path(__file__).resolve().parents[1]
     # Run help via python -m to use the workspace CLI module
-    out = subprocess.check_output([sys.executable, "cli/mie.py", "derive-markov-matrix", "--help"]).decode()
-    assert "1Y|2Y|5Y|10Y|20Y|MAX" in out
-
+    # Legacy runner via a script path is not present in this repo; skip that variant.
+    # out = subprocess.check_output([sys.executable, "cli/mie.py", "derive-markov-matrix", "--help"]).decode()
+    # assert "1Y|2Y|5Y|10Y|20Y|MAX" in out

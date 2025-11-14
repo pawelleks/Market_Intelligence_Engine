@@ -1,4 +1,4 @@
-from app.ui.components import apply_friendly_labels, fmt_percent_two_decimals
+from mie_lib.ui.components import apply_friendly_labels, fmt_percent_two_decimals
 
 
 def test_apply_friendly_labels_returns_new_df():

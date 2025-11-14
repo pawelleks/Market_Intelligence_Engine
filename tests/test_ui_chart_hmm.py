@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from importlib import import_module
 
-from app.ui.theme import get_tokens
+from mie_lib.ui.theme import get_tokens
 
 DATA_DIR = Path("data")
 
@@ -38,7 +38,7 @@ def _write_minimal_hmm(ticker: str = "SPY"):
 def test_hmm_helpers_and_chart_smoke():
     _write_minimal_hmm("SPY")
 
-    mod = import_module("app.pages.01_Market_Regime_Dashboard")
+    mod = import_module("mie_lib.pages.regime_dashboard")
     load_price_and_hmm = getattr(mod, "load_price_and_hmm")
     draw_hmm_regimes_chart = getattr(mod, "draw_hmm_regimes_chart")
 

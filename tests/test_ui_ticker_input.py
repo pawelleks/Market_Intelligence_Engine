@@ -6,9 +6,7 @@ import numpy as np
 import pytest
 
 def test_get_ticker_from_state_variants(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    mod = importlib.import_module("mie_lib.pages.m_chain")
 
     class ST:
         def __init__(self):

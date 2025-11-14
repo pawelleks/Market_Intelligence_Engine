@@ -6,7 +6,7 @@ import pandas as pd
 def test_build_markov_batch_creates_files(tmp_path, monkeypatch):
     # Arrange features for a temp ticker
     root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
+    # monkeypatch.syspath_prepend(str(root))
     tkr = "TSTX"
     fdir = tmp_path / "data/features"
     fdir.mkdir(parents=True, exist_ok=True)
@@ -28,7 +28,7 @@ def test_build_markov_batch_creates_files(tmp_path, monkeypatch):
     # Run CLI with local working dir set to tmp
     env = os.environ.copy()
     cwd = str(tmp_path)
-    cmd = [sys.executable, str(root / "cli/mie.py"), "build-markov-batch", "--tickers", tkr, "--orders", "1,2", "--state-modes", "tri", "--threshold-bps", "10"]
+    cmd = [sys.executable, "-m", "mie_lib.cli.main", "build-markov-batch", "--tickers", tkr, "--orders", "1,2", "--state-modes", "tri", "--threshold-bps", "10"]
     res = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert res.returncode == 0, res.stderr
 

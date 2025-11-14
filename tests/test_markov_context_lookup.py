@@ -5,9 +5,7 @@ import pandas as pd
 import pytest
 
 def test_as_context_key_and_find_row(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    mod = importlib.import_module("mie_lib.pages.m_chain")
 
     # Build dummy matrix with a context column to mirror page expectations
     mat = pd.DataFrame({

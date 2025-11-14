@@ -1,6 +1,6 @@
 from datetime import date
 
-from src.data_ingest.yfinance_loader import _detect_missing_weekdays
+from mie_lib.data_ingest.yfinance_loader import _detect_missing_weekdays
 
 def test_detect_missing_weekdays_no_gap():
     last = date(2025, 11, 4)

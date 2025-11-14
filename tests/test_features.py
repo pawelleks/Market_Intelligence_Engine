@@ -1,8 +1,10 @@
 import pandas as pd
 from pathlib import Path
 import numpy as np
+import pytest
 
-from src.features.build_features import build_features_for_ticker, FEATURES_DIR, RAW_DIR
+from mie_lib.utils.paths import RAW_DIR, FEATURES_DIR
+from mie_lib.features.build_features import build_features_for_ticker
 
 
 def make_synthetic_raw(ticker: str, days: int = 400):
@@ -73,6 +75,13 @@ def test_build_features_full(tmp_path, features_tmp_dirs):
     p_feat.unlink(missing_ok=True)
 
 
+@pytest.fixture
+def features_tmp_dirs(tmp_path):
+    (tmp_path / "data" / "features").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "raw").mkdir(parents=True, exist_ok=True)
+    return tmp_path
+
+
 def test_update_features_incremental(features_tmp_dirs):
     ticker = "TEST2"
     # create initial synthetic raw with 300 business days
@@ -131,7 +140,7 @@ def test_update_features_incremental(features_tmp_dirs):
 def test_schema_enforcement_missing_or_wrong_dtype(tmp_path, features_tmp_dirs):
     # Create a bogus features file missing rv_20d to ensure validator fails
     ticker = "BAD1"
-    from src.features.build_features import _write_features, _validate_feature_df
+    from mie_lib.features.build_features import _write_features, _validate_feature_df
     dates = pd.bdate_range("2021-01-01", periods=30)
     df = pd.DataFrame({
         'date': dates,

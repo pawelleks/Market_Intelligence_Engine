@@ -3,9 +3,7 @@ import importlib
 import pytest
 
 def test_safe_width_monotonic(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    mod = importlib.import_module("mie_lib.pages.m_chain")
 
     assert mod._safe_width(None) == "stretch"
     assert mod._safe_width(0) == "stretch"

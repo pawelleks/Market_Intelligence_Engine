@@ -1,0 +1,19 @@
+# Seasonality configuration (UL System & Architect Bible compliant)
+# This file must remain pure YAML. Do not embed Python code.
+# LOOKBACK_WINDOWS: integer years plus the special "ALL" aggregate.
+LOOKBACK_WINDOWS:
+  - 5
+  - 10
+  - 20
+  - 30
+  - 50
+  - "ALL"
+
+# Minimum number of valid years required for certain seasonality calculations
+MIN_VALID_YEARS: 5
+
+# Default return type basis for seasonality views ("log" or "simple")
+RETURN_TYPE: "log"
+
+# Optional cache TTL for seasonality loaders (minutes)
+CACHE_TTL_MINUTES: 60

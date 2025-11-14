@@ -39,9 +39,8 @@ def test_binary_threshold_changes_matrix_values(monkeypatch, tmp_path):
     _write_features(tmp_data, ticker, rows=300)
 
     # Monkeypatch analytics modules to point to tmp data
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    states_model = importlib.import_module("src.analytics.markov.states_model")
-    markov_engine = importlib.import_module("src.analytics.markov.markov_engine")
+    states_model = importlib.import_module("mie_lib.analytics.markov.states_model")
+    markov_engine = importlib.import_module("mie_lib.analytics.markov.markov_engine")
     # Patch global paths
     states_model.DATA_DIR = tmp_data
     states_model.AN_MKV_DIR = tmp_data / "analytics" / "markov"
@@ -50,7 +49,7 @@ def test_binary_threshold_changes_matrix_values(monkeypatch, tmp_path):
     markov_engine.ANALYTICS_DIR = tmp_data / "analytics" / "markov"
 
     # Build states for two thresholds
-    from src.analytics.markov.states_model import build_states_from_features, derive_matrix
+    from mie_lib.analytics.markov.states_model import build_states_from_features, derive_matrix
     build_states_from_features(ticker, 5, "binary")
     build_states_from_features(ticker, 20, "binary")
 
@@ -78,17 +77,16 @@ def test_cli_build_markov_writes_thresholded_paths(monkeypatch, tmp_path):
     _write_features(tmp_data, ticker, rows=250, seed=42)
 
     # Patch environment so cli uses tmp data dirs
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    import src.analytics.markov.markov_engine as me
+    import mie_lib.cli.mie as me
     me.DATA_DIR = tmp_data
     me.FEATURES_DIR = tmp_data / "features"
     me.ANALYTICS_DIR = tmp_data / "analytics" / "markov"
-    import src.analytics.markov.states_model as sm
+    import mie_lib.analytics.markov.states_model as sm
     sm.DATA_DIR = tmp_data
     sm.AN_MKV_DIR = tmp_data / "analytics" / "markov"
 
     # Build via CLI: states then matrix (implicitly via grid)
-    from cli.mie import main as mie_main
+    from mie_lib.cli.mie import main as mie_main
     # build-markov-states
     try:
         mie_main(["build-markov-states", "--ticker", ticker, "--state-modes", "binary", "--thresholds", "10"])

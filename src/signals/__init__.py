@@ -1,8 +1,2 @@
-"""
-src.signals
-
-Package for signal scoring and outputs (placeholder).
-"""
-
-__all__ = []
+# Scaffold namespace for signals (tests check for existence).
 

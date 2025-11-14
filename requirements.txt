@@ -2,6 +2,9 @@
 pytest>=7.0
 pyyaml>=6.0
 
+# Core numerical stack
+numpy>=1.23
+
 # Runtime dependencies for ingestion
 pandas>=1.5
 pyarrow>=9.0
@@ -15,3 +18,4 @@ scikit-learn>=1.2
 # UI
 streamlit>=1.35
 matplotlib>=3.7
+plotly>=5.17

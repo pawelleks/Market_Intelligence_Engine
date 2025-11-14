@@ -21,12 +21,10 @@ def _write_markov_fixture(root: Path, mode: str = "tri") -> Path:
 
 
 def test_loader_and_modes(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
 
     base = _write_markov_fixture(tmp_path, mode="tri")
 
-    mod = import_module("app.pages.01_Markov_Chain")
+    from mie_lib.pages import m_chain as mod
     # Load effective
     eff = mod._derive_effective_params({"order": 1, "state_mode": "tri", "threshold_bps": 10}, {"order": 1, "state_mode": "tri", "threshold_bps": 10}, {1})
     assert eff == (1, "tri", 10)
@@ -43,4 +41,3 @@ def test_loader_and_modes(tmp_path, monkeypatch):
     # Headline function should not crash
     sub = mod._headline_subline("SPY", ("2020-01-01", "2020-12-31"), "tri", 10, 1)
     assert isinstance(sub, str) and len(sub) > 0
-

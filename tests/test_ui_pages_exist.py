@@ -1,26 +1,22 @@
-import sys
 from pathlib import Path
 from importlib import import_module
 
 PAGES = [
-    "app.pages.01_Markov_Chain",
-    "app.pages.03_Markov_MultiStep",
-    "app.pages.04_HMM_Price_Current",
-    "app.pages.05_HMM_Probabilities_vs_Price",
-    "app.pages.06_HMM_Price_FullHistory",
-    "app.pages.07_HMM_Transition_Matrix",
-    "app.pages.08_Markov_Predictive_Bands",
-    "app.pages.09_Downtrend_Confirmation_Score",
-    "app.pages.10_Key_Probability_Gauges",
+    "mie_lib.pages.m_chain",
+    "mie_lib.pages.m_multistep",
+    # Unified HMM page only
+    "mie_lib.pages.hmm",
+    "mie_lib.pages.m_predictive_bands",
+    "mie_lib.pages.downtrend_score",
+    "mie_lib.pages.prob_gauges",
 ]
 
 
-def test_pages_exist_and_import(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    # Assert files exist
+def test_pages_exist_and_import():
+
+    # Assert files exist under src/
     for mod in PAGES:
-        path = root / Path(mod.replace(".", "/") + ".py")
+        path = Path("src") / (mod.replace(".", "/") + ".py")
         assert path.exists(), f"Missing page file: {path}"
     # Import without running Streamlit
     for mod in PAGES:

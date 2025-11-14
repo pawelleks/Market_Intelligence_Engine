@@ -29,7 +29,7 @@ def _write_minimal_hmm(ticker: str = "SPY"):
 
 def test_hmm_section_handles_present_and_missing(tmp_path, monkeypatch):
     # Ensure import of dashboard page
-    mod = import_module("app.pages.01_Market_Regime_Dashboard")
+    mod = import_module("mie_lib.pages.regime_dashboard")
 
     # Write minimal HMM and features so the loader path doesn't error
     _write_minimal_hmm("SPY")

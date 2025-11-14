@@ -1,4 +1,15 @@
+> **⚠️ DEPRECATED as of 2025-11-14**
+> This file is superseded by:
+> - **[docs/UI_SYSTEM/](../../UI_SYSTEM/)** for current design guidelines
+> 
+> See [legacy/README.md](../README.md) for migration guide. This file will be deleted after **2026-05-14**.
+>
+> ---
+
 # DESIGN BRIEF — Market Intelligence Engine (UI)
+
+## Vision
+A modern, dark-only research dashboard that blends Bloomberg-like density with Koyfin's clarity. It must be fast, readable, explanatory, and shareable.SIGN BRIEF — Market Intelligence Engine (UI)
 
 ## Vision
 A modern, dark-only research dashboard that blends Bloomberg-like density with Koyfin’s clarity. It must be fast, readable, explanatory, and shareable.

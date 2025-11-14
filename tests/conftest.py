@@ -3,6 +3,7 @@ import importlib
 import os
 from pathlib import Path
 import pytest
+print("conftest.py loaded")
 
 
 @pytest.fixture(autouse=True)
@@ -13,6 +14,7 @@ def _patch_data_roots(tmp_path, monkeypatch, request):
     We monkeypatch module-level constants so callers that import them
     (e.g., FEATURES_DIR) point into tmp.
     """
+    print("_patch_data_roots started")
     base = tmp_path / "data"
     features = base / "features"
     raw = base / "raw"
@@ -28,58 +30,79 @@ def _patch_data_roots(tmp_path, monkeypatch, request):
     # Patch modules that hold path constants
     # Features
     try:
-        import src.features.build_features as bf
+        print("Patching mie_lib.features.build_features")
+        import mie_lib.features.build_features as bf
+        print("mie_lib.features.build_features imported")
 
         bf.FEATURES_DIR = features
         # RAW_DIR may exist in build_features; patch if present
         if hasattr(bf, "RAW_DIR"):
             bf.RAW_DIR = raw
-    except Exception:
+        print("Patched mie_lib.features.build_features")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.features.build_features: {e}")
         pass
 
     # Markov engine (builders that load features)
     try:
-        import src.analytics.markov.markov_engine as me
+        print("Patching mie_lib.analytics.markov.markov_engine")
+        import mie_lib.analytics.markov.markov_engine as me
+        print("mie_lib.analytics.markov.markov_engine imported")
 
         me.FEATURES_DIR = features
-    except Exception:
+        print("Patched mie_lib.analytics.markov.markov_engine")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.markov.markov_engine: {e}")
         pass
 
     # HMM engine (loads features)
     try:
-        import src.analytics.hmm.hmm_engine as he
+        print("Patching mie_lib.analytics.hmm.hmm_engine")
+        import mie_lib.analytics.hmm.hmm_engine as he
+        print("mie_lib.analytics.hmm.hmm_engine imported")
 
         he.FEATURES_DIR = features
-    except Exception:
+        print("Patched mie_lib.analytics.hmm.hmm_engine")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.hmm.hmm_engine: {e}")
         pass
 
     # States model (where matrices & states are cached under analytics/markov)
     try:
-        import src.analytics.markov.states_model as sm
+        print("Patching mie_lib.analytics.markov.states_model")
+        import mie_lib.analytics.markov.states_model as sm
+        print("mie_lib.analytics.markov.states_model imported")
 
         sm.AN_MKV_DIR = markov_analytics
         # If states_model uses FEATURES_DIR internally, patch as well if present
         if hasattr(sm, "FEATURES_DIR"):
             sm.FEATURES_DIR = features
-    except Exception:
+        print("Patched mie_lib.analytics.markov.states_model")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.markov.states_model: {e}")
         pass
 
     # Optionally patch any page helpers that directly read FEATURES_DIR if they import it
     try:
-        page = importlib.import_module("app.pages.01_Markov_Chain")
-        if hasattr(page, "FEATURES_DIR"):
-            page.FEATURES_DIR = features
-    except Exception:
+        # Pages are not part of the library, so we don't patch them here.
+        # Tests for pages should handle mocking paths if needed.
+        pass
+    except (ImportError, AttributeError):
         pass
 
     # Patch test modules that import FEATURES_DIR at module scope
+    print("Patching test modules")
     for test_mod in ("tests.test_features", "tests.test_markov", "tests.test_timezone"):
         try:
+            print(f"Patching {test_mod}")
             tm = importlib.import_module(test_mod)
             if hasattr(tm, "FEATURES_DIR"):
                 setattr(tm, "FEATURES_DIR", features)
-        except Exception:
+            print(f"Patched {test_mod}")
+        except (ImportError, AttributeError) as e:
+            print(f"Failed to patch {test_mod}: {e}")
             pass
+    print("Finished patching test modules")
 
     # --- Only chdir for tests that explicitly assert CWD-based data paths ---
     try:
@@ -97,6 +120,7 @@ def _patch_data_roots(tmp_path, monkeypatch, request):
     except Exception:
         pass
 
+    print("_patch_data_roots finished")
     yield
 
 
@@ -117,34 +141,63 @@ def features_tmp_dirs(tmp_path, monkeypatch):
         d.mkdir(parents=True, exist_ok=True)
 
     # Patch the same constants
-    import src.features.build_features as bf
+    try:
+        print("Patching mie_lib.features.build_features in features_tmp_dirs")
+        import mie_lib.features.build_features as bf
 
-    bf.FEATURES_DIR = features
-    if hasattr(bf, "RAW_DIR"):
-        bf.RAW_DIR = raw
+        bf.FEATURES_DIR = features
+        if hasattr(bf, "RAW_DIR"):
+            bf.RAW_DIR = raw
+        print("Patched mie_lib.features.build_features in features_tmp_dirs")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.features.build_features in features_tmp_dirs: {e}")
+        pass
 
-    import src.analytics.markov.markov_engine as me
+    try:
+        print("Patching mie_lib.analytics.markov.markov_engine in features_tmp_dirs")
+        import mie_lib.analytics.markov.markov_engine as me
 
-    me.FEATURES_DIR = features
+        me.FEATURES_DIR = features
+        print("Patched mie_lib.analytics.markov.markov_engine in features_tmp_dirs")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.markov.markov_engine in features_tmp_dirs: {e}")
+        pass
 
-    import src.analytics.hmm.hmm_engine as he
+    try:
+        print("Patching mie_lib.analytics.hmm.hmm_engine in features_tmp_dirs")
+        import mie_lib.analytics.hmm.hmm_engine as he
 
-    he.FEATURES_DIR = features
+        he.FEATURES_DIR = features
+        print("Patched mie_lib.analytics.hmm.hmm_engine in features_tmp_dirs")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.hmm.hmm_engine in features_tmp_dirs: {e}")
+        pass
 
-    import src.analytics.markov.states_model as sm
+    try:
+        print("Patching mie_lib.analytics.markov.states_model in features_tmp_dirs")
+        import mie_lib.analytics.markov.states_model as sm
 
-    sm.AN_MKV_DIR = markov_analytics
-    if hasattr(sm, "FEATURES_DIR"):
-        sm.FEATURES_DIR = features
+        sm.AN_MKV_DIR = markov_analytics
+        if hasattr(sm, "FEATURES_DIR"):
+            sm.FEATURES_DIR = features
+        print("Patched mie_lib.analytics.markov.states_model in features_tmp_dirs")
+    except (ImportError, AttributeError) as e:
+        print(f"Failed to patch mie_lib.analytics.markov.states_model in features_tmp_dirs: {e}")
+        pass
 
     # Patch test modules that import FEATURES_DIR at module scope
+    print("Patching test modules in features_tmp_dirs")
     for test_mod in ("tests.test_features", "tests.test_markov", "tests.test_timezone"):
         try:
+            print(f"Patching {test_mod} in features_tmp_dirs")
             tm = importlib.import_module(test_mod)
             if hasattr(tm, "FEATURES_DIR"):
                 setattr(tm, "FEATURES_DIR", features)
-        except Exception:
+            print(f"Patched {test_mod} in features_tmp_dirs")
+        except Exception as e:
+            print(f"Failed to patch {test_mod} in features_tmp_dirs: {e}")
             pass
+    print("Finished patching test modules in features_tmp_dirs")
 
     return {
         "data": base,

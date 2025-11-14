@@ -1,8 +1,2 @@
-"""
-src.data_clean
-
-Package for data cleaning modules (placeholders).
-"""
-
-__all__ = []
+# Scaffold namespace for data cleaning utilities (tests check for existence).
 

@@ -186,6 +186,14 @@ def main() -> None:
         "2,3",
     ], desc="Build HMM grid (5y, states=2,3)")
 
+    # Step 5 (optional but recommended): Build Seasonality base for all tickers
+    try:
+        run([sys.executable, "cli/mie.py", "build-seasonality-base", "--from-config"], desc="Build Seasonality base for all tickers")
+    except SystemExit:
+        raise
+    except Exception as e:  # pragma: no cover
+        logging.warning("Seasonality base build step failed or skipped: %s", e)
+
     logging.info("Full rebuild from scratch completed successfully.")
 
 

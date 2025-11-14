@@ -16,9 +16,14 @@ This spec defines the **Markov Chain (discretized returns)** page:
 - Text and summary patterns
 
 It extends:
-- `ARCHITECT_BIBLE.md`
-- `UI_README_v2.md`
-- `CHART_SPECS_v2.md`
+- [`../CORE/ARCHITECT_BIBLE.md`](../CORE/ARCHITECT_BIBLE.md)
+- [`UI_README_v2.md`](UI_README_v2.md)
+- [`CHART_SPECS_v2.md`](CHART_SPECS_v2.md)
+
+**Related Documentation**:
+- [`PAGE_SPEC_HMM_v2.md`](PAGE_SPEC_HMM_v2.md) — Related HMM page spec
+- [`../CORE/ANALYTICS_REFERENCE.md`](../CORE/ANALYTICS_REFERENCE.md) — Markov analytics reference
+- [`../CORE/DATA_REFERENCE.md`](../CORE/DATA_REFERENCE.md) — Data schemas and storage patterns
 
 ---
 

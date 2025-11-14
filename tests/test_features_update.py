@@ -4,12 +4,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.features.build_features import (
+from mie_lib.features.build_features import (
     build_features_for_ticker,
-    FEATURES_DIR,
-    RAW_DIR,
     _get_windows,
 )
+from mie_lib.utils.paths import RAW_DIR, FEATURES_DIR
 
 
 def _make_synthetic_raw(ticker: str, days: int = 400) -> Path:

@@ -1,8 +1,2 @@
-"""
-src.analytics.hmm
-
-HMM analytics package placeholder.
-"""
-
-__all__ = []
+# Scaffold namespace for legacy analytics import paths (tests check for existence).
 

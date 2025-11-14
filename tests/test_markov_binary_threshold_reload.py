@@ -11,8 +11,8 @@ def _write_parquet(df, path: Path):
 
 def test_binary_threshold_changes_reload(monkeypatch, tmp_path):
     root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    # monkeypatch.syspath_prepend(str(root))
+    mod = importlib.import_module("mie_lib.pages.m_chain")
 
     data_root = tmp_path / "data"
     # two binaries with different values
@@ -33,4 +33,3 @@ def test_binary_threshold_changes_reload(monkeypatch, tmp_path):
     # Ensure resolved params reflect the thresholds used
     assert info10["resolved"]["thr"] == 10
     assert info20["resolved"]["thr"] == 20
-

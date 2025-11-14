@@ -1,3 +1,11 @@
+> **⚠️ DEPRECATED as of 2025-11-14**
+> This file is superseded by:
+> - **[docs/UI_SYSTEM/UI_REFERENCE_LEGACY.md](../UI_SYSTEM/UI_REFERENCE_LEGACY.md)** for legacy UI reference
+> 
+> See [legacy/README.md](./README.md) for migration guide. This file will be deleted after **2026-05-14**.
+>
+> ---
+
 # Markov Chain (discretized returns) — UI Viewer
 
 This page is a read-only viewer of offline Markov outputs. It never recomputes analytics in the UI.

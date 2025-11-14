@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from app.ui.theme import color_for_status, mpl_palette_for_prob, plotly_palette_for_prob
+from mie_lib.ui.theme import color_for_status, mpl_palette_for_prob, plotly_palette_for_prob
 
 
 def test_no_inline_hex_outside_theme():

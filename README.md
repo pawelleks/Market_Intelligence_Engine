@@ -1,11 +1,24 @@
 Market Intelligence Engine
 
-Scaffold only: initial project structure following docs/ARCHITECT_BIBLE.md.
+- Scaffold only: initial project structure following `docs/CORE/ARCHITECT_BIBLE.md`.
+
+## Environment setup
+
+Use a virtual environment and install the package in editable mode so tests and pages import `mie_lib` correctly.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+pip install -e .
+pip install -r requirements.txt
+```
 
 Run tests:
 
-    python -m pip install -r requirements.txt
-    python -m pytest -q
+```bash
+pytest -q
+```
 
 This README is plain text per project guidelines.
 
@@ -49,3 +62,25 @@ Notes:
 Important:
 - Pages must live under `app/pages/`.
 - When using `st.page_link` from `app/Home.py`, use paths relative to the entrypoint folder, e.g., `"pages/01_Market_Regime_Dashboard.py"`.
+
+## Optional dependencies
+
+Some visuals (e.g., heatmaps on V2 Markov page) can use Plotly if installed. To add:
+
+```bash
+pip install plotly
+```
+
+## Documentation
+
+Canonical documentation lives under `docs/`:
+- docs/CORE/ARCHITECT_BIBLE.md — Master architecture document
+- docs/CORE/ANALYTICS_REFERENCE.md — Markov, HMM, Seasonality outputs
+- docs/CORE/DATA_REFERENCE.md — Data directories and file patterns
+- docs/CORE/CLI_REFERENCE.md — Command-line and scripts reference
+- docs/DEVELOPMENT/DEV_GUIDE.md — Environment, tests, and running the app
+- docs/DEVELOPMENT/CONTRIBUTING.md — Contributing guidelines
+- docs/UI_SYSTEM/ — UI specifications (v2)
+- docs/CHANGELOG.md — Documentation changes
+
+Legacy drafts/specs are preserved under `docs/legacy/` (marked for deletion after 2026-05-14).

@@ -1,9 +1,13 @@
 # Example ticker list
 tickers:
+  - "^GSPC"
+  - "^NDX"
+  - "^DJI"
+  - "^RUT"
   - SPY
   - QQQ
-  - IWM
   - DIA
+  - IWM
   - XLY
   - XLP
   - XLE

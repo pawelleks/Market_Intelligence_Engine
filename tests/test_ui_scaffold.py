@@ -1,6 +1,6 @@
 from importlib import import_module
 
-from app.ui.theme import get_tokens
+from mie_lib.ui.theme import get_tokens
 
 
 def test_ui_tokens_load():
@@ -13,7 +13,7 @@ def test_ui_tokens_load():
 
 
 def test_components_exist():
-    mod = import_module("app.ui.components")
+    mod = import_module("mie_lib.ui.components")
     for name in [
         "SectionHeader",
         "Card",
@@ -28,10 +28,10 @@ def test_components_exist():
 def test_pages_import():
     # Ensure pages import without performing heavy IO
     for modname in [
-        "app.pages.01_Market_Regime_Dashboard",
-        "app.pages.02_Regime_Research_Lab",
-        "app.pages.03_Alpha_Signals_Lab",
-        "app.pages.04_Data_Control_Panel",
+        "mie_lib.pages.regime_dashboard",
+        "mie_lib.pages.research_lab",
+        "mie_lib.pages.alpha_signals_lab",
+        "mie_lib.pages.data_control_panel",
     ]:
         import_module(modname)
 

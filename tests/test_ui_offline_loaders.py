@@ -2,10 +2,10 @@ from pathlib import Path
 import pandas as pd
 import json
 
-from app.ui.components import read_parquet_safe, read_csv_safe, read_json_safe, fmt_percent_one_decimal
+from mie_lib.ui.components import read_parquet_safe, read_csv_safe, read_json_safe, fmt_percent_one_decimal
 
 
-def test_offline_loaders_and_formatter(tmp_path, monkeypatch):
+def test_offline_loaders_and_formatter(tmp_path):
     # Create a tiny parquet/csv/json and ensure loaders work
     p = tmp_path / "x.parquet"
     df = pd.DataFrame({"a": [1, 2]})

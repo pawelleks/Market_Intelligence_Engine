@@ -5,12 +5,161 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ca3862a0-9db7-4ef2-8412-9f969ec01fc2" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/ARCHITECT_BIBLE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Prompts/FixMarkovPage.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Prompts/SeasonalityFix.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/pages/01_Markov_Chain_V2.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/pages/02_Seasonality_Analysis.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/pages/02_Seasonality_Sample.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/pages/04_Hidden_Markov_Model.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/ui/errors.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/utils/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/config/seasonality.yml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/core/state_classification.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/ANALYTICS_REFERENCE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/ARCHITECTURE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/CHANGELOG.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/CLI_REFERENCE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/DATA_REFERENCE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/DEV_GUIDE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/UI_REFERENCE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/state_classification.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pytest.ini" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/check_seasonality_integrity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/cron_smoke.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/fix_seasonality_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/install_cron.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/nightly_update.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/pipeline_all.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/seasonality/build_facts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/seasonality/update.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/validate_seasonality_alignment.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/validation_runner.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/setup.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/Home.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/hmm/loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/markov/aggregation.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/markov/context.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/markov/helpers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/markov/state_codes.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/analytics/seasonality/loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/cli/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/cli/main.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/core/state_classification.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/01_Market_Regime_Dashboard.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/01_Markov_Chain.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/02_Regime_Research_Lab.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/03_Alpha_Signals_Lab.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/04_Data_Control_Panel.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/05_Price_and_Returns_Viewer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/alpha_signals_lab.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/data_control_panel.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/downtrend_score.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/hmm.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/m_chain.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/m_multistep.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/m_predictive_bands.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/prob_gauges.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/regime_dashboard.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/pages/research_lab.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/paths/markov.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/ui/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/ui/components.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/ui/errors.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/ui/theme.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/utils/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/mie_lib/utils/paths.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_features_price_fallback.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_markov_prev_state_anchor.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_public_api_imports.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_seasonality.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_seasonality_preprocess.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/Market_Intelligence_Engine.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/Market_Intelligence_Engine.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/COMMANDS.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/legacy/COMMANDS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Makefile" beforeDir="false" afterPath="$PROJECT_DIR$/Makefile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/pages/01_Markov_Chain.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/pages/01_Markov_Chain.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/pages/02_Markov_OneStep.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/download_update_all.sh" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/download_update_all.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/analytics/markov/states_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/analytics/markov/states_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/04_HMM_Price_Current.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/05_HMM_Probabilities_vs_Price.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/05_Price_and_Returns_Viewer.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/pages/05_Price_and_Returns_Viewer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/06_HMM_Price_FullHistory.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/07_HMM_Transition_Matrix.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/pages/08_Markov_Predictive_Bands.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/pages/08_Markov_Predictive_Bands.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ui/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/ui/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ui/components.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/ui/components.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/ui/theme.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/ui/theme.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cli/__init__.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/cli/mie.py" beforeDir="false" afterPath="$PROJECT_DIR$/cli/mie.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/tickers.yml" beforeDir="false" afterPath="$PROJECT_DIR$/config/tickers.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/ARCHITECT_BIBLE.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/ARCHITECT_BIBLE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/rebuild_all_from_scratch.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/rebuild_all_from_scratch.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/hmm/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/analytics/hmm/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/hmm/hmm_engine.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/markov/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/analytics/markov/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/markov/markov_engine.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/markov/states_model.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/analytics/seasonality/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/analytics/seasonality/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/data_clean/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/data_clean/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/data_ingest/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/data_ingest/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/data_ingest/yfinance_loader.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/features/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/features/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/features/build_features.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/signals/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/signals/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/io.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/io.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/logging.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/logging.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/conftest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_cli_orchestrate.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_cli_orchestrate.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_features.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_features.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_features_loader_page.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_features_update.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_features_update.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_hmm.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_hmm.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_hmm_standardized.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_hmm_standardized.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ingest_gaps.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ingest_gaps.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_availability_resolver.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_availability_resolver.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_batch_cli.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_batch_cli.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_binary_threshold_reload.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_binary_threshold_reload.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_binary_thresholds.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_binary_thresholds.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_cli_window.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_cli_window.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_context_lookup.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_context_lookup.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_horizons_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_horizons_ui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_matrix_loaders.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_matrix_loaders.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_missing_artifacts_messages.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_missing_artifacts_messages.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_offline_thresholds.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_offline_thresholds.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_page_bindings.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_page_bindings.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_precompute_grid.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_precompute_grid.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_sweep.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_sweep.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_ui_parity.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_ui_parity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_markov_windows_2y.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_markov_windows_2y.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_page_markov_path_types.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_page_markov_path_types.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_safe_pick_and_hmm_missing_price.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_safe_pick_and_hmm_missing_price.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_states_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_states_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_streamlit_state_contract.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_streamlit_state_contract.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_timezone.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_timezone.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_chart_hmm.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_chart_hmm.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_colors.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_colors.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_features_cache.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_features_cache.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_hmm_load.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_hmm_load.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_imports.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_imports.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_labels.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_labels.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_markov_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_markov_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_markov_labels.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_markov_labels.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_markov_params.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_markov_params.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_missing_artifacts.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_missing_artifacts.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_offline_loaders.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_offline_loaders.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_pages.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_pages.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_ui_pages_exist.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_pages_exist.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_pages_pathing.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_pages_pathing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_price_viewer.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_price_viewer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_scaffold.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_scaffold.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_streamlit_widths.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_streamlit_widths.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_ticker_input.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_ticker_input.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -31,29 +180,41 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "SHELLCHECK.PATH": "/Users/pawelleks/Library/Application Support/JetBrains/PyCharm2025.1/plugins/Shell Script/shellcheck",
-    "git-widget-placeholder": "feature/markov-onestep-integration"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;SHELLCHECK.PATH&quot;: &quot;/Users/pawelleks/Library/Application Support/JetBrains/PyCharm2025.1/plugins/Shell Script/shellcheck&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;feature/markov-onestep-integration&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/pawelleks/Documents/Python/Projects/Market_Intelligence_Engine&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/docs/legacy" />
+      <recent name="$PROJECT_DIR$/logs" />
       <recent name="$PROJECT_DIR$" />
+      <recent name="$PROJECT_DIR$/docs/legacy" />
       <recent name="$PROJECT_DIR$/scripts" />
     </key>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-e0ed3721d81e-36ea0e71a18c-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.25410.159" />
+        <option value="bundled-js-predefined-d6986cc7102b-1632447f56bf-JavaScript-PY-243.26574.90" />
+        <option value="bundled-python-sdk-c1fac28bca04-4df51de95216-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-243.26574.90" />
       </set>
     </attachedChunks>
   </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
       <changelist id="ca3862a0-9db7-4ef2-8412-9f969ec01fc2" name="Changes" comment="" />
@@ -61,7 +222,23 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1762167834245</updated>
+      <workItem from="1763121564229" duration="88000" />
+      <workItem from="1763121657723" duration="776000" />
+      <workItem from="1763124630879" duration="473000" />
+      <workItem from="1763131124595" duration="2000" />
+      <workItem from="1763131190343" duration="3000" />
     </task>
     <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
   </component>
 </project>

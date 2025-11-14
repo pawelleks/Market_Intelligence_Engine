@@ -5,11 +5,9 @@ import numpy as np
 import time
 
 
-def test_cached_loader_detects_mtime_and_size_changes(tmp_path, monkeypatch):
+def test_cached_loader_detects_mtime_and_size_changes(tmp_path):
     # Arrange tmp features path
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+    mod = importlib.import_module("mie_lib.pages.01_Markov_Chain")
 
     features_dir = tmp_path / "data" / "features"
     features_dir.mkdir(parents=True, exist_ok=True)
@@ -44,10 +42,8 @@ def test_cached_loader_detects_mtime_and_size_changes(tmp_path, monkeypatch):
     assert mtime2 != mtime1
 
 
-def test_cached_loader_downcasts_ret1d(monkeypatch, tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
-    mod = importlib.import_module("app.pages.01_Markov_Chain")
+def test_cached_loader_downcasts_ret1d(tmp_path):
+    mod = importlib.import_module("mie_lib.pages.01_Markov_Chain")
 
     features_dir = tmp_path / "data" / "features"
     features_dir.mkdir(parents=True, exist_ok=True)

@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from src.features.build_features import RAW_DIR, FEATURES_DIR, build_features_for_ticker
-from src.analytics.markov.markov_engine import build_markov_order_sweep, ANALYTICS_DIR
+from mie_lib.features.build_features import RAW_DIR, FEATURES_DIR, build_features_for_ticker
+from mie_lib.analytics.markov.markov_engine import build_markov_order_sweep, ANALYTICS_DIR
 
 
 def _make_features_for_test(ticker: str = "MKSW", days: int = 280):

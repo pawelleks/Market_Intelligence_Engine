@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from src.analytics.markov.states_model import (
+from mie_lib.analytics.markov.states_model import (
     _window_key_from_arg,
     build_states_from_features,
     states_for,
@@ -32,11 +32,7 @@ def _write_features(tmp_path: Path, tkr: str = "TS1", days: int = 600):
     df.to_parquet(tmp_path / f"data/features/{tkr}.parquet", index=False)
 
 
-def test_states_then_matrices_cache_and_windows(tmp_path, monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(root))
-
+def test_states_then_matrices_cache_and_windows(tmp_path):
     _write_features(tmp_path, "TS1", days=800)
 
     # Build states once for tri/binary

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_format_missing_features_msg_includes_cli_and_filename():
-    mod = import_module("app.pages.01_Markov_Chain")
+    mod = import_module("mie_lib.pages.01_Markov_Chain")
     ticker = "SPY"
     fp = Path("data/features/SPY.parquet")
     msg = mod._format_missing_features_msg(ticker, fp, ["ret_1d"])
@@ -15,7 +15,7 @@ def test_format_missing_features_msg_includes_cli_and_filename():
 
 
 def test_format_missing_matrix_msg_legacy_build_markov():
-    mod = import_module("app.pages.01_Markov_Chain")
+    mod = import_module("mie_lib.pages.01_Markov_Chain")
     msg = mod._format_missing_matrix_msg("SPY", "tri", 10, 2, "5Y")
     assert "Markov matrix unavailable" in msg
     assert "ticker=SPY" in msg and "order=2" in msg and "state_mode=tri" in msg and "threshold_bps=10" in msg

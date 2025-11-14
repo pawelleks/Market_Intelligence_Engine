@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 from importlib import import_module
+import importlib  # added for explicit import_module usage
 import pandas as pd
 
 
-def test_param_derivation_and_headline(tmp_path, monkeypatch):
+def test_param_derivation_and_headline(tmp_path):
     # Arrange a fake markov directory with a matrix_order1 and metadata
-    root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root))
+
 
     mdir = tmp_path / "data/analytics/markov/SPY"
     mdir.mkdir(parents=True, exist_ok=True)
@@ -26,8 +26,7 @@ def test_param_derivation_and_headline(tmp_path, monkeypatch):
     (mdir / "metadata.json").write_text(json.dumps(meta))
 
     # Import module under test
-    mod = import_module("app.pages.01_Markov_Chain")
-
+    mod = importlib.import_module("mie_lib.pages.m_chain")
     # Derive params preferring control order if available
     eff = mod._derive_effective_params(meta, {"order": 1, "state_mode": "tri", "threshold_bps": 10}, {1})
     assert eff == (1, "tri", 10)
@@ -39,4 +38,3 @@ def test_param_derivation_and_headline(tmp_path, monkeypatch):
     # Headline builder returns non-empty string and does not rely on globals
     sub = mod._headline_subline("SPY", ("2020-01-01", "2020-01-03"), "tri", 12, 1)
     assert isinstance(sub, str) and len(sub) > 0
-

@@ -32,6 +32,25 @@ Must be consistent with:
   - Muted, no neon.
 - Dark background compatible.
 
+### Technical Specifications
+
+- **Performance**:
+  - Downsample to ≤ 2,500 points per series to maintain responsiveness.
+  - Lazy-load charts when possible.
+- **Sizing**:
+  - Default: compact size for overview.
+  - Expand action: opens modal at **1200×700px** with zoom/pan capabilities.
+- **Tooltips**:
+  - Show exact values + date/context.
+  - Percentages displayed with 1 decimal place by default.
+  - Include sample counts where relevant (e.g., transition matrices).
+- **Interactivity**:
+  - Hover tooltips on all data points.
+  - Legend toggle for multi-series charts.
+  - Zoom/drag when expanded.
+- **Exports**:
+  - CSV/PNG download available on each chart card.
+
 ---
 
 ## Components

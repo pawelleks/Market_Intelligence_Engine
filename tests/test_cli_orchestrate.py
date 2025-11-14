@@ -1,6 +1,7 @@
 import subprocess, sys, os
 from pathlib import Path
 import pandas as pd
+from mie_lib.analytics.markov.states_model import derive_matrix
 
 
 def _write_features(tmp: Path, t: str = "SPT", n: int = 520):
@@ -27,7 +28,6 @@ def _write_features(tmp: Path, t: str = "SPT", n: int = 520):
 def test_ensure_and_update_all(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(tmp_path)
-    monkeypatch.syspath_prepend(str(root))
 
     # minimal config/tickers.yml and analytics_grid.yml
     (tmp_path/"config").mkdir(parents=True, exist_ok=True)
@@ -41,21 +41,19 @@ windows: [1Y, MAX]
     _write_features(tmp_path, "SPT", 520)
 
     # ensure-markov-available builds minimally
-    cmd = [sys.executable, str(root/"cli/mie.py"), "ensure-markov-available", "--ticker", "SPT", "--state-mode", "tri", "--threshold-bps", "10", "--order", "1", "--window", "1Y"]
-    res = subprocess.run(cmd, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    cmd = ["-m", "mie_lib.cli.main", "ensure-markov-available", "--ticker", "SPT", "--state-mode", "tri", "--threshold-bps", "10", "--order", "1", "--window", "1Y"]
+    res = subprocess.run([sys.executable] + cmd, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert res.returncode == 0, res.stderr
 
     # update-all-analytics orchestrates from grid
-    cmd2 = [sys.executable, str(root/"cli/mie.py"), "update-all-analytics"]
-    res2 = subprocess.run(cmd2, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    cmd2 = ["-m", "mie_lib.cli.main", "update-all-analytics"]
+    res2 = subprocess.run([sys.executable] + cmd2, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert res2.returncode == 0, res2.stderr
     # ensure specific window to force-cache the matrix
-    cmd3 = [sys.executable, str(root/"cli/mie.py"), "ensure-markov-available", "--ticker", "SPT", "--state-mode", "tri", "--threshold-bps", "10", "--order", "1", "--window", "MAX"]
+    cmd3 = [sys.executable, "-m", "mie_lib.cli.main", "ensure-markov-available", "--ticker", "SPT", "--state-mode", "tri", "--threshold-bps", "10", "--order", "1", "--window", "MAX"]
     res3 = subprocess.run(cmd3, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert res3.returncode == 0, res3.stderr
     # Also call derive function directly to guarantee cache present
-    from src.analytics.markov.states_model import derive_matrix, build_states_from_features
-    _ = build_states_from_features("SPT", 10, "tri")
     _ = derive_matrix("SPT", 10, "tri", 1, "MAX")
     # Cache files exist for matrices
     mdir = tmp_path/"data/analytics/markov/SPT/matrices/tri/thr10/order1"

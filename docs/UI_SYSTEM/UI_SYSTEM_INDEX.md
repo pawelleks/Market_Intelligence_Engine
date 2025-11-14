@@ -29,6 +29,10 @@ Authoritative map of UI/UX documentation.
   - Markov Chains Analysis page.
   - Sections, filters, offline artifacts, summaries.
 
+- `docs/UI_SYSTEM/PAGE_SPEC_HMM_v2.md`
+  - Hidden Markov Model (Regimes) page.
+  - Interactive on-demand training, regime detection, strategy backtests.
+
 (Extend with additional PAGE_SPEC_* files as new pages are normalized.)
 
 ---

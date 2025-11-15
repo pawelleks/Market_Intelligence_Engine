@@ -1,20 +1,74 @@
-# Example ticker list
+groups:
+  index:
+    description: "Synthetic benchmark indexes"
+  index_etf:
+    description: "ETFs tracking benchmark indexes"
+  sector_etf:
+    description: "Sector ETFs"
+  single_stock:
+    description: "Individual equities"
+  technology:
+    description: "Technology exposure"
+  ai:
+    description: "Artificial Intelligence theme"
+  sp500:
+    description: "S&P 500 universe"
+  sp500_component:
+    description: "Constituent of S&P 500"
+  nasdaq100_component:
+    description: "Constituent of NASDAQ 100"
+
 tickers:
-  - "^GSPC"
-  - "^NDX"
-  - "^DJI"
-  - "^RUT"
-  - SPY
-  - QQQ
-  - DIA
-  - IWM
-  - XLY
-  - XLP
-  - XLE
-  - XLF
-  - XLV
-  - XLI
-  - XLB
-  - XLK
-  - XLU
-  - XLC
+  "^GSPC":
+    name: "S&P 500 Index"
+    groups: [index, sp500]
+  "^NDX":
+    name: "NASDAQ 100 Index"
+    groups: [index, nasdaq100]
+  "^DJI":
+    name: "Dow Jones Industrial Average"
+    groups: [index]
+  "^RUT":
+    name: "Russell 2000 Index"
+    groups: [index]
+  SPY:
+    name: "SPDR S&P 500 ETF Trust"
+    sector: "Broad Market"
+    groups: [index_etf, sp500]
+  QQQ:
+    name: "Invesco QQQ Trust"
+    sector: "Technology"
+    groups: [index_etf, nasdaq100]
+  DIA:
+    name: "SPDR Dow Jones Industrial Average ETF Trust"
+    groups: [index_etf]
+  IWM:
+    name: "iShares Russell 2000 ETF"
+    groups: [index_etf]
+  XLY:
+    groups: [sector_etf]
+  XLP:
+    groups: [sector_etf]
+  XLE:
+    groups: [sector_etf]
+  XLF:
+    groups: [sector_etf]
+  XLV:
+    groups: [sector_etf]
+  XLI:
+    groups: [sector_etf]
+  XLB:
+    groups: [sector_etf]
+  XLK:
+    name: "Technology Select Sector SPDR Fund"
+    sector: "Technology"
+    groups: [sector_etf, technology]
+  XLU:
+    groups: [sector_etf]
+  XLC:
+    groups: [sector_etf]
+  NVDA:
+    groups: [single_stock, technology, ai, sp500_component, nasdaq100_component]
+
+defaults:
+  fallback_groups: [single_stock]

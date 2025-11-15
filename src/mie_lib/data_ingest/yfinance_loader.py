@@ -45,10 +45,12 @@ def read_tickers(config_path: str = "config/tickers.yml") -> List[str]:
         return tickers
 
     if isinstance(cfg, dict):
-        # support config with top-level 'tickers' key
+        # support config with top-level 'tickers' key (list or dict)
         val = cfg.get("tickers") or cfg.get("symbols")
         if isinstance(val, list):
             return [t.strip() for t in val if t and isinstance(t, str)]
+        if isinstance(val, dict):
+            return [str(k).strip() for k in val.keys() if str(k).strip()]
     if isinstance(cfg, list):
         return [t.strip() for t in cfg if t and isinstance(t, str)]
     return []

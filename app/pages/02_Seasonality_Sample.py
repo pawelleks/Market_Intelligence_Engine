@@ -87,7 +87,7 @@ def _render_price_trace(df: pd.DataFrame, ticker: str):
     ax.set_ylabel("Close")
     ax.legend(loc="upper left", fontsize=8)
     mpl_style(fig, ax, TOKENS)
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
 
 # --------------------------------------------------------------------------------------------------
 # Page Rendering

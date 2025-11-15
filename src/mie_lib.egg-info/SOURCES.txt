@@ -35,6 +35,7 @@ src/mie_lib/core/state_classification.py
 src/mie_lib/data/__init__.py
 src/mie_lib/data_clean/__init__.py
 src/mie_lib/data_ingest/__init__.py
+src/mie_lib/data_ingest/ticker_metadata.py
 src/mie_lib/data_ingest/yfinance_loader.py
 src/mie_lib/features/__init__.py
 src/mie_lib/features/build_features.py
@@ -68,6 +69,7 @@ src/mie_lib/utils/io.py
 src/mie_lib/utils/logging.py
 src/mie_lib/utils/paths.py
 src/mie_lib/utils/preflight.py
+src/mie_lib/utils/tickers.py
 src/signals/__init__.py
 src/utils/config.py
 src/utils/io.py

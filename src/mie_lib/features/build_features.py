@@ -265,12 +265,14 @@ def _validate_feature_df(df):
         raise ValueError("Duplicate dates in feature dataframe")
 
     # Required canonical columns presence and dtype
-    req_cols = {"ret_1d": "float32", "rv_20d": "float32"}
-    for col, dtype_str in req_cols.items():
+    req_cols = {"ret_1d": {"float32", "float64"}, "rv_20d": {"float32"}}
+    for col, allowed_dtypes in req_cols.items():
         if col not in df.columns:
             raise ValueError(f"Missing required feature column: {col}")
-        if str(df[col].dtype) != dtype_str:
-            raise TypeError(f"Column {col} must be {dtype_str}, got {df[col].dtype}")
+        dtype_str = str(df[col].dtype)
+        if dtype_str not in allowed_dtypes:
+            allowed = ", ".join(sorted(allowed_dtypes))
+            raise TypeError(f"Column {col} must be one of [{allowed}], got {dtype_str}")
 
     # NaN checks: for each rolling-derived column, allow NaNs only in first `window-1` rows.
     col_warmups = {
@@ -452,20 +454,26 @@ def build_features_for_ticker(ticker: str, mode: str = "full", lookback: int = 9
     meta_cols = {"date", "ticker", "as_of", "data_version"}
     # Determine numeric feature columns from OUTPUT_COLUMNS excluding meta
     numeric_cols = [c for c in OUTPUT_COLUMNS if c not in meta_cols and c in df_feat.columns]
-    if numeric_cols:
+    precision_sensitive = {"ret_1d"}
+    float32_targets = [c for c in numeric_cols if c not in precision_sensitive]
+    if float32_targets:
         # Coerce the block to numeric and then cast the resulting DataFrame to float32.
-        coerced_block = df_feat.loc[:, numeric_cols].apply(pd.to_numeric, errors="coerce")
+        coerced_block = df_feat.loc[:, float32_targets].apply(pd.to_numeric, errors="coerce")
         coerced_block = coerced_block.astype("float32")
-        df_feat.loc[:, numeric_cols] = coerced_block
+        df_feat.loc[:, float32_targets] = coerced_block
         # Verify dtypes; if any column didn't become float32 (edge cases), cast individually
-        not_float32 = [c for c in numeric_cols if str(df_feat[c].dtype) != "float32"]
+        not_float32 = [c for c in float32_targets if str(df_feat[c].dtype) != "float32"]
         if not_float32:
             for c in not_float32:
                 df_feat[c] = pd.to_numeric(df_feat[c], errors="coerce").astype("float32")
             LOG.info("Performed per-column fallback casting for %d columns: %s", len(not_float32), not_float32)
 
-        LOG.info("Casted %d numeric feature columns to float32", len(numeric_cols))
-        LOG.info("Numeric dtypes after cast: %s", df_feat.loc[:, numeric_cols].dtypes.apply(lambda dt: str(dt)).to_dict())
+        LOG.info("Casted %d numeric feature columns to float32", len(float32_targets))
+        LOG.info("Numeric dtypes after cast: %s", df_feat.loc[:, float32_targets].dtypes.apply(lambda dt: str(dt)).to_dict())
+
+    for col in precision_sensitive & set(df_feat.columns):
+        df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").astype("float64")
+        LOG.info("Retained high precision for column '%s' (dtype=%s)", col, df_feat[col].dtype)
 
     try:
         _validate_feature_df(df_feat)

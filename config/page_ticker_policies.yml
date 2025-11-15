@@ -1,0 +1,15 @@
+default:
+  include_groups: ["all"]
+  exclude_groups: []
+
+01_Markov_Chain_V2:
+  include_groups: ["index", "index_etf"]
+  exclude_groups: []
+
+02_Seasonality_Analysis:
+  include_groups: ["sector_etf"]
+  exclude_groups: []
+
+04_Hidden_Markov_Model:
+  include_groups: ["index", "index_etf"]
+  exclude_groups: []

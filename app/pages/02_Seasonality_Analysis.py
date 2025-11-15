@@ -292,10 +292,10 @@ DATA = Path("data")
 
 # Image-based calendar heatmap rendering (high-DPI, top month labels, black text)
 @st.cache_data(ttl=1800, show_spinner=False)
-def _render_seasonality_calendar_image(ticker: str, lookback: str, pivot: pd.DataFrame, last_date: pd.Timestamp | None) -> bytes:
-    """Render a PNG heatmap for the seasonality calendar table using matplotlib.
-    Uses a diverging colormap centered at 0 (red->white->green); overlays value text and highlights today's cell.
-    Returns raw PNG bytes.
+def _render_seasonality_calendar_image(ticker: str, lookback: str, pivot: pd.DataFrame, last_date: pd.Timestamp | None):
+    """Render a matplotlib Figure for the seasonality calendar heatmap.
+    Uses a diverging colormap centered at 0 (red→white→green); overlays value text and highlights today's cell.
+    Returns the matplotlib Figure for downstream rendering via st.pyplot.
     """
     import matplotlib.pyplot as plt
     from matplotlib.colors import TwoSlopeNorm, LinearSegmentedColormap
@@ -371,12 +371,7 @@ def _render_seasonality_calendar_image(ticker: str, lookback: str, pivot: pd.Dat
 
     # Layout and export at high DPI
     fig.tight_layout()
-    from io import BytesIO
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=300, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+    return fig
 
 def _first_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     for c in candidates:
@@ -717,8 +712,8 @@ def main():
                 last_dt = pd.to_datetime(base_df["date"]).max() if "date" in base_df.columns else None
             except Exception:
                 last_dt = None
-            img = _render_seasonality_calendar_image(ticker, str(cal_lb).upper(), pivot, last_dt)
-            st.image(img, use_container_width=True)
+            fig = _render_seasonality_calendar_image(ticker, str(cal_lb).upper(), pivot, last_dt)
+            st.pyplot(fig, width="stretch")
     except Exception as e:
         render_exception("Failed to render Seasonality Calendar", e)
 

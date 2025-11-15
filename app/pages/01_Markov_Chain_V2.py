@@ -8,6 +8,9 @@ import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.utils.ticker_policy import get_page_tickers
+from mie_lib.utils.tickers import get_ticker_full_name
+
 # --- Page Setup ---
 st.set_page_config(page_title="Markov Chain V2", layout="wide")
 
@@ -90,9 +93,13 @@ def main():
     # --- Sidebar Inputs ---
     with st.sidebar:
         st.header("Markov Chain V2")
-        # TODO: Load tickers from a config file
-        tickers = ["SPY", "QQQ", "DIA", "IWM", "^GSPC", "^NDX", "^DJI", "^RUT"]
-        ticker = st.selectbox("Ticker", tickers, index=0)
+        tickers = get_page_tickers("01_Markov_Chain_V2") or ["SPY"]
+        ticker = st.selectbox(
+            "Ticker",
+            tickers,
+            index=0,
+            format_func=lambda t: get_ticker_full_name(t) or t,
+        )
         window_key = st.select_slider(
             "Window",
             options=["1Y", "2Y", "5Y", "10Y", "20Y", "MAX"],
@@ -103,7 +110,7 @@ def main():
         order = st.slider("Order (K)", 1, 4, 1)
         horizons = st.multiselect("Horizons (days)", [1, 2, 3, 4, 5, 10, 20, 60], default=[1, 2, 3, 4])
         # Add cache clear for post-CLI rebuilds
-        if st.button("🔄 Clear data cache & reload"):
+    if st.button("🔄 Clear data cache & reload", key="markov_v2_clear_cache"):
             st.cache_data.clear()
             st.rerun()
 

@@ -26,6 +26,7 @@ from app.ui.theme import (
     HMM_STATE_COLORS,
 )
 from mie_lib.utils.paths import features_parquet_path
+from mie_lib.features.build_features import _select_price_column
 
 
 STATE_DISPLAY_ORDER = ["Bull", "Neutral", "Bear"]
@@ -96,18 +97,22 @@ def _load_feature_history(ticker: str) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce").dt.tz_localize(None)
     df = df.dropna(subset=["date"]).sort_values("date").drop_duplicates("date", keep="last")
 
-    if "close" not in df.columns:
-        if "adj_close" in df.columns:
-            df["close"] = df["adj_close"]
-        else:
-            raise ValueError("`close` column missing from features file.")
+    try:
+        _, price_series = _select_price_column(df)
+    except KeyError as exc:
+        raise ValueError(
+            "Price columns missing from features file. Rebuild features via `python cli/mie.py rebuild-features --tickers {ticker}`."
+        ) from exc
 
-    for col in ["close", "ret_1d", "rv_20d"]:
-        if col not in df.columns:
-            raise ValueError(f"Required column `{col}` missing from features file.")
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["close"] = pd.to_numeric(price_series, errors="coerce").ffill()
 
-    df["close"] = df["close"].ffill()
+    if "ret_1d" not in df.columns:
+        df["ret_1d"] = df["close"].pct_change()
+    df["ret_1d"] = pd.to_numeric(df["ret_1d"], errors="coerce")
+
+    if "rv_20d" not in df.columns:
+        df["rv_20d"] = df["ret_1d"].rolling(window=20, min_periods=1).std()
+    df["rv_20d"] = pd.to_numeric(df["rv_20d"], errors="coerce")
     df["ret_1d"] = df["ret_1d"].fillna(0.0)
     df["rv_20d"] = df["rv_20d"].fillna(df["rv_20d"].median())
 

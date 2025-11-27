@@ -17,6 +17,7 @@ META_DIR: Path = DATA_DIR / "meta"
 # Analytics roots
 MARKOV_DIR: Path = DATA_DIR / "analytics" / "markov"
 HMM_DIR: Path = DATA_DIR / "analytics" / "hmm"
+OPTIONS_DIR: Path = DATA_DIR / "analytics" / "options"
 SEASONALITY_DIR: Path = DATA_DIR / "seasonality"
 
 # ---------- Feature layer helpers ----------
@@ -84,6 +85,22 @@ def seasonality_base_path(ticker: str) -> Path:
     return SEASONALITY_DIR / "base" / f"{ticker}.parquet"
 
 
+# ---------- Expected moves helpers ----------
+
+def options_expected_moves_path(ticker: str) -> Path:
+    slug = str(ticker).strip().lower()
+    return OPTIONS_DIR / f"{slug}_expected_moves.parquet"
+
+
+def options_weekly_reference_path(ticker: str) -> Path:
+    slug = str(ticker).strip().lower()
+    return OPTIONS_DIR / f"{slug}_weekly_reference.parquet"
+
+
+def options_manifest_path() -> Path:
+    return META_DIR / "expected_moves_manifest.json"
+
+
 __all__ = [
     "ROOT",
     "DATA_DIR",
@@ -92,6 +109,7 @@ __all__ = [
     "META_DIR",
     "MARKOV_DIR",
     "HMM_DIR",
+    "OPTIONS_DIR",
     "SEASONALITY_DIR",
     # Features
     "features_parquet_path",
@@ -109,4 +127,8 @@ __all__ = [
     "hmm_std_out_dir",
     # Seasonality
     "seasonality_base_path",
+    # Expected moves
+    "options_expected_moves_path",
+    "options_weekly_reference_path",
+    "options_manifest_path",
 ]

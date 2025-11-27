@@ -454,8 +454,7 @@ def build_features_for_ticker(ticker: str, mode: str = "full", lookback: int = 9
     meta_cols = {"date", "ticker", "as_of", "data_version"}
     # Determine numeric feature columns from OUTPUT_COLUMNS excluding meta
     numeric_cols = [c for c in OUTPUT_COLUMNS if c not in meta_cols and c in df_feat.columns]
-    precision_sensitive = {"ret_1d"}
-    float32_targets = [c for c in numeric_cols if c not in precision_sensitive]
+    float32_targets = list(numeric_cols)
     if float32_targets:
         # Coerce the block to numeric and then cast the resulting DataFrame to float32.
         coerced_block = df_feat.loc[:, float32_targets].apply(pd.to_numeric, errors="coerce")
@@ -470,10 +469,6 @@ def build_features_for_ticker(ticker: str, mode: str = "full", lookback: int = 9
 
         LOG.info("Casted %d numeric feature columns to float32", len(float32_targets))
         LOG.info("Numeric dtypes after cast: %s", df_feat.loc[:, float32_targets].dtypes.apply(lambda dt: str(dt)).to_dict())
-
-    for col in precision_sensitive & set(df_feat.columns):
-        df_feat[col] = pd.to_numeric(df_feat[col], errors="coerce").astype("float64")
-        LOG.info("Retained high precision for column '%s' (dtype=%s)", col, df_feat[col].dtype)
 
     try:
         _validate_feature_df(df_feat)

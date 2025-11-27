@@ -4,13 +4,15 @@ Commands: update, rebuild, validate
 No business logic implemented — scaffolding only.
 """
 import argparse
-import sys
-from pathlib import Path
-from datetime import datetime, timezone
-import os
-import subprocess
 import json
 import logging
+import os
+import subprocess
+import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import yaml
 
 # Ensure project root is on sys.path so `src` is importable when running cli scripts
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +23,12 @@ from mie_lib.data_ingest.yfinance_loader import (
     fetch_full_history,
     update_ticker_incremental,
     validate_raw,
+)
+from mie_lib.options.expected_move import (
+    ExpectedMovesConfig,
+    PolygonOptionChainProvider,
+    build_expected_moves_history,
+    update_expected_moves,
 )
 from mie_lib.utils.logging import get_logger
 # --- features build API (aliased to avoid shadowing inside handlers) ---
@@ -34,7 +42,7 @@ from mie_lib.analytics.hmm.hmm_engine import HMMConfig, build_hmm_for_ticker
 from mie_lib.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker
 from mie_lib.analytics.markov.states_model import build_states_from_features, derive_matrix
 from mie_lib.analytics.markov.states_model import states_stale
-import yaml
+from mie_lib.options.em_core import MockOptionChainProvider
 
 LOG = get_logger("cli")
 
@@ -189,6 +197,66 @@ def handle_build_features(args):
     return summary
 
 
+def _parse_iso_date(val: str, arg_name: str) -> date:
+    try:
+        return datetime.fromisoformat(val).date()
+    except Exception as exc:  # pragma: no cover - arg guard
+        raise SystemExit(f"{arg_name} must be YYYY-MM-DD: {val} ({exc})")
+
+
+def _resolve_expected_moves_provider_arg(provider_name: str | None, cfg: ExpectedMovesConfig):
+    name = (provider_name or cfg.provider or "polygon").lower()
+    if name == "mock":
+        return MockOptionChainProvider()
+    if name in {"polygon", "auto", "default"}:
+        return PolygonOptionChainProvider(
+            {
+                "max_api_calls_per_day": cfg.max_api_calls_per_day,
+                "provider": name,
+            }
+        )
+    raise SystemExit(f"Unsupported expected-moves provider '{provider_name}'")
+
+
+def handle_build_expected_moves(args):
+    cfg = ExpectedMovesConfig.load()
+    ticker = (getattr(args, "ticker", None) or cfg.spot_ticker).upper()
+    start = _parse_iso_date(args.start, "--start")
+    end = _parse_iso_date(args.end, "--end") if getattr(args, "end", None) else None
+    provider = _resolve_expected_moves_provider_arg(getattr(args, "provider", None), cfg)
+    results = build_expected_moves_history(
+        start=start,
+        end=end,
+        ticker=ticker,
+        provider=provider,
+        include_weekly_reference=not getattr(args, "no_weekly_reference", False),
+    )
+    LOG.info(
+        "build-expected-moves complete ticker=%s days=%s provider=%s", ticker, len(results), provider.__class__.__name__
+    )
+    print({"ticker": ticker, "days": len(results)})
+    return results
+
+
+def handle_update_expected_moves(args):
+    cfg = ExpectedMovesConfig.load()
+    ticker = (getattr(args, "ticker", None) or cfg.spot_ticker).upper()
+    provider = _resolve_expected_moves_provider_arg(getattr(args, "provider", None), cfg)
+    lookback = int(getattr(args, "lookback", 5) or 5)
+    include_weekly = bool(getattr(args, "include_weekly_reference", False))
+    results = update_expected_moves(
+        ticker=ticker,
+        lookback_days=lookback,
+        provider=provider,
+        include_weekly_reference=include_weekly,
+    )
+    LOG.info(
+        "update-expected-moves complete ticker=%s days=%s provider=%s", ticker, len(results), provider.__class__.__name__
+    )
+    print({"ticker": ticker, "days": len(results)})
+    return results
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -218,6 +286,39 @@ def build_parser():
     p_uf = sub.add_parser("update-features", help="Update features for tickers (incremental)")
     p_uf.add_argument("--lookback", type=int, default=90)
     p_uf.add_argument("--csv", action="store_true")
+
+    p_em_build = sub.add_parser(
+        "build-expected-moves",
+        help="Rebuild expected moves history for a ticker using the polygon pipeline",
+    )
+    p_em_build.add_argument("--ticker", help="Ticker (default from expected_moves config)")
+    p_em_build.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
+    p_em_build.add_argument("--end", help="End date YYYY-MM-DD (inclusive)")
+    p_em_build.add_argument(
+        "--provider", choices=["polygon", "mock"], help="Override option chain provider"
+    )
+    p_em_build.add_argument(
+        "--no-weekly-reference",
+        action="store_true",
+        help="Skip weekly reference parquet writes",
+    )
+    p_em_build.set_defaults(func=handle_build_expected_moves)
+
+    p_em_update = sub.add_parser(
+        "update-expected-moves",
+        help="Incrementally update expected moves parquet for recent sessions",
+    )
+    p_em_update.add_argument("--ticker", help="Ticker (default from expected_moves config)")
+    p_em_update.add_argument("--lookback", type=int, default=5, help="Trading days to rebuild")
+    p_em_update.add_argument(
+        "--provider", choices=["polygon", "mock"], help="Override option chain provider"
+    )
+    p_em_update.add_argument(
+        "--include-weekly-reference",
+        action="store_true",
+        help="Also refresh weekly reference parquet",
+    )
+    p_em_update.set_defaults(func=handle_update_expected_moves)
 
     # Smoke check command
     sub.add_parser("smoke-update", help="Lightweight smoke check after FULL+UPDATE: verifies sorted dates and ret_1d continuity for first ticker")

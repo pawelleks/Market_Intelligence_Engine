@@ -1,0 +1,55 @@
+# Expected Moves pipeline configuration
+# This file declares the default inputs consumed by ExpectedMovesConfig.
+# All keys are pure data (no Python code) to keep loading simple.
+
+spot_ticker: SPY
+provider: mock  # default provider used by CLI (polygon|mock).
+max_api_calls_per_day: 0  # mock provider ignores this; polygon can override per-day budget.
+
+# Horizons correspond to the canonical dashboard views. Keys must be stable.
+horizons:
+  next_session:
+    label: "Next Session"
+    target_days: 1
+    use_expiration: nearest
+  through_friday:
+    label: "Through Friday"
+    target_days: 3  # approximate trading days until week end; only advisory.
+    use_expiration: weekly
+  end_of_next_week:
+    label: "End of Next Week"
+    target_days: 8
+    use_expiration: weekly_plus
+  month_end:
+    label: "Month End"
+    target_days: 18
+    use_expiration: month_end
+  prev_friday_ref:
+    label: "Prev Friday (Weekly Ref)"
+    target_days: 0
+    use_expiration: weekly_reference
+
+# Confidence levels passed to EM dashboard rows (1 sigma through 3 sigma bounds by default).
+confidence_levels:
+  - 0.6827
+  - 0.90
+  - 0.95
+  - 0.9973
+
+# Weekly reference parquet writer settings (used by expected_move._build_weekly_reference).
+weekly_reference:
+  enabled: true
+  anchor: prev_friday
+  description: "Last trading day of the prior week for UI reference."
+
+# Optional VIX metadata for downstream consumers (the library fetches VIX1D by default).
+vix:
+  source: VIX1D
+  fallback: VIX
+  smoothing_window_days: 1
+
+# Provider tuning knobs understood by PolygonOptionChainProvider.
+provider_options:
+  strike_band: 10
+  expiries_lookahead_days: 45
+  min_chain_depth: 2

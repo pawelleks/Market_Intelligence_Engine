@@ -21,3 +21,4 @@ data/logs/
 # Local IDE & backups
 .idea/
 *.tar.gz
+*.log

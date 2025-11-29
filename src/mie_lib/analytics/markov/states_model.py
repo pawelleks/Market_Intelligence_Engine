@@ -352,39 +352,95 @@ def one_step(matrix_df: pd.DataFrame, mode: str) -> pd.Series:
 
 
 def multi_step(matrix_df: pd.DataFrame, horizons: List[int], mode: str) -> pd.DataFrame:
-    """Compute multi-step probabilities using uniform initial distribution.
-    Only valid for order=1 matrices (contexts == states)."""
+    """Compute multi-step probabilities for a first-order Markov chain.
+
+    matrix_df should contain columns mc_prob_up/down and optional mc_prob_neutral.
+    Horizons are positive integers. Returns DataFrame indexed by horizon with
+    one column per state, each row normalized to 1.
+    """
+
     if matrix_df is None or matrix_df.empty:
-        return pd.DataFrame(columns=horizons)
-    mode = mode.lower().strip()
-    if mode == "tri":
-        cols = ["mc_prob_up","mc_prob_neutral","mc_prob_down"]
-        universe = ["U","N","D"]
+        return pd.DataFrame()
+
+    mode = (mode or "tri").lower().strip()
+    tri_cols = ["mc_prob_up", "mc_prob_neutral", "mc_prob_down"]
+    bin_cols = ["mc_prob_up", "mc_prob_down"]
+    if mode == "tri" and all(col in matrix_df.columns for col in tri_cols):
+        prob_cols = tri_cols
+        state_codes = ["U", "N", "D"]
+    elif mode == "binary" and all(col in matrix_df.columns for col in bin_cols):
+        prob_cols = bin_cols
+        state_codes = ["U", "D"]
     else:
-        cols = ["mc_prob_up","mc_prob_down"]
-        universe = ["U","D"]
-    # Build P (states rows -> next distribution) by matching contexts to universe
-    P_rows = []
-    for u in universe:
-        row = matrix_df.loc[matrix_df["context"] == u, cols]
-        if row.empty:
-            # uniform fallback
-            row_vals = np.array([1/len(cols)]*len(cols))
+        # Fallback: attempt auto-detect if requested mode columns missing
+        if all(col in matrix_df.columns for col in tri_cols):
+            prob_cols = tri_cols
+            state_codes = ["U", "N", "D"]
+        elif all(col in matrix_df.columns for col in bin_cols):
+            prob_cols = bin_cols
+            state_codes = ["U", "D"]
         else:
-            row_vals = row.iloc[0][cols].to_numpy()
+            return pd.DataFrame()
+
+    def _mask_for_state(df: pd.DataFrame, code: str) -> pd.Series:
+        code = str(code).upper()
+        mask = pd.Series(False, index=df.index)
+        if "context" in df.columns:
+            ctx = df["context"].astype(str).str.upper()
+            mask |= ctx.str.endswith(code)
+        if "context_display" in df.columns:
+            disp = df["context_display"].astype(str).str.upper()
+            mask |= disp.str.endswith(code)
+        return mask
+
+    def _normalized_row(values: np.ndarray) -> np.ndarray:
+        arr = np.clip(np.asarray(values, dtype=float), 1e-12, None)
+        total = arr.sum()
+        if not np.isfinite(total) or total <= 0:
+            return np.full(len(prob_cols), 1.0 / len(prob_cols))
+        return arr / total
+
+    df = matrix_df.copy()
+    P_rows: list[np.ndarray] = []
+    for code in state_codes:
+        mask = _mask_for_state(df, code)
+        subset = df.loc[mask, prob_cols]
+        if subset.empty and "context" in df.columns:
+            subset = df.loc[df["context"].astype(str).str.upper() == code, prob_cols]
+        if subset.empty:
+            row_vals = np.full(len(prob_cols), 1.0 / len(prob_cols))
+        else:
+            if "counts" in df.columns:
+                weights = df.loc[subset.index, "counts"].astype(float).fillna(0.0)
+                weight_sum = float(weights.sum())
+            else:
+                weights = None
+                weight_sum = 0.0
+            if weights is not None and weight_sum > 0:
+                weighted = (subset.multiply(weights, axis=0).sum() / weight_sum).to_numpy(dtype=float)
+            else:
+                weighted = subset.mean().to_numpy(dtype=float)
+            row_vals = _normalized_row(np.nan_to_num(weighted, nan=0.0))
         P_rows.append(row_vals)
-    P = np.vstack(P_rows)  # SxS
-    # Uniform initial distribution
-    p0 = np.array([1/len(universe)]*len(universe))
-    out_rows = []
-    for h in horizons:
-        if h < 1:
-            continue
+
+    if not P_rows:
+        return pd.DataFrame()
+
+    P = np.vstack(P_rows)
+    num_states = len(prob_cols)
+    uniform = np.full(num_states, 1.0 / num_states)
+
+    valid_horizons = sorted({int(h) for h in horizons if isinstance(h, (int, float)) and h >= 1})
+    if not valid_horizons:
+        return pd.DataFrame()
+
+    out_rows: list[dict] = []
+    for h in valid_horizons:
         Ph = np.linalg.matrix_power(P, h)
-        ph = p0 @ Ph
+        ph = uniform @ Ph
         rec = {"horizon": h}
-        for i, col in enumerate(cols):
-            rec[col] = ph[i]
+        for idx, col in enumerate(prob_cols):
+            rec[col] = float(ph[idx])
         out_rows.append(rec)
-    out = pd.DataFrame(out_rows).set_index("horizon")
-    return out
+
+    return pd.DataFrame(out_rows).set_index("horizon").sort_index()

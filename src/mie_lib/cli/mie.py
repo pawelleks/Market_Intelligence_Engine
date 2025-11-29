@@ -31,6 +31,25 @@ from mie_lib.options.expected_move import (
     update_expected_moves,
 )
 from mie_lib.utils.logging import get_logger
+# --- expected moves snapshot helpers ---
+from mie_lib.cli.expected_moves_snapshots import (
+    DEFAULT_DESTINATION_ROOT as DEFAULT_EM_SNAPSHOT_DEST,
+    DEFAULT_TMP_ROOT as DEFAULT_EM_SNAPSHOT_TMP,
+    build_expected_moves_snapshots,
+)
+# --- hmm snapshot helpers ---
+from mie_lib.cli.hmm_snapshots import (
+    DEFAULT_DESTINATION_ROOT as DEFAULT_HMM_SNAPSHOT_DEST,
+    DEFAULT_TMP_ROOT as DEFAULT_HMM_SNAPSHOT_TMP,
+    build_hmm_snapshots,
+)
+# --- markov snapshot helpers ---
+from mie_lib.cli.markov_snapshots import (
+    DEFAULT_DESTINATION_ROOT as DEFAULT_MARKOV_SNAPSHOT_DEST,
+    DEFAULT_TMP_ROOT as DEFAULT_MARKOV_SNAPSHOT_TMP,
+    DEFAULT_WINDOWS as DEFAULT_MARKOV_SNAPSHOT_WINDOWS,
+    build_markov_snapshots,
+)
 # --- features build API (aliased to avoid shadowing inside handlers) ---
 from mie_lib.features.build_features import (
     build_features_for_ticker as _build_features_for_ticker,
@@ -43,6 +62,7 @@ from mie_lib.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker
 from mie_lib.analytics.markov.states_model import build_states_from_features, derive_matrix
 from mie_lib.analytics.markov.states_model import states_stale
 from mie_lib.options.em_core import MockOptionChainProvider
+from mie_lib.utils.paths import HMM_DIR, MARKOV_DIR
 
 LOG = get_logger("cli")
 
@@ -114,6 +134,27 @@ def _default_markov_tickers() -> list[str]:
     core = set(DEFAULT_MARKOV_GRID_TICKERS_FALLBACK)
     sel = [t for t in cfg if t in core]
     return sel if sel else DEFAULT_MARKOV_GRID_TICKERS_FALLBACK
+
+
+def _default_hmm_snapshot_tickers() -> list[str]:
+    yaml_tickers = [t for t in _load_yaml_tickers() if t]
+    if yaml_tickers:
+        return yaml_tickers
+    hmm_root = HMM_DIR
+    if hmm_root.exists():
+        dirs = sorted({p.name.upper() for p in hmm_root.iterdir() if p.is_dir()})
+        if dirs:
+            return dirs
+    return ["SPY"]
+
+
+def _default_markov_snapshot_tickers() -> list[str]:
+    markov_root = MARKOV_DIR
+    if markov_root.exists():
+        dirs = sorted({p.name.upper() for p in markov_root.iterdir() if p.is_dir()})
+        if dirs:
+            return dirs
+    return _default_markov_tickers()
 
 
 def _parse_csv_int_list(val: str | None, default: list[int]) -> list[int]:
@@ -257,6 +298,111 @@ def handle_update_expected_moves(args):
     return results
 
 
+def handle_build_expected_moves_snapshots(args):
+    cfg = ExpectedMovesConfig.load()
+    tickers_arg = getattr(args, "tickers", None)
+    if tickers_arg:
+        tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
+    else:
+        tickers = [cfg.spot_ticker.upper()]
+    if not tickers:
+        raise SystemExit("build-expected-moves-snapshots: no tickers resolved")
+
+    destination_root = Path(getattr(args, "output_dir", "") or DEFAULT_EM_SNAPSHOT_DEST)
+    tmp_root = Path(getattr(args, "tmp_dir", "") or DEFAULT_EM_SNAPSHOT_TMP)
+    allow_missing = bool(getattr(args, "allow_missing", False))
+    weekly_cfg = cfg.weekly_reference or {}
+    expect_weekly_reference = bool(weekly_cfg.get("enabled", True))
+
+    summary = build_expected_moves_snapshots(
+        tickers=tickers,
+        destination_root=destination_root,
+        tmp_root=tmp_root,
+        allow_missing=allow_missing,
+        expect_weekly_reference=expect_weekly_reference,
+    )
+    ok = sum(1 for r in summary if r.get("status") in {"ok", "partial"})
+    skipped = sum(1 for r in summary if r.get("status") == "skipped")
+    LOG.info(
+        "build-expected-moves-snapshots complete tickers=%s ok=%s skipped=%s dest=%s",
+        ",".join(tickers),
+        ok,
+        skipped,
+        destination_root,
+    )
+    print({"tickers": tickers, "results": summary})
+    return summary
+
+
+def handle_build_hmm_snapshots(args):
+    tickers_arg = getattr(args, "tickers", None)
+    if tickers_arg:
+        tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
+    else:
+        tickers = _default_hmm_snapshot_tickers()
+    if not tickers:
+        raise SystemExit("build-hmm-snapshots: no tickers resolved")
+
+    destination_root = Path(getattr(args, "output_dir", "") or DEFAULT_HMM_SNAPSHOT_DEST)
+    tmp_root = Path(getattr(args, "tmp_dir", "") or DEFAULT_HMM_SNAPSHOT_TMP)
+    allow_missing = bool(getattr(args, "allow_missing", False))
+
+    summary = build_hmm_snapshots(
+        tickers=tickers,
+        destination_root=destination_root,
+        tmp_root=tmp_root,
+        allow_missing=allow_missing,
+    )
+    ok = len(summary.get("tickers_succeeded", []))
+    missing = len(summary.get("tickers_missing", {}))
+    LOG.info(
+        "build-hmm-snapshots complete tickers=%s ok=%s missing=%s dest=%s",
+        ",".join(tickers),
+        ok,
+        missing,
+        destination_root,
+    )
+    print(summary)
+    return summary
+
+
+def handle_build_markov_snapshots(args):
+    tickers_arg = getattr(args, "tickers", None)
+    if tickers_arg:
+        tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
+    else:
+        tickers = _default_markov_snapshot_tickers()
+    if not tickers:
+        raise SystemExit("build-markov-snapshots: no tickers resolved")
+
+    destination_root = Path(getattr(args, "output_dir", "") or DEFAULT_MARKOV_SNAPSHOT_DEST)
+    tmp_root = Path(getattr(args, "tmp_dir", "") or DEFAULT_MARKOV_SNAPSHOT_TMP)
+    allow_missing = bool(getattr(args, "allow_missing", False))
+    windows_arg = getattr(args, "windows", None)
+    windows = [w.strip().upper() for w in windows_arg.split(",") if w.strip()] if windows_arg else None
+
+    summary = build_markov_snapshots(
+        tickers=tickers,
+        destination_root=destination_root,
+        tmp_root=tmp_root,
+        allow_missing=allow_missing,
+        windows=windows,
+    )
+    ok = summary.get("copied_count", 0)
+    missing = len(summary.get("missing", []))
+    wanted_windows = windows or list(DEFAULT_MARKOV_SNAPSHOT_WINDOWS)
+    LOG.info(
+        "build-markov-snapshots complete tickers=%s ok=%s missing=%s dest=%s windows=%s",
+        ",".join(tickers),
+        ok,
+        missing,
+        destination_root,
+        ",".join(wanted_windows),
+    )
+    print(summary)
+    return summary
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -319,6 +465,82 @@ def build_parser():
         help="Also refresh weekly reference parquet",
     )
     p_em_update.set_defaults(func=handle_update_expected_moves)
+
+    p_em_snapshot = sub.add_parser(
+        "build-expected-moves-snapshots",
+        help="Copy expected moves analytics into the snapshot tree for UI consumption",
+    )
+    p_em_snapshot.add_argument(
+        "--tickers",
+        help="Comma-separated tickers; defaults to the spot ticker from expected_moves.yml",
+    )
+    p_em_snapshot.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Skip tickers with missing artifacts instead of raising",
+    )
+    p_em_snapshot.add_argument(
+        "--output-dir",
+        help="Destination snapshot root (default data/analytics_snapshots/options)",
+    )
+    p_em_snapshot.add_argument(
+        "--tmp-dir",
+        help="Temporary staging directory for atomic copies (default data/tmp/options_snapshots)",
+    )
+    p_em_snapshot.set_defaults(func=handle_build_expected_moves_snapshots)
+
+    p_hmm_snapshot = sub.add_parser(
+        "build-hmm-snapshots",
+        help="Copy HMM analytics into the snapshot tree for UI consumption",
+    )
+    p_hmm_snapshot.add_argument(
+        "--tickers",
+        help="Comma-separated tickers; defaults to config tickers or existing analytics directories",
+    )
+    p_hmm_snapshot.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Skip tickers with missing artifacts instead of raising",
+    )
+    p_hmm_snapshot.add_argument(
+        "--output-dir",
+        help="Destination snapshot root (default data/analytics_snapshots/hmm)",
+    )
+    p_hmm_snapshot.add_argument(
+        "--tmp-dir",
+        help="Temporary staging directory for atomic copies (default data/tmp/hmm_snapshot_build)",
+    )
+    p_hmm_snapshot.set_defaults(func=handle_build_hmm_snapshots)
+
+    p_markov_snapshot = sub.add_parser(
+        "build-markov-snapshots",
+        help=(
+            "Copy Markov analytics trees into the snapshot directory, capturing window metadata "
+            "including the 50Y horizon."
+        ),
+    )
+    p_markov_snapshot.add_argument(
+        "--tickers",
+        help="Comma-separated tickers; defaults to existing analytics directories or Markov grid fallback",
+    )
+    p_markov_snapshot.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Skip tickers with missing analytics instead of raising",
+    )
+    p_markov_snapshot.add_argument(
+        "--windows",
+        help="Comma windows to track in metadata (default 1Y,2Y,5Y,10Y,20Y,50Y,MAX)",
+    )
+    p_markov_snapshot.add_argument(
+        "--output-dir",
+        help="Destination snapshot root (default data/analytics_snapshots/markov)",
+    )
+    p_markov_snapshot.add_argument(
+        "--tmp-dir",
+        help="Temporary staging directory for atomic copies (default data/tmp/markov_snapshot_build)",
+    )
+    p_markov_snapshot.set_defaults(func=handle_build_markov_snapshots)
 
     # Smoke check command
     sub.add_parser("smoke-update", help="Lightweight smoke check after FULL+UPDATE: verifies sorted dates and ret_1d continuity for first ticker")

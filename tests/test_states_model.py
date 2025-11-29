@@ -1,6 +1,11 @@
 from pathlib import Path
+import inspect
+import math
+
 import pandas as pd
 import numpy as np
+
+import mie_lib.analytics.markov.states_model as states_model
 
 from mie_lib.analytics.markov.states_model import (
     _window_key_from_arg,
@@ -8,7 +13,6 @@ from mie_lib.analytics.markov.states_model import (
     states_for,
     derive_matrix,
     one_step,
-    multi_step,
 )
 
 
@@ -66,7 +70,49 @@ def test_states_then_matrices_cache_and_windows(tmp_path):
 
     # multi-step uses K=1-derived matrix
     mk1 = derive_matrix("TS1", 10, "tri", 1, "1Y")
-    out = multi_step(mk1, [1,2,3], "tri")
-    assert set(out.index) == {1,2,3}
+    out = states_model.multi_step(mk1, [1, 2, 3], "tri")
+    assert set(out.index) == {1, 2, 3}
+
+
+def test_multi_step_distribution_progression():
+    matrix_df = pd.DataFrame(
+        {
+            "context": ["U", "N", "D"],
+            "mc_prob_up": [0.8, 0.3, 0.1],
+            "mc_prob_neutral": [0.1, 0.5, 0.2],
+            "mc_prob_down": [0.1, 0.2, 0.7],
+            "counts": [100, 80, 60],
+        }
+    )
+    horizons = [1, 2, 3, 4, 5]
+    out = states_model.multi_step(matrix_df, horizons, "tri")
+    assert list(out.index) == [1, 2, 3, 4, 5]
+    # Ensure probabilities evolve over time for at least one state
+    first_probs = out.loc[1].to_numpy()
+    last_probs = out.loc[5].to_numpy()
+    assert not np.allclose(first_probs, last_probs)
+    # Probabilities remain normalized per horizon
+    assert np.allclose(out.sum(axis=1).to_numpy(), 1.0)
+
+
+def test_multi_step_no_ctx_row_keyword_and_progression():
+    sig = inspect.signature(states_model.multi_step)
+    assert "ctx_row" not in sig.parameters
+    assert "mode" in sig.parameters
+
+    matrix = pd.DataFrame(
+        [
+            {"context": "G", "mc_prob_up": 0.6, "mc_prob_neutral": 0.2, "mc_prob_down": 0.2, "counts": 10},
+            {"context": "N", "mc_prob_up": 0.3, "mc_prob_neutral": 0.4, "mc_prob_down": 0.3, "counts": 5},
+            {"context": "R", "mc_prob_up": 0.1, "mc_prob_neutral": 0.2, "mc_prob_down": 0.7, "counts": 8},
+        ]
+    )
+    horizons = [1, 2, 3, 4, 5]
+    result = states_model.multi_step(matrix, horizons, "tri")
+
+    assert list(result.index) == sorted(set(horizons))
+    assert "mc_prob_neutral" in result.columns
+    assert not result.iloc[0].equals(result.iloc[-1])
+    assert all(math.isclose(row.sum(), 1.0, rel_tol=1e-6) for _, row in result.iterrows())
 
 

@@ -984,8 +984,13 @@ def main(argv=None):
         sys.exit(0)
     elif args.command == "build-hmm":
         try:
-            cfg = HMMConfig(n_states=args.states, train_window_years=args.window_years, random_seed=args.seed)
-            out = build_hmm_for_ticker(args.ticker, cfg)
+            # Use standardized builder to ensure metrics and correct paths for API
+            out = build_hmm_standardized_for_ticker(
+                args.ticker, 
+                n_states=args.states, 
+                train_window_years=args.window_years, 
+                random_seed=args.seed
+            )
             print(out)
             LOG.info("build-hmm: %s", out)
             sys.exit(0)

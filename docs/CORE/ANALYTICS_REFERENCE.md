@@ -42,3 +42,12 @@ Parquet files for specific `(state_mode, threshold_bps, order, window)`:
 - Streamlit pages must not recompute analytics; they read these artifacts.
 - Path helpers in `mie_lib.utils.paths` should be used by library code when constructing paths.
 
+## Markov Chain Analysis Endpoints
+### GET /api/v1/markov/matrix/{ticker}/{state_mode}
+**Description:** Retrieves the Markov transition matrix (counts and probabilities).
+**Path Parameters:**
+- `ticker`: Asset ticker (e.g., SPY).
+- `state_mode`: 'binary' (2 states) or 'tri' (3 states).
+**Query Parameters:**
+- `order`: Markov order (k). Default is 1.
+- `threshold_bps`: Return threshold in basis points.

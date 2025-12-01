@@ -75,8 +75,13 @@ def hmm_out_dir(ticker: str) -> Path:
     return HMM_DIR / f"{ticker}"
 
 
-def hmm_std_out_dir(ticker: str, window_years: int, n_states: int) -> Path:
-    return HMM_DIR / f"{ticker}" / f"win{int(window_years)}y" / f"states{int(n_states)}"
+def hmm_std_out_dir(ticker: str, window_years: int | str, n_states: int) -> Path:
+    w_str = str(window_years).lower()
+    if w_str == "max":
+        win_part = "winMax"
+    else:
+        win_part = f"win{int(window_years)}y"
+    return HMM_DIR / f"{ticker}" / win_part / f"states{int(n_states)}"
 
 
 # ---------- Seasonality helpers ----------

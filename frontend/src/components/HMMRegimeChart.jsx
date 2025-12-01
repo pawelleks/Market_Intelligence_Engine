@@ -1,62 +1,29 @@
 import React from 'react';
 import Plot from 'react-plotly.js';
 
-const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, bearThreshold }) => {
+const getTenYearRange = (dates) => {
+    if (dates.length < 2) return null;
+    const endDate = dates[dates.length - 1];
+    const endYear = parseInt(endDate.substring(0, 4));
+    const tenYearStartYear = (endYear - 10);
+    // Construct start date string YYYY-MM-DD
+    const tenYearStart = tenYearStartYear + endDate.substring(4);
+    return [tenYearStart, endDate];
+};
+
+const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, bearThreshold, ticker }) => {
     if (!data || data.length === 0) {
         return <div style={{ color: '#9e9e9e', padding: '20px' }}>No HMM probability data available.</div>;
     }
 
     // --- 1. Prepare Data ---
     const dates = data.map(d => d.date);
-    const bullProbs = data.map(d => d.hmm_prob_bull * 100);
-    const bearProbs = data.map(d => d.hmm_prob_bear * 100);
-    const hasNeutral = data[0]?.hmm_prob_neutral !== undefined;
-    const neutralProbs = hasNeutral ? data.map(d => d.hmm_prob_neutral * 100) : [];
 
-    // --- HMM Regime Traces (Left Y-Axis, Stacked) ---
-    const hmmTraces = [
-        {
-            x: dates,
-            y: bullProbs,
-            mode: 'lines',
-            name: 'P(Bull Regime)',
-            line: { color: '#4caf50', width: 0 },
-            fill: 'tonexty',
-            stackgroup: 'one',
-            hoverinfo: 'x+y+name',
-            hovertemplate: '%{y:.2f}%%<extra></extra>', // FIX: Added % symbol
-            yaxis: 'y1'
-        },
-        ...(hasNeutral ? [{
-            x: dates,
-            y: neutralProbs,
-            mode: 'lines',
-            name: 'P(Neutral Regime)',
-            line: { color: '#9e9e9e', width: 0 },
-            fill: 'tonexty',
-            stackgroup: 'one',
-            hoverinfo: 'x+y+name',
-            hovertemplate: '%{y:.2f}%%<extra></extra>', // FIX: Added % symbol
-            yaxis: 'y1'
-        }] : []),
-        {
-            x: dates,
-            y: bearProbs,
-            mode: 'lines',
-            name: 'P(Bear Regime)',
-            line: { color: '#f44336', width: 0 },
-            fill: 'tonexty',
-            stackgroup: 'one',
-            hoverinfo: 'x+y+name',
-            hovertemplate: '%{y:.2f}%%<extra></extra>', // FIX: Added % symbol
-            yaxis: 'y1'
-        }
-    ];
+    // Add the zoom calculation inside the component:
+    const tenYearRange = getTenYearRange(dates);
 
-    // --- Price Overlay Trace (Right Secondary Y-Axis) ---
+    // --- Price Trace (Main Line) ---
     let priceTrace = [];
-    let showPriceAxis = false;
-
     if (priceData && priceData.length > 0) {
         const priceDates = priceData.map(d => d.date);
         const priceColumn = priceData[0]?.adj_close !== undefined ? 'adj_close' :
@@ -65,67 +32,123 @@ const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, 
 
         if (priceColumn) {
             const prices = priceData.map(d => d[priceColumn]);
-            showPriceAxis = true;
-
             priceTrace = [{
                 x: priceDates,
                 y: prices,
                 mode: 'lines',
                 name: 'Asset Price',
-                line: { color: '#d7e3f3', width: 1.5, dash: 'solid' },
-                yaxis: 'y2',
+                line: { color: '#9ec4ff', width: 2 }, // Light blue line
                 hoverinfo: 'x+y+name',
-                hovertemplate: '%{y:.2f}'
+                hovertemplate: 'Price: $%{y:.2f}'
             }];
         }
     }
 
-    // --- Threshold Traces ---
-    const thresholdTraces = [
-        // Bull Threshold Line
+    // --- Regime Background Shapes ---
+    // We need to create rectangular shapes for periods where a regime is dominant.
+    // This is computationally heavier but gives the "background band" look.
+    // Algorithm: Iterate through data, find contiguous blocks where prob > threshold.
+
+    const shapes = [];
+    let currentRegime = null;
+    let startIndex = null;
+
+    // Helper to add shape
+    const addShape = (regime, start, end) => {
+        let color = 'rgba(0,0,0,0)';
+        if (regime === 'Bull') color = 'rgba(76, 175, 80, 0.2)'; // Green low opacity
+        if (regime === 'Bear') color = 'rgba(244, 67, 54, 0.2)'; // Red low opacity
+        // Neutral is usually transparent or gray, let's skip for clarity or add if needed
+
+        if (color !== 'rgba(0,0,0,0)') {
+            shapes.push({
+                type: 'rect',
+                xref: 'x',
+                yref: 'paper',
+                x0: dates[start],
+                x1: dates[end],
+                y0: 0,
+                y1: 1,
+                fillcolor: color,
+                line: { width: 0 },
+                layer: 'below'
+            });
+        }
+    };
+
+    data.forEach((d, i) => {
+        let dominant = null;
+        // Simple logic: if Bull > threshold -> Bull, if Bear > threshold -> Bear
+        // Priority to Bear if both (unlikely with high thresholds)
+        if (d.hmm_prob_bear * 100 >= bearThreshold) dominant = 'Bear';
+        else if (d.hmm_prob_bull * 100 >= bullThreshold) dominant = 'Bull';
+
+        if (dominant !== currentRegime) {
+            // Regime change
+            if (currentRegime !== null) {
+                addShape(currentRegime, startIndex, i - 1);
+            }
+            currentRegime = dominant;
+            startIndex = i;
+        }
+    });
+    // Add last segment
+    if (currentRegime !== null && startIndex !== null) {
+        addShape(currentRegime, startIndex, data.length - 1);
+    }
+
+    // --- Legend Traces (Dummy traces for background colors) ---
+    // We add these so the user knows what the background colors mean.
+    const legendTraces = [
         {
-            x: dates,
-            y: Array(dates.length).fill(bullThreshold),
-            mode: 'lines',
-            name: `Bull Signal (${bullThreshold}%)`,
-            line: { color: '#4caf50', width: 1, dash: 'dot' },
-            yaxis: 'y1',
-            hoverinfo: 'name'
+            x: [null],
+            y: [null],
+            name: 'Bull Regime',
+            mode: 'markers',
+            marker: { color: 'rgba(76, 175, 80, 1)', size: 10, symbol: 'square' }, // Solid green for legend
+            showlegend: true,
+            hoverinfo: 'none'
         },
-        // Bear Threshold Line
         {
-            x: dates,
-            y: Array(dates.length).fill(bearThreshold),
-            mode: 'lines',
-            name: `Bear Signal (${bearThreshold}%)`,
-            line: { color: '#f44336', width: 1, dash: 'dot' },
-            yaxis: 'y1',
-            hoverinfo: 'name'
+            x: [null],
+            y: [null],
+            name: 'Bear Regime',
+            mode: 'markers',
+            marker: { color: 'rgba(244, 67, 54, 1)', size: 10, symbol: 'square' }, // Solid red for legend
+            showlegend: true,
+            hoverinfo: 'none'
         }
     ];
 
-    const traces = [...hmmTraces, ...priceTrace, ...thresholdTraces];
+    const traces = [...priceTrace, ...legendTraces];
 
 
-    // --- 2. Define Layout (Dual-Axis Configuration) ---
+    // --- 2. Define Layout (Single Axis with Background Shapes) ---
     const layout = {
-        title: { text: `Regime Probabilities (Trained on ${windowYears}Y)`, font: { size: 16, color: '#d7e3f3', align: 'left' } },
-        height: 650,
+        height: 500,
         autosize: true,
-        margin: { t: 50, b: 50, l: 50, r: 50 },
+        margin: { t: 60, b: 50, l: 50, r: 50 },
         font: { color: '#d7e3f3', family: 'Arial, sans-serif' },
         plot_bgcolor: '#0e1525',
         paper_bgcolor: '#0b1220',
 
+        // Add shapes for regimes
+        shapes: shapes,
+
         xaxis: {
             title: 'Date',
+            // Set default range to last 5 years
+            range: [
+                dates.length > 0 ? new Date(new Date(dates[dates.length - 1]).setFullYear(new Date(dates[dates.length - 1]).getFullYear() - 5)).toISOString().split('T')[0] : undefined,
+                dates.length > 0 ? dates[dates.length - 1] : undefined
+            ],
+            autorange: false,
             showgrid: true,
             gridcolor: '#203049',
             linecolor: '#203049',
             zerolinecolor: '#203049',
             rangeslider: {
                 visible: true,
-                range: [dates[0], dates[dates.length - 1]],
                 bgcolor: '#203049',
                 bordercolor: '#203049'
             },
@@ -134,6 +157,8 @@ const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, 
                     { step: 'year', stepmode: 'backward', count: 1, label: '1Y' },
                     { step: 'year', stepmode: 'backward', count: 5, label: '5Y' },
                     { step: 'year', stepmode: 'backward', count: 10, label: '10Y' },
+                    { step: 'year', stepmode: 'backward', count: 15, label: '15Y' },
+                    { step: 'year', stepmode: 'backward', count: 20, label: '20Y' },
                     { step: 'all', label: 'Max' },
                 ],
                 bgcolor: '#203049',
@@ -141,35 +166,32 @@ const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, 
             },
         },
 
-        // Primary Y-Axis (Left) for Probabilities
+        // Primary Y-Axis (Price)
         yaxis: {
-            title: 'Regime Probability (%)',
-            range: [0, 100],
+            title: 'Asset Price (USD)',
             showgrid: true,
             gridcolor: '#203049',
             linecolor: '#203049',
             zerolinecolor: '#203049',
-            domain: [0, 1],
-            fixedrange: true
+            fixedrange: false // Allow zoom on Y
         },
 
-        // Secondary Y-Axis (Right) for Asset Price (Conditional visibility)
-        yaxis2: {
-            title: 'Asset Price (USD)',
-            overlaying: 'y',
-            side: 'right',
-            showgrid: showPriceAxis,
-            visible: showPriceAxis,
-            zeroline: false,
-            anchor: 'x'
+        legend: {
+            orientation: 'h',
+            y: 1.02,
+            x: 1,
+            xanchor: 'right',
+            bgcolor: 'rgba(0,0,0,0)',
+            font: { size: 12, color: '#d7e3f3' }
         },
-
-        legend: { orientation: 'h', y: 1.05, x: 0, bgcolor: 'rgba(0,0,0,0)', font: { size: 11 } },
         modebar: { bgcolor: '#203049', color: '#d7e3f3', activecolor: '#9ec4ff' }
     };
 
     return (
         <div style={{ width: '100%', height: '100%' }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '1.2rem', color: '#d7e3f3', textAlign: 'left', fontWeight: 'bold' }}>
+                {ticker}: Regime Probabilities (Trained on {windowYears}Y)
+            </h3>
             <Plot
                 data={traces}
                 layout={layout}

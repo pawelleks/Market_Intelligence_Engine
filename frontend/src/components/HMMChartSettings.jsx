@@ -1,7 +1,8 @@
 import React from 'react';
 
 // Define the available pre-computed windows, matching the project's strategy
-const PRECOMPUTED_WINDOWS = [1, 5, 10, 20, 50, 'Max']; // 50 years is a custom window now
+// Added 15 and 20 years to the list
+const PRECOMPUTED_WINDOWS = [1, 5, 10, 15, 20, 50, 'Max'];
 
 const HMMChartSettings = ({ settings, onSettingsChange }) => {
 
@@ -24,7 +25,7 @@ const HMMChartSettings = ({ settings, onSettingsChange }) => {
 
 
     return (
-        <div style={{ padding: '10px', backgroundColor: '#0e1525', borderRadius: '8px', marginBottom: '25px', border: '1px solid #203049' }}>
+        <div style={{ padding: '10px', backgroundColor: '#0e1525', borderRadius: '8px', marginBottom: '25px', border: '1px solid #203049', textAlign: 'left' }}>
             <h4 style={{ color: '#9ec4ff', marginTop: '0', fontSize: '1.0rem', marginBottom: '10px', borderBottom: '1px solid #203049', paddingBottom: '5px' }}>
                 HMM Configuration Panel
             </h4>

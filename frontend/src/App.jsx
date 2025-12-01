@@ -3,6 +3,11 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import HMMRegimeChart from './components/HMMRegimeChart';
 import HMMChartSettings from './components/HMMChartSettings';
+import HMMStatsTable from './components/HMMStatsTable';
+import HMMTransitionTable from './components/HMMTransitionTable';
+
+import MarkovTransitionMatrix from './components/MarkovTransitionMatrix';
+import MarkovSettings from './components/MarkovSettings';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -32,6 +37,9 @@ const getWindowDates = (windowYears) => {
 const useAnalyticalData = (settings) => {
   const [markovData, setMarkovData] = useState(null);
   const [hmmData, setHmmData] = useState(null);
+  const [hmmStats, setHmmStats] = useState(null);
+  const [hmmDurations, setHmmDurations] = useState(null); // New state for durations
+  const [hmmMetrics, setHmmMetrics] = useState(null); // New state for transition matrix
   const [priceData, setPriceData] = useState(null); // New state for price overlay
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -39,6 +47,8 @@ const useAnalyticalData = (settings) => {
   // FIX 6: New API endpoint assumption for fetching features/price data
   const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
   const HMM_URL = `${API_BASE}/hmm/probabilities/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
+  const HMM_STATS_URL = `${API_BASE}/hmm/stats/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
+  const HMM_METRICS_URL = `${API_BASE}/hmm/metrics/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const MARK_URL = `${API_BASE}/markov/matrix/${settings.ticker}`;
 
   useEffect(() => {
@@ -65,6 +75,44 @@ const useAnalyticalData = (settings) => {
         }
         setHmmData(hmmJson.data);
 
+        // --- Fetch HMM Statistics (Non-blocking) ---
+        try {
+          const hmmStatsResponse = await fetch(HMM_STATS_URL);
+          if (hmmStatsResponse.ok) {
+            const hmmStatsJson = await hmmStatsResponse.json();
+            setHmmStats(hmmStatsJson.data);
+            // Extract expected durations if available
+            if (hmmStatsJson.expected_durations) {
+              setHmmDurations(hmmStatsJson.expected_durations);
+            } else {
+              setHmmDurations(null);
+            }
+          } else {
+            console.warn("HMM Stats not found (non-fatal)");
+            setHmmStats(null);
+            setHmmDurations(null);
+          }
+        } catch (e) {
+          console.warn("HMM Stats fetch error (non-fatal)", e);
+          setHmmStats(null);
+          setHmmDurations(null);
+        }
+
+        // --- Fetch HMM Metrics (Transition Matrix) ---
+        try {
+          const hmmMetricsResponse = await fetch(HMM_METRICS_URL);
+          if (hmmMetricsResponse.ok) {
+            const hmmMetricsJson = await hmmMetricsResponse.json();
+            setHmmMetrics(hmmMetricsJson.data);
+          } else {
+            console.warn("HMM Metrics not found (non-fatal)");
+            setHmmMetrics(null);
+          }
+        } catch (e) {
+          console.warn("HMM Metrics fetch error (non-fatal)", e);
+          setHmmMetrics(null);
+        }
+
         // --- FIX 6: Fetch Price Data for Overlay ---
         // NOTE: We assume a dedicated price/feature endpoint exists or will be created
         const priceResponse = await fetch(PRICE_URL);
@@ -87,7 +135,7 @@ const useAnalyticalData = (settings) => {
   }, [settings]);
 
   // FIX 6: Return the new priceData state
-  return { markovData, hmmData, priceData, loading, error };
+  return { markovData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error };
 };
 
 
@@ -100,7 +148,7 @@ const DashboardHome = () => (
   </div>
 );
 
-const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, loading, error }) => {
+const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error }) => {
   // FIX 4: Dynamic summary text based on settings
   const { start, end } = getWindowDates(settings.windowYears);
   const stateNames = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Bear)';
@@ -127,12 +175,35 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, loading, err
 
       {/* Right Panel: Charts and Display (Fluid Width - FIX 7: flex-grow: 1) */}
       <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left' }}>
-        <h2 style={{ fontSize: '1.6rem', marginBottom: '5px', textAlign: 'left' }}>HMM Regime Analysis: {settings.ticker}</h2>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '0', textAlign: 'left' }}>HMM Regime Analysis: {settings.ticker}</h2>
 
         {/* FIX 4: Chart settings text display */}
         <p style={{ color: '#9e9e9e', fontSize: '0.8rem', borderBottom: '1px solid #203049', paddingBottom: '10px', marginBottom: '20px' }}>
           {summaryText}
         </p>
+
+        {/* Per-State Statistics Table */}
+        <h3 style={{ marginTop: '0px', marginBottom: '15px', fontSize: '1.2rem', color: '#d7e3f3', fontWeight: 'bold' }}>
+          Per-State Performance Statistics
+        </h3>
+        <HMMStatsTable
+          statsData={hmmStats}
+          hmmData={hmmData}
+          priceData={priceData}
+          bullThreshold={settings.bullThreshold}
+          bearThreshold={settings.bearThreshold}
+        />
+
+        <div style={{ height: '40px' }}></div> {/* Spacer */}
+
+        {/* Transition Matrix Table */}
+        <HMMTransitionTable
+          metricsData={hmmMetrics}
+          nStates={settings.nStates}
+          expectedDurations={hmmDurations} // FIX: Pass durations
+        />
+
+        <div style={{ height: '40px' }}></div> {/* Spacer */}
 
         {loading ? <p>Loading chart...</p> :
           <HMMRegimeChart
@@ -140,7 +211,67 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, loading, err
             priceData={priceData} // FIX 6: Pass price data
             windowYears={settings.windowYears}
             nStates={settings.nStates}
+            ticker={settings.ticker}
+            bullThreshold={settings.bullThreshold}
+            bearThreshold={settings.bearThreshold}
           />
+        }
+      </div>
+    </div>
+  );
+};
+
+
+const MarkovAnalysisPage = ({ settings, setSettings, markovData, loading, error }) => {
+  // Determine the state display for the title
+  const stateDisplay = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Red)';
+
+  // Summary text for the page title area
+  const summaryText = `Ticker: ${settings.ticker} • State Mode: ${stateDisplay} • Window: ${settings.windowYears}Y • Threshold: ${settings.thresholdBPS} bps (${(settings.thresholdBPS / 100).toFixed(3)}%) • Order: ${settings.markovOrder}`;
+
+  return (
+    <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
+
+      {/* Left Panel: Configuration */}
+      <div style={{ width: '300px', flexShrink: 0, textAlign: 'left' }}>
+        <MarkovSettings settings={settings} onSettingsChange={setSettings} />
+
+        {/* Data Status/Debug */}
+        <div style={{ padding: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049' }}>
+          <h3 style={{ color: '#4caf50', marginTop: '0' }}>Data Status</h3>
+          <p style={{ fontSize: '13px' }}>Proxy Status: Active</p>
+          <p style={{ fontSize: '13px' }}>Markov Records: {markovData ? markovData.length : 'N/A'}</p>
+          <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `Error: ${error}` : ''}</p>
+        </div>
+      </div>
+
+      {/* Right Panel: Charts and Tables (Fluid Width) */}
+      <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left' }}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '0' }}>Markov Analysis: {settings.ticker}</h2>
+        <p style={{ color: '#9e9e9e', fontSize: '0.85rem', borderBottom: '1px solid #203049', paddingBottom: '10px', marginBottom: '20px' }}>
+          {summaryText}
+        </p>
+
+        {loading ? <p>Loading Markov data...</p> :
+          <>
+            {/* 1. Transition Matrix Section (Table and Heatmap) */}
+            <h3 style={{ fontSize: '1.2rem', color: '#9ec4ff' }}>Transition Matrix: Order {settings.markovOrder}</h3>
+            <MarkovTransitionMatrix
+              data={markovData}
+              settings={settings} // Pass all settings for filtering
+            />
+
+            {/* 2. Multi-Step Forecast Section (Placeholder structure) */}
+            <div style={{ marginTop: '40px' }}>
+              <h3 style={{ fontSize: '1.2rem', color: '#9ec4ff' }}>Multi-Step Forecast (1st-Order Approximation)</h3>
+              <p>Forecast Horizon: {settings.forecastHorizons.join(', ')} days</p>
+
+              {/* Placeholder for Multi-Step Table and Chart */}
+              <div style={{ padding: '20px', backgroundColor: '#0e1525', borderRadius: '8px' }}>
+                <p style={{ color: '#9e9e9e' }}>Multi-Step Forecast Components (To be built)</p>
+              </div>
+            </div>
+          </>
         }
       </div>
     </div>
@@ -153,15 +284,17 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, loading, err
 function App() {
   const [settings, setSettings] = useState({
     ticker: 'SPY',
-    nStates: 3, // Set to 3 States default based on error message 'Ternary' in screenshot
-    windowYears: 'Max', // FIX: Default to Max History
-    thresholdBPS: 10,
-    bullThreshold: 50, // FIX: Default to 50%
-    bearThreshold: 50, // FIX: Default to 50%
+    nStates: 3, // Default to 3 States for Ternary Markov
+    windowYears: 20, // Default to 20 Years for a good range
+    thresholdBPS: 10, // Default to 10 bps
+    bullThreshold: 50,
+    bearThreshold: 50,
+    markovOrder: 1, // Default Markov Order
+    forecastHorizons: [1, 2, 3, 4], // Default Horizons for Multi-Step
   });
 
   // FIX 6: Update hook usage to include priceData
-  const { markovData, hmmData, priceData, loading, error } = useAnalyticalData(settings);
+  const { markovData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error } = useAnalyticalData(settings);
 
   return (
     <Router>
@@ -169,13 +302,13 @@ function App() {
         <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3' }}>
 
           {/* Sidebar Navigation */}
-          <nav style={{ width: '200px', backgroundColor: '#0e1525', padding: '20px', borderRight: '1px solid #203049', flexShrink: 0 }}>
+          <nav style={{ width: '200px', backgroundColor: '#0e1525', padding: '20px', borderRight: '1px solid #203049', flexShrink: 0, textAlign: 'left' }}>
             <h3 style={{ color: '#9ec4ff' }}>MIE Sections</h3>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               <li><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
               <li><Link to="/analysis/hmm" style={{ color: '#9ec4ff', textDecoration: 'none' }}>HMM Regimes</Link></li>
               {/* Placeholder for future sections */}
-              <li><Link to="/analysis/markov" style={{ color: '#555', textDecoration: 'none' }}>Markov Analysis (WIP)</Link></li>
+              <li><Link to="/analysis/markov" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Markov Analysis</Link></li>
             </ul>
           </nav>
 
@@ -190,12 +323,24 @@ function App() {
                   setSettings={setSettings}
                   hmmData={hmmData}
                   priceData={priceData} // FIX 6: Pass price data
+                  hmmStats={hmmStats}
+                  hmmMetrics={hmmMetrics}
+                  hmmDurations={hmmDurations} // FIX: Pass durations
                   loading={loading}
                   error={error}
                 />}
               />
               {/* Future Nested Routes will go here */}
-              <Route path="/analysis/markov" element={<h2>Markov Section Placeholder</h2>} />
+              <Route
+                path="/analysis/markov"
+                element={<MarkovAnalysisPage
+                  settings={settings}
+                  setSettings={setSettings}
+                  markovData={markovData}
+                  loading={loading}
+                  error={error}
+                />}
+              />
             </Routes>
           </main>
 

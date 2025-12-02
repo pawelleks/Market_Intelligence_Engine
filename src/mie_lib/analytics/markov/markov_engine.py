@@ -101,7 +101,7 @@ def load_features_for_markov(ticker: str):
 
 
 # Unified classification imports
-from .states_model import classify_tri_state, classify_binary_state  # local import to avoid circular at module import time
+from .states_model import classify_tri_state, classify_binary_state, multi_step # Now imports the utility
 
 
 def _states_from_returns(ret: "pd.Series", cfg: MarkovConfig) -> "pd.Series":
@@ -257,6 +257,22 @@ def build_markov_for_ticker(ticker: str, cfg: MarkovConfig) -> Dict[str, str]:
     # Save counts and probability matrices for given order
     counts_df.to_parquet(out_dir / f"counts_order{cfg.order}.parquet", index=False)
     prob_df.to_parquet(out_dir / f"matrix_order{cfg.order}.parquet", index=False)
+
+    # --- Multi-Step Forecast (NEW) ---
+    # NOTE: This only works robustly for Order 1
+    if cfg.order == 1:
+        # horizons are not configurable here, assume standard 1, 2, 3, 4, 5 days
+        horizons = [1, 2, 3, 4, 5] 
+        try:
+            multi_step_df = multi_step(prob_df, horizons, cfg.state_mode)
+            
+            if not multi_step_df.empty:
+                out_path = out_dir / f"multi_step_order{cfg.order}_{cfg.state_mode}.parquet"
+                # Reset index to keep 'horizon' as a column, since to_parquet(index=False) drops the index
+                multi_step_df.reset_index().to_parquet(out_path, index=False)
+        except Exception:
+            pass
+    # --- END Multi-Step Forecast ---
 
     # Build predictions for all dates with context (including last date)
     pred_df = _predictions_for_dates(df["date"], ctx, prob_df, counts_df, cfg)

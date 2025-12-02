@@ -8,6 +8,10 @@ import HMMTransitionTable from './components/HMMTransitionTable';
 
 import MarkovTransitionMatrix from './components/MarkovTransitionMatrix';
 import MarkovSettings from './components/MarkovSettings';
+import MarkovMultiStepForecast from './components/MarkovMultiStepForecast';
+import MarkovConclusion from './components/MarkovConclusion';
+import MarkovMultiStepConclusion from './components/MarkovMultiStepConclusion';
+import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -36,20 +40,28 @@ const getWindowDates = (windowYears) => {
 // FIX 6: Added priceData to state management and fetch
 const useAnalyticalData = (settings) => {
   const [markovData, setMarkovData] = useState(null);
+  const [markovMultiStepData, setMarkovMultiStepData] = useState(null);
   const [hmmData, setHmmData] = useState(null);
   const [hmmStats, setHmmStats] = useState(null);
   const [hmmDurations, setHmmDurations] = useState(null); // New state for durations
   const [hmmMetrics, setHmmMetrics] = useState(null); // New state for transition matrix
   const [priceData, setPriceData] = useState(null); // New state for price overlay
+  const [latestMarkovState, setLatestMarkovState] = useState(null); // New state for latest context
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // FIX 6: New API endpoint assumption for fetching features/price data
   // FIX 6: New API endpoint assumption for fetching features/price data
   const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
   const HMM_URL = `${API_BASE}/hmm/probabilities/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_STATS_URL = `${API_BASE}/hmm/stats/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_METRICS_URL = `${API_BASE}/hmm/metrics/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
-  const MARK_URL = `${API_BASE}/markov/matrix/${settings.ticker}`;
+
+  // Construct Markov URL with query params
+  const markovStateMode = settings.nStates === 2 ? 'binary' : 'tri';
+  const markovWindow = settings.windowYears === 'Max' ? 'MAX' : `${settings.windowYears}Y`;
+  const MARK_URL = `${API_BASE}/markov/matrix/${settings.ticker}?state_mode=${markovStateMode}&window_key=${markovWindow}&threshold_bps=${settings.thresholdBPS}&order=${settings.markovOrder}`;
+  const MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${markovStateMode}`;
 
   useEffect(() => {
     async function fetchData() {
@@ -65,6 +77,15 @@ const useAnalyticalData = (settings) => {
           throw new Error(`Markov API Error: ${markovJson.detail}`);
         }
         setMarkovData(markovJson.data);
+
+        // --- Fetch Markov Multi-Step Data ---
+        const multiStepResponse = await fetch(MULTISTEP_URL);
+        const multiStepJson = await multiStepResponse.json();
+
+        if (!multiStepResponse.ok) {
+          throw new Error(`Markov Multi-Step API Error: ${multiStepJson.detail}`);
+        }
+        setMarkovMultiStepData(multiStepJson.data);
 
         // --- Fetch HMM Data ---
         const hmmResponse = await fetch(HMM_URL);
@@ -135,7 +156,7 @@ const useAnalyticalData = (settings) => {
   }, [settings]);
 
   // FIX 6: Return the new priceData state
-  return { markovData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error };
+  return { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, loading, error };
 };
 
 
@@ -222,7 +243,7 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
 };
 
 
-const MarkovAnalysisPage = ({ settings, setSettings, markovData, loading, error }) => {
+const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStepData, loading, error }) => {
   // Determine the state display for the title
   const stateDisplay = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Red)';
 
@@ -232,16 +253,26 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, loading, error 
   return (
     <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
 
-      {/* Left Panel: Configuration */}
-      <div style={{ width: '300px', flexShrink: 0, textAlign: 'left' }}>
+      {/* Left Panel: Configuration (STICKY WRAPPER IMPLEMENTED HERE) */}
+      <div style={{
+        width: '300px',
+        flexShrink: 0,
+        textAlign: 'left',
+        // --- STICKY PROPERTIES ---
+        position: 'sticky',
+        top: '20px', // Distance from the top of the viewport when scrolling
+        alignSelf: 'flex-start', // Ensures it starts at the top
+        maxHeight: 'calc(100vh - 40px)' // Ensures it doesn't overflow the viewport
+        // --- END STICKY PROPERTIES ---
+      }}>
         <MarkovSettings settings={settings} onSettingsChange={setSettings} />
 
         {/* Data Status/Debug */}
-        <div style={{ padding: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049' }}>
-          <h3 style={{ color: '#4caf50', marginTop: '0' }}>Data Status</h3>
+        <div style={{ padding: '10px', border: '1px solid #203049', borderRadius: '8px', marginTop: '20px', backgroundColor: '#0e1525' }}>
+          <h3 style={{ color: '#4caf50', paddingTop: '0' }}>Data Status</h3>
           <p style={{ fontSize: '13px' }}>Proxy Status: Active</p>
           <p style={{ fontSize: '13px' }}>Markov Records: {markovData ? markovData.length : 'N/A'}</p>
-          <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `Error: ${error}` : ''}</p>
+          <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `Error: ${error}` : 'Data Loaded.'}</p>
         </div>
       </div>
 
@@ -260,16 +291,22 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, loading, error 
               data={markovData}
               settings={settings} // Pass all settings for filtering
             />
+            <MarkovConclusion markovData={markovData} settings={settings} />
 
-            {/* 2. Multi-Step Forecast Section (Placeholder structure) */}
+            {/* NEW ONE-STEP SECTION */}
+            <MarkovOneStepMatrix markovData={markovData} settings={settings} />
+
+            {/* 2. Multi-Step Forecast Section */}
             <div style={{ marginTop: '40px' }}>
               <h3 style={{ fontSize: '1.2rem', color: '#9ec4ff' }}>Multi-Step Forecast (1st-Order Approximation)</h3>
-              <p>Forecast Horizon: {settings.forecastHorizons.join(', ')} days</p>
+              <p style={{ color: '#9e9e9e', fontSize: '0.9rem', marginBottom: '15px' }}>
+                Forecast Horizon: {settings.forecastHorizons.join(', ')} days
+              </p>
 
-              {/* Placeholder for Multi-Step Table and Chart */}
-              <div style={{ padding: '20px', backgroundColor: '#0e1525', borderRadius: '8px' }}>
-                <p style={{ color: '#9e9e9e' }}>Multi-Step Forecast Components (To be built)</p>
-              </div>
+              <MarkovMultiStepForecast settings={settings} />
+
+              {/* NEW CONCLUSION COMPONENT */}
+              <MarkovMultiStepConclusion forecastData={markovMultiStepData} settings={settings} />
             </div>
           </>
         }
@@ -284,7 +321,7 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, loading, error 
 function App() {
   const [settings, setSettings] = useState({
     ticker: 'SPY',
-    nStates: 3, // Default to 3 States for Ternary Markov
+    nStates: 2, // Default to 2 States (Binary)
     windowYears: 20, // Default to 20 Years for a good range
     thresholdBPS: 10, // Default to 10 bps
     bullThreshold: 50,
@@ -294,7 +331,7 @@ function App() {
   });
 
   // FIX 6: Update hook usage to include priceData
-  const { markovData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error } = useAnalyticalData(settings);
+  const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, loading, error } = useAnalyticalData(settings);
 
   return (
     <Router>
@@ -337,6 +374,8 @@ function App() {
                   settings={settings}
                   setSettings={setSettings}
                   markovData={markovData}
+                  markovMultiStepData={markovMultiStepData}
+                  latestMarkovState={latestMarkovState} // NEW PROP
                   loading={loading}
                   error={error}
                 />}

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MIE API Test Client</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #0b1220; color: #d7e3f3; margin: 20px; }
+        code { background-color: #203049; padding: 2px 4px; border-radius: 3px; }
+        h1 { color: #4caf50; }
+        h2 { color: #9ec4ff; border-bottom: 1px solid #203049; padding-bottom: 5px; }
+        #output { background-color: #0e1525; border: 1px solid #203049; padding: 15px; margin-top: 10px; }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+    <h1>MIE Analytics API - Frontend Verification</h1>
+    <p>Server running at <code>http://localhost:8000</code>. Checking Markov and HMM endpoints.</p>
+    
+    <h2>Markov Matrix (Order 1)</h2>
+    <pre id="output-markov" class="loading">Loading Markov data...</pre>
+
+    <h2>HMM Probabilities (2 States, 5Y Window)</h2>
+    <pre id="output-hmm" class="loading">Loading HMM data...</pre>
+
+    <script>
+        const API_BASE = "http://localhost:8000/api/v1";
+        const MARK_URL = `${API_BASE}/markov/matrix/SPY`;
+        const HMM_URL  = `${API_BASE}/hmm/probabilities/SPY`;
+
+        async function fetchData(url, outputElementId) {
+            const outputElement = document.getElementById(outputElementId);
+            outputElement.className = 'loading';
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(`Status ${response.status} - ${data.detail || "Unknown API error"}`);
+                }
+
+                // Display only the first 5 records of the data payload for readability
+                const displayData = data.data.slice(0, 5); 
+                const totalRecords = data.data.length;
+
+                outputElement.className = 'success';
+                outputElement.textContent = 
+                    `✅ SUCCESS! (Total Records: ${totalRecords})\n\n` + 
+                    JSON.stringify(displayData, null, 2) +
+                    `\n\n... and ${totalRecords - 5} more records.`;
+                
+                console.log(`Successfully retrieved ${url} with ${totalRecords} records.`);
+
+            } catch (error) {
+                outputElement.className = 'error';
+                outputElement.textContent = 
+                    `❌ ERROR: Connection Failed.\n` + 
+                    `Please check server status (PID ${data.pid || 'N/A'}).\n` +
+                    `Details: ${error.message}`;
+                console.error("Fetch Error:", error);
+            }
+        }
+
+        fetchData(MARK_URL, 'output-markov');
+        fetchData(HMM_URL, 'output-hmm');
+    </script>
+</body>
+</html>

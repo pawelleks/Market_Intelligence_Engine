@@ -21,6 +21,9 @@ from mie_lib.utils.paths import features_parquet_path
 
 # Price Viewer Imports
 from mie_lib.core.state_classification import classify_tri_state
+from mie_lib.analytics.minervini import run_minervini_template
+from mie_lib.utils.ticker_service import get_tickers_for_analysis
+from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
 
 # -----------------------------------------------------------------
@@ -165,6 +168,17 @@ def get_data_freshness_status(ticker: str) -> JSONResponse:
             detail=f"Error checking freshness: {e}"
         )
 
+@app.get("/api/v1/tickers/{analysis_key}")
+def get_available_tickers_for_analysis(analysis_key: str) -> JSONResponse:
+    """Retrieves the list of tickers allowed for a specific analytical page scope."""
+    
+    tickers = get_tickers_for_analysis(analysis_key)
+    
+    return JSONResponse(content={
+        "analysis_key": analysis_key,
+        "tickers": tickers
+    })
+
 @app.get("/api/v1/data/prices/{ticker}")
 def get_price_returns_viewer_data(
     ticker: str, 
@@ -246,14 +260,15 @@ def get_markov_matrix(
 def get_markov_multistep(
     ticker: str,
     state_mode: str,
-    order: int = 1, # Multi-step forecast only works robustly for Order 1
+    threshold_bps: int, # NEW: Threshold is required for file uniqueness
+    order: int = 1, 
 ) -> JSONResponse:
     """Retrieves the pre-computed multi-step forecast probabilities."""
     
     ticker = ticker.upper()
     
     # 1. Determine the path to the multi-step file
-    path = markov_out_dir(ticker) / f"multi_step_order{order}_{state_mode}.parquet"
+    path = markov_out_dir(ticker) / f"multi_step_order{order}_{state_mode}_thr{threshold_bps}.parquet"
     
     # 2. Read and format the data
     data = _read_parquet_and_format(path)

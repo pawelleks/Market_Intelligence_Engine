@@ -1,7 +1,37 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+
+const API_BASE = "/api/v1";
+const ANALYSIS_KEY = "Minervini_Template"; // Use the specific Minervini scope
 
 const MinerviniPage = ({ settings, onSettingsChange, priceData, loading, error }) => {
     // Note: Trend Template calculation requires full historical price data
+
+    const [availableTickers, setAvailableTickers] = useState([]);
+    const [loadingTickers, setLoadingTickers] = useState(true);
+
+    // Fetch the list of available tickers on mount
+    useEffect(() => {
+        async function fetchTickers() {
+            setLoadingTickers(true);
+            try {
+                const response = await fetch(`${API_BASE}/tickers/${ANALYSIS_KEY}`);
+                const json = await response.json();
+                if (response.ok) {
+                    setAvailableTickers(json.tickers);
+                    // Automatically set the first ticker as the default if none is selected
+                    if (!settings.ticker || !json.tickers.includes(settings.ticker)) {
+                        onSettingsChange({ ...settings, ticker: json.tickers[0] || 'SPY' });
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to fetch available tickers:", error);
+                setAvailableTickers(['SPY', 'QQQ']); // Fallback list
+            } finally {
+                setLoadingTickers(false);
+            }
+        }
+        fetchTickers();
+    }, []); // Depend only on mount
     return (
         <div style={{ display: 'flex', gap: '20px', padding: '20px', width: '100%' }}>
 
@@ -15,6 +45,22 @@ const MinerviniPage = ({ settings, onSettingsChange, priceData, loading, error }
                     <p style={{ fontSize: '13px', color: '#9e9e9e', paddingBottom: '10px' }}>
                         Note: This analysis requires fetching the full available price history.
                     </p>
+
+                    <div style={{ marginBottom: '15px' }}>
+                        <label style={{ display: 'block', fontSize: '13px', marginBottom: '5px', color: '#9e9e9e' }}>Ticker Symbol</label>
+                        {loadingTickers ?
+                            <p style={{ fontSize: '14px' }}>Loading list...</p> :
+                            <select
+                                value={settings.ticker}
+                                onChange={(e) => onSettingsChange({ ...settings, ticker: e.target.value })}
+                                style={{ width: '100%', padding: '8px', backgroundColor: '#0b1220', color: '#d7e3f3', border: '1px solid #203049', borderRadius: '4px' }}
+                            >
+                                {availableTickers.map(ticker => (
+                                    <option key={ticker} value={ticker}>{ticker}</option>
+                                ))}
+                            </select>
+                        }
+                    </div>
                     <button onClick={() => alert('Future: Fetch full history here')}
                         style={{ padding: '10px', backgroundColor: '#4caf50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
                         Run Template Check

@@ -55,144 +55,100 @@ const useAnalyticalData = (settings) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // FIX 6: New API endpoint assumption for fetching features/price data
-  // FIX 6: New API endpoint assumption for fetching features/price data
-  const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
-  const FRESHNESS_URL = `${API_BASE}/data/freshness/${settings.ticker}`;
-  const PRICE_VIEWER_URL = `${API_BASE}/data/prices/${settings.ticker}?rows=${settings.rows}&state_mode=${settings.stateMode}&threshold_bps=${settings.thresholdBPS}`;
+  // Derived URLs
+  const markovStateMode = settings.nStates === 2 ? 'binary' : 'tri';
+  const markovWindow = settings.windowYears === 'Max' ? 'MAX' : `${settings.windowYears}Y`;
+
   const HMM_URL = `${API_BASE}/hmm/probabilities/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_STATS_URL = `${API_BASE}/hmm/stats/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_METRICS_URL = `${API_BASE}/hmm/metrics/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
+  const MARK_MATRIX_URL = `${API_BASE}/markov/matrix/${settings.ticker}?state_mode=${markovStateMode}&window_key=${markovWindow}&threshold_bps=${settings.thresholdBPS}&order=${settings.markovOrder}`;
+  const MARK_MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${markovStateMode}?threshold_bps=${settings.thresholdBPS}`;
+  const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
+  const FRESHNESS_URL = `${API_BASE}/data/freshness/${settings.ticker}`;
+  const PRICE_VIEWER_URL = `${API_BASE}/data/prices/${settings.ticker}?rows=${settings.rows}&state_mode=${settings.stateMode}&threshold_bps=${settings.thresholdBPS}`;
 
-  // Construct Markov URL with query params
-  const markovStateMode = settings.nStates === 2 ? 'binary' : 'tri';
-  const markovWindow = settings.windowYears === 'Max' ? 'MAX' : `${settings.windowYears}Y`;
-  const MARK_URL = `${API_BASE}/markov/matrix/${settings.ticker}?state_mode=${markovStateMode}&window_key=${markovWindow}&threshold_bps=${settings.thresholdBPS}&order=${settings.markovOrder}`;
-  const MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${markovStateMode}`;
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
       setError(null);
 
+      // --- 1. Fetch HMM and Markov Core Data (MUST RUN) ---
+
+      // HMM Probabilities (Critical for HMM Page)
       try {
-        // --- Fetch Markov Data ---
-        const markovResponse = await fetch(MARK_URL);
-        const markovJson = await markovResponse.json();
+        const response = await fetch(HMM_URL);
+        const json = await response.json();
+        if (response.ok) { setHmmData(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("HMM Probabilities Failed:", err.message); setHmmData(null); }
 
-        if (!markovResponse.ok) {
-          throw new Error(`Markov API Error: ${markovJson.detail}`);
-        }
-        setMarkovData(markovJson.data);
-
-        // --- Fetch Markov Multi-Step Data ---
-        const multiStepResponse = await fetch(MULTISTEP_URL);
-        const multiStepJson = await multiStepResponse.json();
-
-        if (!multiStepResponse.ok) {
-          throw new Error(`Markov Multi-Step API Error: ${multiStepJson.detail}`);
-        }
-        setMarkovMultiStepData(multiStepJson.data);
-
-        // --- Fetch HMM Data ---
-        const hmmResponse = await fetch(HMM_URL);
-        const hmmJson = await hmmResponse.json();
-
-        if (!hmmResponse.ok) {
-          throw new Error(`HMM API Error: ${hmmJson.detail}`);
-        }
-        setHmmData(hmmJson.data);
-
-        // --- Fetch HMM Statistics (Non-blocking) ---
-        try {
-          const hmmStatsResponse = await fetch(HMM_STATS_URL);
-          if (hmmStatsResponse.ok) {
-            const hmmStatsJson = await hmmStatsResponse.json();
-            setHmmStats(hmmStatsJson.data);
-            // Extract expected durations if available
-            if (hmmStatsJson.expected_durations) {
-              setHmmDurations(hmmStatsJson.expected_durations);
-            } else {
-              setHmmDurations(null);
-            }
+      // HMM Statistics (Critical for HMM Page)
+      try {
+        const response = await fetch(HMM_STATS_URL);
+        const json = await response.json();
+        if (response.ok) {
+          setHmmStats(json.data);
+          if (json.expected_durations) {
+            setHmmDurations(json.expected_durations);
           } else {
-            console.warn("HMM Stats not found (non-fatal)");
-            setHmmStats(null);
             setHmmDurations(null);
           }
-        } catch (e) {
-          console.warn("HMM Stats fetch error (non-fatal)", e);
-          setHmmStats(null);
-          setHmmDurations(null);
-        }
+        } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("HMM Stats Failed:", err.message); setHmmStats(null); setHmmDurations(null); }
 
-        // --- Fetch HMM Metrics (Transition Matrix) ---
-        try {
-          const hmmMetricsResponse = await fetch(HMM_METRICS_URL);
-          if (hmmMetricsResponse.ok) {
-            const hmmMetricsJson = await hmmMetricsResponse.json();
-            setHmmMetrics(hmmMetricsJson.data);
-          } else {
-            console.warn("HMM Metrics not found (non-fatal)");
-            setHmmMetrics(null);
-          }
-        } catch (e) {
-          console.warn("HMM Metrics fetch error (non-fatal)", e);
-          setHmmMetrics(null);
-        }
+      // HMM Metrics (Transition Matrix)
+      try {
+        const response = await fetch(HMM_METRICS_URL);
+        const json = await response.json();
+        if (response.ok) { setHmmMetrics(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("HMM Metrics Failed:", err.message); setHmmMetrics(null); }
 
-        // --- FIX 6: Fetch Price Data for Overlay ---
-        // NOTE: We assume a dedicated price/feature endpoint exists or will be created
-        const priceResponse = await fetch(PRICE_URL);
-        const priceJson = await priceResponse.json();
+      // Markov Matrix (Critical for Markov Page)
+      try {
+        const response = await fetch(MARK_MATRIX_URL);
+        const json = await response.json();
+        if (response.ok) { setMarkovData(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("Markov Matrix Failed:", err.message); setMarkovData(null); }
 
-        if (!priceResponse.ok) {
-          throw new Error(`Price API Error: ${priceJson.detail}`);
-        }
-        setPriceData(priceJson.data);
+      // --- 2. Fetch Dependent/Utility Data (Can Fail Gracefully) ---
 
-        // --- Fetch Data Freshness Status (NEW) ---
-        try {
-          const freshnessResponse = await fetch(FRESHNESS_URL);
-          if (freshnessResponse.ok) {
-            const freshnessJson = await freshnessResponse.json();
-            setFreshnessStatus(freshnessJson);
-          } else {
-            console.warn("Freshness API failed to load.");
-            setFreshnessStatus(null);
-          }
-        } catch (e) {
-          console.warn("Freshness fetch error", e);
-          setFreshnessStatus(null);
-        }
+      // Markov Multi-Step (Can Fail Gracefully if data not generated)
+      try {
+        const response = await fetch(MARK_MULTISTEP_URL);
+        const json = await response.json();
+        if (response.ok) { setMarkovMultiStepData(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("Markov Multi-Step Failed:", err.message); setMarkovMultiStepData(null); }
 
-        // --- Price Viewer Data Fetch ---
-        try {
-          const viewerResponse = await fetch(PRICE_VIEWER_URL);
-          if (viewerResponse.ok) {
-            const viewerJson = await viewerResponse.json();
-            setPriceViewerData(viewerJson.data);
-          } else {
-            console.warn("Price Viewer API failed to load.");
-            setPriceViewerData(null);
-          }
-        } catch (e) {
-          console.warn("Price Viewer fetch error", e);
-          setPriceViewerData(null);
-        }
+      // Price Data (Needed for Overlays/Viewer)
+      try {
+        const response = await fetch(PRICE_URL);
+        const json = await response.json();
+        if (response.ok) { setPriceData(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("Price Features Failed:", err.message); setPriceData(null); }
 
-      } catch (err) {
-        console.error("Data Fetch Error:", err);
-        setError(err.message || 'Check browser console for network details.');
-      } finally {
-        setLoading(false);
-      }
+      // Data Freshness Status
+      try {
+        const response = await fetch(FRESHNESS_URL);
+        const json = await response.json();
+        if (response.ok) { setFreshnessStatus(json); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("Freshness Check Failed:", err.message); setFreshnessStatus(null); }
+
+      // Price Viewer Data (Utility Page)
+      try {
+        const response = await fetch(PRICE_VIEWER_URL);
+        const json = await response.json();
+        if (response.ok) { setPriceViewerData(json.data); } else { throw new Error(json.detail); }
+      } catch (err) { console.warn("Price Viewer Data Failed:", err.message); setPriceViewerData(null); }
+
+      setLoading(false);
+
     }
 
     fetchData();
-  }, [settings]);
+  }, [settings]); // Depend on settings change
 
-  // FIX 6: Return the new priceData state
+  // Updated return signature
   return { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error };
 };
 
@@ -394,7 +350,7 @@ function App() {
     bullThreshold: 50,
     bearThreshold: 50,
     markovOrder: 1, // Default Markov Order
-    forecastHorizons: [1, 2, 3, 4], // Default Horizons for Multi-Step
+    forecastHorizons: ['1', '2', '3', '4'], // Default Horizons for Multi-Step
     // NEW DEFAULTS FOR VIEWER
     rows: 50,
     stateMode: 'tri'

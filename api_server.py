@@ -287,6 +287,45 @@ def get_markov_multistep(
     })
 
 
+@app.get("/api/v1/template/minervini/{ticker}")
+def get_minervini_template(
+    ticker: str,
+    check_date: Optional[date] = None
+) -> JSONResponse:
+    """Calculates and returns the Minervini Trend Template checklist status."""
+    
+    ticker = ticker.upper()
+    
+    # Determine the check date (default to yesterday for most recent market data)
+    final_check_date = check_date or (date.today() - timedelta(days=1))
+    
+    # 1. Load the necessary RAW price data file (contains OHLC for Minervini checks)
+    # We use raw data because features data lacks the absolute price columns (High, Low, Adj Close)
+    path = Path(f"data/raw/{ticker}.parquet")
+    
+    if not path.exists():
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Raw price data not found for {ticker} at {path}. Cannot run template."
+        )
+        
+    try:
+        df_full = pd.read_parquet(path)
+        
+        # 2. Run the template check
+        results = run_minervini_template(df_full, final_check_date)
+        
+        return JSONResponse(content={
+            "ticker": ticker,
+            "results": results
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error running template analysis: {e}"
+        )
+
+
 @app.get("/api/v1/hmm/probabilities/{ticker}")
 def get_hmm_probabilities(
     ticker: str,

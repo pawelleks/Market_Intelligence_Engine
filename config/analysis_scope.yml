@@ -1,0 +1,7 @@
+scope:
+  Market_Analysis:
+    - Index_ETFs
+    - Big_Tech
+  Minervini_Template:
+    - Big_Tech
+    - Semiconductors

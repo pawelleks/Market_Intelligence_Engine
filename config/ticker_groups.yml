@@ -1,0 +1,12 @@
+groups:
+  Index_ETFs:
+    - SPY
+    - QQQ
+    - IWM
+  Big_Tech:
+    - AAPL
+    - MSFT
+    - GOOGL
+  Semiconductors:
+    - NVDA
+    - AMD

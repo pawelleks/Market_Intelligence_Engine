@@ -42,7 +42,20 @@ const PriceViewerSettings = ({ settings, onSettingsChange }) => {
         onSettingsChange({ ...settings, [name]: val });
     };
 
-    const inputStyle = { width: '100%', padding: '8px', backgroundColor: '#0b1220', color: '#d7e3f3', border: '1px solid #203049', borderRadius: '4px' };
+    const inputStyle = {
+        width: '100%',
+        padding: '8px',
+        backgroundColor: '#0b1220',
+        color: '#d7e3f3',
+        border: '1px solid #203049',
+        borderRadius: '4px',
+        // Apply styling to the dropdown arrow for better contrast (often platform-specific)
+        appearance: 'none',
+        backgroundImage: "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22white%22%3E%3Cpath%20d%3D%22M7%2010l5%205%205-5z%22%2F%3E%3C%2Fsvg%3E\")",
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 8px top 50%',
+        backgroundSize: '12px',
+    };
     const labelStyle = { display: 'block', fontSize: '13px', marginBottom: '3px', color: '#9e9e9e' };
     const controlStyle = { marginBottom: '15px', padding: '5px 0', textAlign: 'left' };
 

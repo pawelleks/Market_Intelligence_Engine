@@ -17,7 +17,7 @@ const MarkovMultiStepForecast = ({ settings }) => {
     const API_BASE = "/api/v1";
     // NOTE: Order 1 is assumed for Multi-Step Forecasts (1st-Order Approximation)
     const mode = settings.nStates === 2 ? 'binary' : 'tri';
-    const MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${mode}`;
+    const MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${mode}?threshold_bps=${settings.thresholdBPS}`;
 
     useEffect(() => {
         async function fetchData() {
@@ -40,7 +40,7 @@ const MarkovMultiStepForecast = ({ settings }) => {
         }
         // Only fetch when ticker or state mode (which defines the forecast file) changes
         fetchData();
-    }, [settings.ticker, settings.nStates]);
+    }, [settings.ticker, settings.nStates, settings.thresholdBPS]);
 
     if (loading) {
         return <p style={{ color: '#9e9e9e', padding: '20px' }}>Calculating forecasts...</p>;
@@ -55,7 +55,8 @@ const MarkovMultiStepForecast = ({ settings }) => {
     // Filter data based on user-selected horizons (settings.forecastHorizons)
     // NOTE: Multi-select output is an array of strings/numbers; ensure consistency
     const horizons = settings.forecastHorizons || [1, 2, 3, 4]; // Default to 1-4 if none selected
-    const filteredData = forecastData.filter(d => horizons.includes(d.horizon));
+    // Ensure both are compared as integers
+    const filteredData = forecastData.filter(d => horizons.map(h => parseInt(h)).includes(parseInt(d.horizon)));
 
     if (filteredData.length === 0) {
         return <p style={{ color: '#9e9e9e', padding: '20px' }}>Select forecast horizons (1, 2, 3, 4 days, etc.) in the config panel.</p>;

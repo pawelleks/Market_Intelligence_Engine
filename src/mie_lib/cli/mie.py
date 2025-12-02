@@ -59,7 +59,7 @@ from mie_lib.features.build_features import FEATURES_DIR, _get_windows
 from mie_lib.analytics.markov.markov_engine import MarkovConfig, build_markov_for_ticker
 from mie_lib.analytics.hmm.hmm_engine import HMMConfig, build_hmm_for_ticker
 from mie_lib.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker
-from mie_lib.analytics.markov.states_model import build_states_from_features, derive_matrix
+from mie_lib.analytics.markov.states_model import build_states_from_features, derive_matrix, multi_step
 from mie_lib.analytics.markov.states_model import states_stale
 from mie_lib.options.em_core import MockOptionChainProvider
 from mie_lib.utils.paths import HMM_DIR, MARKOV_DIR
@@ -787,6 +787,21 @@ def main(argv=None):
             df = derive_matrix(t, thr, mode, K, win)
             base = Path("data")/"analytics"/"markov"/t/"matrices"/mode/f"thr{thr}"/f"order{K}"
             mp = base/f"{win}.parquet"
+            
+            # --- Multi-Step Forecast (NEW) ---
+            if K == 1:
+                horizons = [1, 2, 3, 4, 5]
+                try:
+                    ms_df = multi_step(df, horizons, mode)
+                    if not ms_df.empty:
+                        # Path: data/analytics/markov/{ticker}/multi_step_order1_{mode}_thr{thr}.parquet
+                        ms_path = Path("data")/"analytics"/"markov"/t/f"multi_step_order{K}_{mode}_thr{thr}.parquet"
+                        ms_df.reset_index().to_parquet(ms_path, index=False)
+                        LOG.info("build-markov: multi-step written to %s", ms_path)
+                except Exception as e:
+                    LOG.warning("build-markov: multi-step failed: %s", e)
+            # --- END Multi-Step Forecast ---
+
             print({"ticker": t, "mode": mode, "thr": thr, "order": K, "window": win, "states": sp, "matrix": str(mp), "rows": len(df)})
             LOG.info("build-markov: %s", mp)
             sys.exit(0)
@@ -975,6 +990,21 @@ def main(argv=None):
                         for K in orders:
                             try:
                                 df = derive_matrix(t, thr, m, K, w)
+                                
+                                # --- Multi-Step Forecast (NEW) ---
+                                if K == 1:
+                                    horizons = [1, 2, 3, 4, 5]
+                                    try:
+                                        ms_df = multi_step(df, horizons, m)
+                                        if not ms_df.empty:
+                                            # Path: data/analytics/markov/{ticker}/multi_step_order1_{mode}_thr{thr}.parquet
+                                            ms_path = Path("data")/"analytics"/"markov"/t/f"multi_step_order{K}_{m}_thr{thr}.parquet"
+                                            ms_df.reset_index().to_parquet(ms_path, index=False)
+                                            _grid_log_append(f"multi-step written to {ms_path}")
+                                    except Exception as e:
+                                        _grid_log_append(f"multi-step failed for {t} {m} thr={thr}: {e}")
+                                # --- END Multi-Step Forecast ---
+
                                 _grid_log_append(str({
                                     "ticker": t, "mode": m, "thr": thr, "window": w, "order": K, "rows": len(df)
                                 }))

@@ -19,3 +19,6 @@ scikit-learn>=1.2
 streamlit>=1.35
 matplotlib>=3.7
 plotly>=5.17
+
+# Utilities
+pandas-market-calendars>=4.4

@@ -1,13 +1,13 @@
 import React from 'react';
 import Plot from 'react-plotly.js';
 
-const STATE_NAME_MAP = {
-    'U': 'Green',
-    'N': 'Neutral',
-    'D': 'Red',
-    'Up Prob (%)': 'Green Prob (%)',
-    'Neutral Prob (%)': 'Neutral Prob (%)',
-    'Down Prob (%)': 'Red Prob (%)',
+const STATE_INFO_MAP = {
+    'U': { name: 'Green', color: '#4caf50' },
+    'N': { name: 'Neutral', color: '#9e9e9e' },
+    'D': { name: 'Red', color: '#f44336' },
+    'Up': { name: 'Green', color: '#4caf50' },
+    'Neutral': { name: 'Neutral', color: '#9e9e9e' },
+    'Down': { name: 'Red', color: '#f44336' },
 };
 
 
@@ -17,7 +17,7 @@ const formatContext = (context, order) => {
     const parts = context.split('-');
     if (order === 1) {
         // Full names for Order 1
-        return parts.map(p => STATE_NAME_MAP[p] || p).join('-');
+        return parts.map(p => STATE_INFO_MAP[p]?.name || p).join('-');
     } else {
         // Short names (G, N, R) for Order > 1
         const shortMap = { 'U': 'G', 'N': 'N', 'D': 'R' };
@@ -34,8 +34,8 @@ const renderContext = (context, order) => {
     return (
         <span>
             {parts.map((p, i) => {
-                const text = order === 1 ? (STATE_NAME_MAP[p] || p) : (shortMap[p] || p);
-                const color = colorMap[p] || '#d7e3f3';
+                const text = order === 1 ? (STATE_INFO_MAP[p]?.name || p) : (shortMap[p] || p);
+                const color = STATE_INFO_MAP[p]?.color || '#d7e3f3';
                 return (
                     <span key={i}>
                         <span style={{ color: color, fontWeight: 'bold' }}>{text}</span>
@@ -66,9 +66,7 @@ const MarkovTransitionMatrix = ({ data, settings }) => {
     // 2. Prepare Data for Heatmap (Plotly)
     const heatmapData = [{
         z: probMatrix,
-        x: stateNames.map(name => STATE_NAME_MAP[name.charAt(0).toUpperCase()] || name), // Labels: Up, Neutral, Down
-        z: probMatrix,
-        x: stateNames.map(name => STATE_NAME_MAP[name.charAt(0).toUpperCase()] || name), // Labels: Up, Neutral, Down
+        x: stateNames.map(name => STATE_INFO_MAP[name.charAt(0).toUpperCase()]?.name || name), // Labels: Up, Neutral, Down
         y: contexts.map(c => formatContext(c, settings.markovOrder)), // Translate based on order
         type: 'heatmap',
         colorscale: [
@@ -86,23 +84,16 @@ const MarkovTransitionMatrix = ({ data, settings }) => {
 
     // 3. Prepare Data for Table Display
     // 3. Prepare Data for Table Display
-    const tableHeaders = ['Context', ...probKeys.map(key => {
-        const rawState = key.split('_')[2];
-        const capState = rawState.charAt(0).toUpperCase() + rawState.slice(1);
-        return STATE_NAME_MAP[capState + ' Prob (%)'] || key;
-    })];
+    const tableHeaders = ['Context', ...probKeys.map(key => STATE_INFO_MAP[key.split('_').pop().charAt(0).toUpperCase()]?.name + ' Prob (%)' || key)];
 
     const tableRows = contexts.map((context, i) => {
-        // Render colored context
         const row = {
             Context: renderContext(context, settings.markovOrder)
         };
 
         probKeys.forEach((key, j) => {
             // Use the translated header name as the key
-            const rawState = key.split('_')[2];
-            const capState = rawState.charAt(0).toUpperCase() + rawState.slice(1);
-            const translatedHeader = STATE_NAME_MAP[capState + ' Prob (%)'] || key;
+            const translatedHeader = STATE_INFO_MAP[key.split('_').pop().charAt(0).toUpperCase()]?.name + ' Prob (%)' || key;
             row[translatedHeader] = probMatrix[i][j].toFixed(2) + '%';
         });
         return row;

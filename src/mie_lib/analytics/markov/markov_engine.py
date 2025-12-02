@@ -267,7 +267,7 @@ def build_markov_for_ticker(ticker: str, cfg: MarkovConfig) -> Dict[str, str]:
             multi_step_df = multi_step(prob_df, horizons, cfg.state_mode)
             
             if not multi_step_df.empty:
-                out_path = out_dir / f"multi_step_order{cfg.order}_{cfg.state_mode}.parquet"
+                out_path = out_dir / f"multi_step_order{cfg.order}_{cfg.state_mode}_thr{int(cfg.threshold_bps)}.parquet"
                 # Reset index to keep 'horizon' as a column, since to_parquet(index=False) drops the index
                 multi_step_df.reset_index().to_parquet(out_path, index=False)
         except Exception:

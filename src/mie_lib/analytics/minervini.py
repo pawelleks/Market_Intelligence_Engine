@@ -3,8 +3,6 @@ import numpy as np
 from datetime import date, timedelta
 from typing import List, Dict, Any, Tuple
 
-# We rely on the features parquet containing date, close, adj_close (for SMA calcs), high, and low
-
 # --- MOVING AVERAGE CALCULATION ---
 
 def _calculate_smas(df: pd.DataFrame) -> pd.DataFrame:
@@ -29,7 +27,10 @@ def _calculate_smas(df: pd.DataFrame) -> pd.DataFrame:
 # --- TREND TEMPLATE CHECKS ---
 
 def run_minervini_template(df_full: pd.DataFrame, check_date: date) -> Dict[str, Any]:
-    """Runs the 10-point Minervini Trend Template technical checks on the last available day."""
+    """Runs the 7 core technical Minervini Trend Template checks on the last available day."""
+
+    # NEW: Normalize columns to lowercase to handle 'Close', 'Adj Close', etc.
+    df_full = df_full.rename(columns=str.lower)
 
     # 1. Prepare and filter data up to the check date
     df_full['date'] = pd.to_datetime(df_full['date']).dt.date
@@ -39,6 +40,9 @@ def run_minervini_template(df_full: pd.DataFrame, check_date: date) -> Dict[str,
     df = _calculate_smas(df)
 
     # Get the data for the last available day (the day we check the template)
+    if df.empty:
+         return {"status": "FAIL", "summary": "No data available up to check date.", "checks": []}
+
     last_row = df.iloc[-1]
     
     # Ensure MAs are calculated
@@ -52,6 +56,9 @@ def run_minervini_template(df_full: pd.DataFrame, check_date: date) -> Dict[str,
     lookback_year_ago = check_date - timedelta(days=365)
     df_52w = df[df['date'] >= lookback_year_ago]
     
+    if df_52w.empty:
+         return {"status": "FAIL", "summary": "Insufficient data for 52-week High/Low check.", "checks": []}
+
     low_52w = df_52w['low'].min()
     high_52w = df_52w['high'].max()
 
@@ -59,45 +66,35 @@ def run_minervini_template(df_full: pd.DataFrame, check_date: date) -> Dict[str,
     last_200_sma = last_row['SMA_200']
     
     month_ago_date = check_date - timedelta(days=30)
-    # Handle case where month_ago_date might not exist in df (e.g. weekend/holiday)
-    # We take the last available data point on or before month_ago_date
-    month_ago_df = df[df['date'] <= month_ago_date]
-    if month_ago_df.empty:
-         # Fallback if data is extremely sparse, though unlikely with >200 days check
-         month_ago_200_sma = last_200_sma 
-    else:
-        month_ago_200_sma = month_ago_df['SMA_200'].iloc[-1]
+    month_ago_200_sma_series = df[df['date'] <= month_ago_date]['SMA_200']
+    month_ago_200_sma = month_ago_200_sma_series.iloc[-1] if not month_ago_200_sma_series.empty else np.nan
     
-    # CHECKLIST EXECUTION
+    # CHECKLIST EXECUTION (Adapted for ETFs - 7 Technical Checks)
     checks = {
         # Check 1: Current price > 150-day SMA AND Current price > 200-day SMA
-        "P_GT_MA": (current_price > last_row['SMA_150']) and (current_price > last_row['SMA_200']),
+        "P_GT_MA": bool((current_price > last_row['SMA_150']) and (current_price > last_row['SMA_200'])),
         
         # Check 2: 150-day SMA > 200-day SMA
-        "MA_150_GT_200": last_row['SMA_150'] > last_row['SMA_200'],
+        "MA_150_GT_200": bool(last_row['SMA_150'] > last_row['SMA_200']),
         
         # Check 3: 200-day SMA is trending up (200 SMA today > 200 SMA 1 month ago)
-        "MA_200_RISING": last_200_sma > month_ago_200_sma,
+        "MA_200_RISING": bool(last_200_sma > month_ago_200_sma) if not pd.isna(month_ago_200_sma) else False,
         
         # Check 4: 50-day SMA > 150-day SMA AND 50-day SMA > 200-day SMA
-        "MA_50_GT_LONG": (last_row['SMA_50'] > last_row['SMA_150']) and (last_row['SMA_50'] > last_row['SMA_200']),
+        "MA_50_GT_LONG": bool((last_row['SMA_50'] > last_row['SMA_150']) and (last_row['SMA_50'] > last_row['SMA_200'])),
         
         # Check 5: Current price > 50-day SMA
-        "P_GT_MA_50": current_price > last_row['SMA_50'],
+        "P_GT_MA_50": bool(current_price > last_row['SMA_50']),
         
         # Check 6: Current price is within 25% of 52-week High
-        "CLOSE_TO_HIGH": (high_52w > 0) and ( (high_52w - current_price) / high_52w <= 0.25 ), 
+        "CLOSE_TO_HIGH": bool((high_52w > 0) and ( (high_52w - current_price) / high_52w <= 0.25 )), 
         
         # Check 7: Current price is at least 30% above 52-week Low
-        "FAR_FROM_LOW": (low_52w > 0) and ( (current_price - low_52w) / low_52w >= 0.30 ), 
-        
-        # Checks 8-10 are volume and fundamentals, which require external data not always present here.
+        "FAR_FROM_LOW": bool((low_52w > 0) and ( (current_price - low_52w) / low_52w >= 0.30 )), 
     }
     
-    # Adapt for ETFs (SPY, QQQ): Focus only on the 7 core technical checks (Checks 1-7).
+    # Adapt for ETFs: Require 6 out of the 7 core technical checks to pass.
     total_technical_passes = sum(checks.values())
-    
-    # A conservative ETF screening rule requires 6 out of the 7 core technical checks to pass.
     is_passing = total_technical_passes >= 6 
     
     return {
@@ -106,5 +103,5 @@ def run_minervini_template(df_full: pd.DataFrame, check_date: date) -> Dict[str,
         "required_passes": 6,
         "check_date": check_date.isoformat(),
         "current_price": float(current_price),
-        "data_status": checks # checks dictionary remains the 7 technical rules
+        "data_status": checks
     }

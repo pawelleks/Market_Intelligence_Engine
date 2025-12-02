@@ -12,6 +12,7 @@ import MarkovMultiStepForecast from './components/MarkovMultiStepForecast';
 import MarkovConclusion from './components/MarkovConclusion';
 import MarkovMultiStepConclusion from './components/MarkovMultiStepConclusion';
 import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
+import PriceReturnsViewerPage from './pages/PriceReturnsViewerPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -46,13 +47,18 @@ const useAnalyticalData = (settings) => {
   const [hmmDurations, setHmmDurations] = useState(null); // New state for durations
   const [hmmMetrics, setHmmMetrics] = useState(null); // New state for transition matrix
   const [priceData, setPriceData] = useState(null); // New state for price overlay
+
   const [latestMarkovState, setLatestMarkovState] = useState(null); // New state for latest context
+  const [freshnessStatus, setFreshnessStatus] = useState(null); // New state for data freshness
+  const [priceViewerData, setPriceViewerData] = useState(null); // New state for price viewer
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // FIX 6: New API endpoint assumption for fetching features/price data
   // FIX 6: New API endpoint assumption for fetching features/price data
   const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
+  const FRESHNESS_URL = `${API_BASE}/data/freshness/${settings.ticker}`;
+  const PRICE_VIEWER_URL = `${API_BASE}/data/prices/${settings.ticker}?rows=${settings.rows}&state_mode=${settings.stateMode}&threshold_bps=${settings.thresholdBPS}`;
   const HMM_URL = `${API_BASE}/hmm/probabilities/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_STATS_URL = `${API_BASE}/hmm/stats/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
   const HMM_METRICS_URL = `${API_BASE}/hmm/metrics/${settings.ticker}?n_states=${settings.nStates}&window_years=${settings.windowYears}`;
@@ -144,6 +150,36 @@ const useAnalyticalData = (settings) => {
         }
         setPriceData(priceJson.data);
 
+        // --- Fetch Data Freshness Status (NEW) ---
+        try {
+          const freshnessResponse = await fetch(FRESHNESS_URL);
+          if (freshnessResponse.ok) {
+            const freshnessJson = await freshnessResponse.json();
+            setFreshnessStatus(freshnessJson);
+          } else {
+            console.warn("Freshness API failed to load.");
+            setFreshnessStatus(null);
+          }
+        } catch (e) {
+          console.warn("Freshness fetch error", e);
+          setFreshnessStatus(null);
+        }
+
+        // --- Price Viewer Data Fetch ---
+        try {
+          const viewerResponse = await fetch(PRICE_VIEWER_URL);
+          if (viewerResponse.ok) {
+            const viewerJson = await viewerResponse.json();
+            setPriceViewerData(viewerJson.data);
+          } else {
+            console.warn("Price Viewer API failed to load.");
+            setPriceViewerData(null);
+          }
+        } catch (e) {
+          console.warn("Price Viewer fetch error", e);
+          setPriceViewerData(null);
+        }
+
       } catch (err) {
         console.error("Data Fetch Error:", err);
         setError(err.message || 'Check browser console for network details.');
@@ -156,7 +192,7 @@ const useAnalyticalData = (settings) => {
   }, [settings]);
 
   // FIX 6: Return the new priceData state
-  return { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, loading, error };
+  return { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error };
 };
 
 
@@ -169,7 +205,7 @@ const DashboardHome = () => (
   </div>
 );
 
-const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, loading, error }) => {
+const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, freshnessStatus, loading, error }) => {
   // FIX 4: Dynamic summary text based on settings
   const { start, end } = getWindowDates(settings.windowYears);
   const stateNames = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Bear)';
@@ -179,23 +215,37 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
 
   return (
     // FIX 7: Use fixed left panel and fluid right panel (flex-grow: 1)
-    <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
+    <div style={{ display: 'flex', gap: '20px', padding: '20px', width: '100%' }}>
 
       {/* Left Panel: Configuration (Fixed Width) */}
-      <div style={{ width: '300px', flexShrink: 0 }}>
+      <div style={{ width: '270px', flexShrink: 0 }}>
         <HMMChartSettings settings={settings} onSettingsChange={setSettings} />
 
         {/* Status/Debug */}
-        <div style={{ padding: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049' }}>
+        <div style={{ padding: '15px', border: '1px solid #203049', borderRadius: '8px', marginTop: '20px', backgroundColor: '#0e1525', textAlign: 'left' }}>
           <h3 style={{ color: '#4caf50', marginTop: '0' }}>Data Status</h3>
-          <p style={{ fontSize: '13px' }}>Proxy Status: Active</p>
-          <p style={{ fontSize: '13px' }}>HMM Records: {hmmData ? hmmData.length : 'N/A'}</p>
+          <p style={{ fontSize: '13px', marginBottom: '8px' }}>Proxy Status: Active</p>
+
+          {/* NEW FRESHNESS DISPLAY */}
+          {freshnessStatus && (
+            <p style={{ fontSize: '14px', color: freshnessStatus.is_fresh ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
+              Data: {freshnessStatus.ticker} last OHLC day {freshnessStatus.last_date}.
+            </p>
+          )}
+          {freshnessStatus && (
+            <p style={{ fontSize: '13px', color: freshnessStatus.is_fresh ? '#4caf50' : '#f44336' }}>
+              {freshnessStatus.status_text}
+            </p>
+          )}
+          {/* END NEW FRESHNESS DISPLAY */}
+
+          <p style={{ fontSize: '13px', marginTop: '8px' }}>HMM Records: {hmmData ? hmmData.length : 'N/A'}</p>
           <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `Error: ${error}` : ''}</p>
         </div>
       </div>
 
       {/* Right Panel: Charts and Display (Fluid Width - FIX 7: flex-grow: 1) */}
-      <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left' }}>
+      <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left', minWidth: 0 }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '0', textAlign: 'left' }}>HMM Regime Analysis: {settings.ticker}</h2>
 
         {/* FIX 4: Chart settings text display */}
@@ -243,7 +293,7 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
 };
 
 
-const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStepData, loading, error }) => {
+const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStepData, freshnessStatus, loading, error }) => {
   // Determine the state display for the title
   const stateDisplay = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Red)';
 
@@ -251,33 +301,47 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStep
   const summaryText = `Ticker: ${settings.ticker} • State Mode: ${stateDisplay} • Window: ${settings.windowYears}Y • Threshold: ${settings.thresholdBPS} bps (${(settings.thresholdBPS / 100).toFixed(3)}%) • Order: ${settings.markovOrder}`;
 
   return (
-    <div style={{ display: 'flex', gap: '20px', padding: '20px' }}>
+    <div style={{ display: 'flex', gap: '20px', padding: '20px', width: '100%' }}>
 
-      {/* Left Panel: Configuration (STICKY WRAPPER IMPLEMENTED HERE) */}
+      {/* Left Panel: Configuration (STICKY WRAPPER) */}
       <div style={{
-        width: '300px',
+        width: '270px',
         flexShrink: 0,
         textAlign: 'left',
-        // --- STICKY PROPERTIES ---
-        position: 'sticky',
-        top: '20px', // Distance from the top of the viewport when scrolling
-        alignSelf: 'flex-start', // Ensures it starts at the top
-        maxHeight: 'calc(100vh - 40px)' // Ensures it doesn't overflow the viewport
-        // --- END STICKY PROPERTIES ---
+        position: 'sticky', // Apply sticky to the outermost left column
+        top: '20px',        // Anchor 20px from the top
+        alignSelf: 'flex-start', // Ensures the element doesn't stretch to parent height
+        maxHeight: 'calc(100vh - 40px)', // Constrain height to viewport
+        overflowY: 'auto',  // Allow the settings panel itself to scroll if it gets too long
       }}>
+
         <MarkovSettings settings={settings} onSettingsChange={setSettings} />
 
-        {/* Data Status/Debug */}
-        <div style={{ padding: '10px', border: '1px solid #203049', borderRadius: '8px', marginTop: '20px', backgroundColor: '#0e1525' }}>
+        {/* Data Status/Debug Box (Must be inside the sticky container) */}
+        <div style={{ padding: '10px', border: '1px solid #203049', borderRadius: '8px', marginTop: '20px', backgroundColor: '#0e1525', textAlign: 'left' }}>
           <h3 style={{ color: '#4caf50', paddingTop: '0' }}>Data Status</h3>
-          <p style={{ fontSize: '13px' }}>Proxy Status: Active</p>
-          <p style={{ fontSize: '13px' }}>Markov Records: {markovData ? markovData.length : 'N/A'}</p>
+          <p style={{ fontSize: '13px', marginBottom: '8px' }}>Proxy Status: Active</p>
+
+          {/* NEW FRESHNESS DISPLAY */}
+          {freshnessStatus && (
+            <p style={{ fontSize: '14px', color: freshnessStatus.is_fresh ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
+              Data: {freshnessStatus.ticker} last OHLC day {freshnessStatus.last_date}.
+            </p>
+          )}
+          {freshnessStatus && (
+            <p style={{ fontSize: '13px', color: freshnessStatus.is_fresh ? '#4caf50' : '#f44336' }}>
+              {freshnessStatus.status_text}
+            </p>
+          )}
+          {/* END NEW FRESHNESS DISPLAY */}
+
+          <p style={{ fontSize: '13px', marginTop: '8px' }}>Markov Records: {markovData ? markovData.length : 'N/A'}</p>
           <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `Error: ${error}` : 'Data Loaded.'}</p>
         </div>
       </div>
 
       {/* Right Panel: Charts and Tables (Fluid Width) */}
-      <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left' }}>
+      <div style={{ flexGrow: 1, padding: '0 10px', textAlign: 'left', minWidth: 0 }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '0' }}>Markov Analysis: {settings.ticker}</h2>
         <p style={{ color: '#9e9e9e', fontSize: '0.85rem', borderBottom: '1px solid #203049', paddingBottom: '10px', marginBottom: '20px' }}>
           {summaryText}
@@ -328,15 +392,18 @@ function App() {
     bearThreshold: 50,
     markovOrder: 1, // Default Markov Order
     forecastHorizons: [1, 2, 3, 4], // Default Horizons for Multi-Step
+    // NEW DEFAULTS FOR VIEWER
+    rows: 50,
+    stateMode: 'tri'
   });
 
   // FIX 6: Update hook usage to include priceData
-  const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, loading, error } = useAnalyticalData(settings);
+  const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error } = useAnalyticalData(settings);
 
   return (
     <Router>
       <div className="App">
-        <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3' }}>
+        <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3', width: '100%' }}>
 
           {/* Sidebar Navigation */}
           <nav style={{ width: '200px', backgroundColor: '#0e1525', padding: '20px', borderRight: '1px solid #203049', flexShrink: 0, textAlign: 'left' }}>
@@ -346,11 +413,12 @@ function App() {
               <li><Link to="/analysis/hmm" style={{ color: '#9ec4ff', textDecoration: 'none' }}>HMM Regimes</Link></li>
               {/* Placeholder for future sections */}
               <li><Link to="/analysis/markov" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Markov Analysis</Link></li>
+              <li><Link to="/utility/price-viewer" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
             </ul>
           </nav>
 
           {/* Main Content Area */}
-          <main style={{ flexGrow: 1, overflowY: 'auto' }}>
+          <main style={{ flexGrow: 1, overflowY: 'auto', padding: '0', width: '100%' }}>
             <Routes>
               <Route path="/" element={<DashboardHome />} />
               <Route
@@ -363,6 +431,7 @@ function App() {
                   hmmStats={hmmStats}
                   hmmMetrics={hmmMetrics}
                   hmmDurations={hmmDurations} // FIX: Pass durations
+                  freshnessStatus={freshnessStatus} // NEW PROP
                   loading={loading}
                   error={error}
                 />}
@@ -376,8 +445,20 @@ function App() {
                   markovData={markovData}
                   markovMultiStepData={markovMultiStepData}
                   latestMarkovState={latestMarkovState} // NEW PROP
+                  freshnessStatus={freshnessStatus} // NEW PROP
                   loading={loading}
                   error={error}
+                />}
+              />
+              <Route
+                path="/utility/price-viewer"
+                element={<PriceReturnsViewerPage
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  data={priceViewerData}
+                  loading={loading}
+                  error={error}
+                  freshnessStatus={freshnessStatus}
                 />}
               />
             </Routes>

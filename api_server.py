@@ -15,6 +15,14 @@ from mie_lib.analytics.markov.markov_engine import MarkovConfig # Used for defau
 from mie_lib.utils.paths import hmm_std_out_dir 
 from mie_lib.analytics.hmm.hmm_engine import HMMConfig # Used for HMM configuration defaults
 
+# Data Freshness Imports
+from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
+from mie_lib.utils.paths import features_parquet_path
+
+# Price Viewer Imports
+from mie_lib.core.state_classification import classify_tri_state
+from typing import Dict, List, Any, Optional
+
 # -----------------------------------------------------------------
 # FastAPI Initialization
 # -----------------------------------------------------------------
@@ -66,10 +74,137 @@ def _read_parquet_and_format(path: Path) -> Optional[List[Dict[str, Any]]]:
         print(f"Error reading {path}: {e}")
         return None
 
+def _process_price_data(df_raw: pd.DataFrame, state_mode: str, threshold_bps: int, rows: int) -> List[Dict[str, Any]]:
+    """Performs normalization, return calculation, state classification, and styling."""
+    
+    if df_raw.empty:
+        return []
+
+    # 1. Normalization and Returns
+    out = df_raw.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.tz_localize(None)
+    out = out.sort_values("date").reset_index(drop=True)
+    out["close"] = pd.to_numeric(out["close"], downcast="float")
+    out["daily_return_pct"] = (out["close"].pct_change() * 100.0).astype("float32") # Percentage change
+    
+    out.rename(columns={c: c.lower() for c in out.columns}, inplace=True)
+    if "volume" not in out.columns and "Volume" in df_raw.columns:
+        out["volume"] = df_raw["Volume"] # Assume Volume is present in raw data
+    out["volume"] = pd.to_numeric(out["volume"], errors="coerce", downcast="integer")
+    out["volume"].fillna(0, inplace=True) # Fill missing volume with 0
+
+    out = out.dropna(subset=["daily_return_pct"]).reset_index(drop=True)
+
+    # 2. Classification
+    threshold = float(threshold_bps) / 10000.0 # Convert bps to decimal (e.g., 10 bps -> 0.001)
+
+    def classify_state_wrapper(ret_pct: float):
+        ret_val = ret_pct / 100.0 # Convert back to decimal for classification logic
+        if pd.isna(ret_val): return ""
+        
+        # Use existing core classification logic
+        state_raw = classify_tri_state(ret_val, threshold_bps) 
+        
+        if state_mode == "binary":
+            # NEW LOGIC: Map Neutral to Green in Binary Mode.
+            return "Red" if state_raw == "Red" else ("Green" if state_raw in {"Green", "Neutral"} else "")
+        return state_raw
+        
+    out["State"] = out["daily_return_pct"].apply(classify_state_wrapper)
+
+    # 3. Final Formatting and Selection
+    out = out.sort_values("date", ascending=False).head(rows).reset_index(drop=True)
+    
+    # Format the required columns for display
+    out["Date"] = out["date"].dt.strftime("%Y-%m-%d")
+    out["Daily Change (%)"] = out["daily_return_pct"].map(lambda x: f"{x:+.2f}%" if pd.notna(x) else "")
+    out.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}, inplace=True)
+    
+    final_cols = ["Date", "Open", "High", "Low", "Close", "Volume", "Daily Change (%)", "State"]
+    return out[final_cols].to_dict(orient="records")
+
 
 # -----------------------------------------------------------------
 # Endpoints
 # -----------------------------------------------------------------
+
+@app.get("/api/v1/data/freshness/{ticker}")
+def get_data_freshness_status(ticker: str) -> JSONResponse:
+    """Checks the freshness of the primary features parquet file."""
+    
+    ticker = ticker.upper()
+    path = features_parquet_path(ticker)
+    
+    if not path.exists():
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Features data not found for {ticker}."
+        )
+        
+    try:
+        # Load features file and get the latest date
+        df = pd.read_parquet(path, columns=['date'])
+        last_date_raw = df['date'].max()
+        last_date = coerce_to_date(last_date_raw)
+        
+        # Calculate status using the new utility
+        is_fresh, days_missing = is_up_to_date(last_date)
+        
+        status_text = "Up-to-date" if is_fresh else f"Warning - {days_missing} trading day(s) missing"
+        
+        return JSONResponse(content={
+            "ticker": ticker,
+            "last_date": last_date.isoformat(),
+            "is_fresh": is_fresh,
+            "days_missing": days_missing,
+            "status_text": status_text
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error checking freshness: {e}"
+        )
+
+@app.get("/api/v1/data/prices/{ticker}")
+def get_price_returns_viewer_data(
+    ticker: str, 
+    rows: int = 50,
+    state_mode: str = "tri",
+    threshold_bps: int = 10,
+) -> JSONResponse:
+    """Retrieves OHLC data, calculates returns and state classification for display."""
+    
+    ticker = ticker.upper()
+    path = Path(f"data/raw/{ticker}.parquet") # Using raw parquet for full OHLC data
+    
+    if not path.exists():
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Raw price data not found for {ticker} at {path}."
+        )
+        
+    try:
+        df_raw = pd.read_parquet(path)
+        
+        # Check for required columns before processing
+        required = ['date', 'open', 'high', 'low', 'close']
+        if not all(c.lower() in [col.lower() for col in df_raw.columns] for c in required):
+            raise ValueError("Raw data missing required OHLC columns.")
+
+        processed_data = _process_price_data(df_raw, state_mode, threshold_bps, rows)
+        
+        return JSONResponse(content={
+            "ticker": ticker,
+            "data": processed_data,
+            "metadata": {
+                "rows_displayed": len(processed_data)
+            }
+        })
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing price data: {e}"
+        )
 
 @app.get("/api/v1/markov/matrix/{ticker}")
 def get_markov_matrix(

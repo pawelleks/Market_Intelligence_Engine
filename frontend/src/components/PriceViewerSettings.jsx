@@ -1,10 +1,41 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+
+// Define API URL and ANALYSIS KEY
+const API_BASE = "/api/v1";
+const ANALYSIS_KEY = "Market_Analysis"; // Using general market analysis scope
 
 const ROWS_OPTIONS = [50, 100, 200];
 const THRESHOLD_BPS_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
 
 
 const PriceViewerSettings = ({ settings, onSettingsChange }) => {
+
+    const [availableTickers, setAvailableTickers] = useState([]);
+    const [loadingTickers, setLoadingTickers] = useState(true);
+
+    // Fetch the list of available tickers when the component mounts
+    useEffect(() => {
+        async function fetchTickers() {
+            setLoadingTickers(true);
+            try {
+                const response = await fetch(`${API_BASE}/tickers/${ANALYSIS_KEY}`);
+                const json = await response.json();
+                if (response.ok) {
+                    setAvailableTickers(json.tickers);
+                    // Automatically set the first ticker as the default if none is selected
+                    if (!settings.ticker || !json.tickers.includes(settings.ticker)) {
+                        onSettingsChange({ ...settings, ticker: json.tickers[0] || 'SPY' });
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to fetch available tickers:", error);
+                setAvailableTickers(['SPY', 'QQQ']); // Fallback list
+            } finally {
+                setLoadingTickers(false);
+            }
+        }
+        fetchTickers();
+    }, []);
 
     const handleChange = (name, value) => {
         const val = ['rows', 'thresholdBPS'].includes(name) ? parseInt(value) : value;
@@ -14,6 +45,10 @@ const PriceViewerSettings = ({ settings, onSettingsChange }) => {
     const inputStyle = { width: '100%', padding: '8px', backgroundColor: '#0b1220', color: '#d7e3f3', border: '1px solid #203049', borderRadius: '4px' };
     const labelStyle = { display: 'block', fontSize: '13px', marginBottom: '3px', color: '#9e9e9e' };
     const controlStyle = { marginBottom: '15px', padding: '5px 0', textAlign: 'left' };
+
+    if (loadingTickers) {
+        return <p style={{ color: '#9e9e9e', padding: '10px' }}>Loading Ticker List...</p>;
+    }
 
     return (
         <div style={{ padding: '10px', backgroundColor: '#0e1525', borderRadius: '8px', marginBottom: '25px', border: '1px solid #203049', textAlign: 'left' }}>
@@ -25,8 +60,9 @@ const PriceViewerSettings = ({ settings, onSettingsChange }) => {
             <div style={controlStyle}>
                 <label style={labelStyle}>Ticker Symbol</label>
                 <select value={settings.ticker} onChange={(e) => handleChange('ticker', e.target.value)} style={inputStyle}>
-                    <option value="SPY">SPY</option>
-                    <option value="QQQ">QQQ</option>
+                    {availableTickers.map(ticker => (
+                        <option key={ticker} value={ticker}>{ticker}</option>
+                    ))}
                 </select>
             </div>
 

@@ -13,6 +13,7 @@ import MarkovConclusion from './components/MarkovConclusion';
 import MarkovMultiStepConclusion from './components/MarkovMultiStepConclusion';
 import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
 import PriceReturnsViewerPage from './pages/PriceReturnsViewerPage';
+import MinerviniPage from './pages/MinerviniPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -380,6 +381,8 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStep
 };
 
 
+
+
 // --- Main Application Shell ---
 
 function App() {
@@ -414,6 +417,7 @@ function App() {
               {/* Placeholder for future sections */}
               <li><Link to="/analysis/markov" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Markov Analysis</Link></li>
               <li><Link to="/utility/price-viewer" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
+              <li><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
             </ul>
           </nav>
 
@@ -459,6 +463,16 @@ function App() {
                   loading={loading}
                   error={error}
                   freshnessStatus={freshnessStatus}
+                />}
+              />
+              <Route
+                path="/theory/minervini"
+                element={<MinerviniPage
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  priceData={priceData} // Pass the price data state
+                  loading={loading}
+                  error={error}
                 />}
               />
             </Routes>

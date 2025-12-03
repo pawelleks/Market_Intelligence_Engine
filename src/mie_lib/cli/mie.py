@@ -63,6 +63,7 @@ from mie_lib.analytics.markov.states_model import build_states_from_features, de
 from mie_lib.analytics.markov.states_model import states_stale
 from mie_lib.options.em_core import MockOptionChainProvider
 from mie_lib.utils.paths import HMM_DIR, MARKOV_DIR
+from mie_lib.seasonality_engine import generate_seasonality_base
 
 LOG = get_logger("cli")
 
@@ -635,6 +636,10 @@ def build_parser():
     p_seas_update.add_argument("--since", required=False, help="YYYY-MM-DD; if omitted, processes all")
     p_seas_update.add_argument("--tickers", default="ALL", help="Comma list or ALL to load from config")
     p_seas_update.add_argument("--dry-run", action="store_true", help="Print planned writes but do not persist")
+
+    # NEW: Simple Seasonality Builder
+    p_seas_simple = sub.add_parser("build-seasonality", help="Generate seasonality base data for a single ticker")
+    p_seas_simple.add_argument("--ticker", required=True, help="Ticker symbol")
 
     # NEW: Seasonality base builder (per-ticker base used by Seasonality Analysis page)
     p_seas_base = sub.add_parser(
@@ -1247,6 +1252,12 @@ def main(argv=None):
         _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5", "--states", "2,3"])
         print("✅ Done.")
         sys.exit(0)
+    elif args.command == "build-seasonality":
+        if not args.ticker:
+            print("Error: --ticker is required for build-seasonality")
+            return
+        print(f"Building Seasonality Base Data for {args.ticker}...")
+        generate_seasonality_base(args.ticker)
     else:
         parser.print_help()
         sys.exit(1)

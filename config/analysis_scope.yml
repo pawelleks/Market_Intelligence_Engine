@@ -1,7 +1,11 @@
 scope:
-  Market_Analysis:
+  Market_Analysis: # General scope used by Markov/HMM for a broad overview
     - Index_ETFs
     - Big_Tech
-  Minervini_Template:
+  Minervini_Template: # Specific scope for Minervini
     - Big_Tech
     - Semiconductors
+  Seasonality_Analysis: # Specific scope for Seasonality
+    - Index_ETFs
+    - MSFT
+    - AAPL

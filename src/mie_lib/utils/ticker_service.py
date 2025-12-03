@@ -30,11 +30,8 @@ def get_ticker_groups() -> Dict[str, List[str]]:
     normalized_groups = {}
     for group_name, ticker_list in groups.items():
         if isinstance(ticker_list, list):
-            # Normalize group keys to match lookup logic if needed, but keeping original casing for display is usually better.
-            # Here we just normalize the ticker values.
-            normalized_groups[group_name] = [t.upper() for t in ticker_list if isinstance(t, str)]
-            # Also store uppercase key for robust lookup
-            normalized_groups[group_name.upper()] = normalized_groups[group_name]
+            # Normalize group name to uppercase to ensure case-insensitive matching
+            normalized_groups[group_name.upper()] = [t.upper() for t in ticker_list if isinstance(t, str)]
     return normalized_groups
 
 def get_tickers_for_analysis(analysis_key: str) -> List[str]:
@@ -51,15 +48,15 @@ def get_tickers_for_analysis(analysis_key: str) -> List[str]:
     final_tickers: Set[str] = set()
     
     for item in scope_list:
-        # Check if item is a group
-        if item.upper() in ticker_groups:
-            # Item is a group name, add all tickers from that group
-            final_tickers.update(ticker_groups[item.upper()])
-        else:
-            # Item is assumed to be an individual ticker
-            if isinstance(item, str):
+        if isinstance(item, str):
+            # Check if item is a group (case-insensitive)
+            if item.upper() in ticker_groups:
+                # Item is a group name, add all tickers from that group
+                final_tickers.update(ticker_groups[item.upper()])
+            else:
+                # Item is assumed to be an individual ticker
                 final_tickers.add(item.upper())
 
     # Filter to ensure only tickers present in the master list are included
-    master_list = set(get_available_tickers())
+    master_list = get_available_tickers()
     return sorted([t for t in final_tickers if t in master_list])

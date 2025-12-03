@@ -14,6 +14,7 @@ import MarkovMultiStepConclusion from './components/MarkovMultiStepConclusion';
 import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
 import PriceReturnsViewerPage from './pages/PriceReturnsViewerPage';
 import MinerviniPage from './pages/MinerviniPage';
+import SeasonalityPage from './pages/SeasonalityPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -367,13 +368,13 @@ function App() {
           {/* Sidebar Navigation */}
           <nav style={{ width: '200px', backgroundColor: '#0e1525', padding: '20px', borderRight: '1px solid #203049', flexShrink: 0, textAlign: 'left' }}>
             <h3 style={{ color: '#9ec4ff' }}>MIE Sections</h3>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              <li><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
-              <li><Link to="/analysis/hmm" style={{ color: '#9ec4ff', textDecoration: 'none' }}>HMM Regimes</Link></li>
-              {/* Placeholder for future sections */}
-              <li><Link to="/analysis/markov" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Markov Analysis</Link></li>
-              <li><Link to="/utility/price-viewer" style={{ color: '#9ec4ff', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
-              <li><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
+            <ul style={{ listStyle: 'none', padding: 0, fontSize: '13px' }}>
+              <li style={{ marginBottom: '10px' }}><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/market/seasonality" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Seasonality</Link></li>
             </ul>
           </nav>
 
@@ -429,6 +430,13 @@ function App() {
                   priceData={priceData} // Pass the price data state
                   loading={loading}
                   error={error}
+                />}
+              />
+              <Route
+                path="/market/seasonality"
+                element={<SeasonalityPage
+                  settings={settings}
+                  onSettingsChange={setSettings}
                 />}
               />
             </Routes>

@@ -23,6 +23,7 @@ from mie_lib.utils.paths import features_parquet_path
 from mie_lib.core.state_classification import classify_tri_state
 from mie_lib.analytics.minervini import run_minervini_template
 from mie_lib.utils.ticker_service import get_tickers_for_analysis
+from mie_lib.analytics.seasonality_analytics import get_seasonal_curves, get_calendar_heatmap, get_day_drilldown
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -516,3 +517,44 @@ def get_hmm_metrics(
         "window_years": window_years,
         "data": data
     })
+
+
+# -----------------------------------------------------------------
+# Seasonality Endpoints
+# -----------------------------------------------------------------
+
+
+
+@app.get("/api/v1/seasonality/curves/{ticker}")
+def api_get_seasonal_curves(ticker: str, lookbacks: str = "10,20") -> JSONResponse:
+    """Returns cumulative return curves. 'lookbacks' is a comma-separated string (e.g. '10,20')."""
+    try:
+        lbs = [int(x.strip()) for x in lookbacks.split(",") if x.strip()]
+        data = get_seasonal_curves(ticker.upper(), lbs)
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Seasonality data not found for {ticker}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/seasonality/heatmap/{ticker}")
+def api_get_calendar_heatmap(ticker: str, lookback: int = 20) -> JSONResponse:
+    """Returns 12x31 matrix of average returns."""
+    try:
+        data = get_calendar_heatmap(ticker.upper(), lookback)
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Seasonality data not found for {ticker}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/seasonality/drilldown/{ticker}/{month}/{day}")
+def api_get_day_drilldown(ticker: str, month: int, day: int, lookback: int = 50) -> JSONResponse:
+    """Returns historical records for a specific day."""
+    try:
+        data = get_day_drilldown(ticker.upper(), month, day, lookback)
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Seasonality data not found for {ticker}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

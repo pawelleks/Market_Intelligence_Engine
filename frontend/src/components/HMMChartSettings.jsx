@@ -40,6 +40,12 @@ const HMMChartSettings = ({ settings, onSettingsChange }) => {
                 >
                     <option value="SPY">SPY</option>
                     <option value="QQQ">QQQ</option>
+                    <option value="IWM">IWM</option>
+                    <option value="AAPL">AAPL</option>
+                    <option value="MSFT">MSFT</option>
+                    <option value="NVDA">NVDA</option>
+                    <option value="AMD">AMD</option>
+                    <option value="GOOGL">GOOGL</option>
                 </select>
             </div>
 

@@ -2,8 +2,10 @@ tickers:
   - SPY
   - QQQ
   - IWM
+  - DIA
   - AAPL
   - MSFT
   - NVDA
   - AMD
   - GOOGL
+  - AMZN

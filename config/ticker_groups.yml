@@ -3,10 +3,12 @@ groups:
     - SPY
     - QQQ
     - IWM
+    - DIA
   Big_Tech:
     - AAPL
     - MSFT
     - GOOGL
+    - AMZN
   Semiconductors:
     - NVDA
     - AMD

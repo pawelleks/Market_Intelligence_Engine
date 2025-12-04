@@ -282,15 +282,19 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
 
             chart.timeScale().setVisibleLogicalRange({
                 from: startIndex,
-                to: totalBars - 1,
+                to: totalBars + 10, // Add right margin for better visibility
             });
         }
     }, [chartData]);
 
+    const todayStr = new Date().toISOString().split('T')[0];
+
     return (
         <div style={{ marginTop: '30px', border: '1px solid #203049', borderRadius: '8px', padding: '15px', backgroundColor: '#0e1525' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <h3 style={{ margin: 0, color: '#9ec4ff', fontSize: '1.2rem' }}>Candlestick Analysis</h3>
+                <h3 style={{ margin: 0, color: '#9ec4ff', fontSize: '1.2rem' }}>
+                    {ticker} chart - expected moves - {todayStr}
+                </h3>
                 <div style={{ display: 'flex', gap: '10px' }}>
                     {['1h', '4h', '1d'].map(int => (
                         <button

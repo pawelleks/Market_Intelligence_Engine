@@ -78,30 +78,27 @@ def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
             weekly_date = odte_date
             break
             
-    # 3. Monthly: Next 3rd Friday
-    # Logic: Find 3rd Friday of current month. If passed (or is today), find 3rd Friday of next month.
-    def get_third_friday(year, month):
-        # Start at day 1
-        d = date(year, month, 1)
-        # Find first Friday
-        while d.weekday() != 4:
-            d += timedelta(days=1)
-        # Add 2 weeks to get 3rd Friday
-        return d + timedelta(weeks=2)
+    # 3. Monthly: Last Trading Day of Month (EOM)
+    def get_last_trading_day_of_month(year, month):
+        # Start at the last day of the month
+        # Get number of days in month
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        d = date(year, month, last_day)
+        
+        # Move backward until we find a trading day
+        while not is_trading_day(d):
+            d -= timedelta(days=1)
+        return d
 
-    monthly_date = get_third_friday(as_of.year, as_of.month)
+    monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month)
     
     # If monthly date is today or in the past, move to next month
     if monthly_date <= as_of:
         if as_of.month == 12:
-            monthly_date = get_third_friday(as_of.year + 1, 1)
+            monthly_date = get_last_trading_day_of_month(as_of.year + 1, 1)
         else:
-            monthly_date = get_third_friday(as_of.year, as_of.month + 1)
-            
-    # Ensure it's a trading day (if not, move to previous trading day usually, but let's stick to simple next/prev logic or just assume standard expirations are handled by exchange)
-    # Standard monthly expirations are usually robust, but let's check is_trading_day just in case and move backward if needed (rare for Friday to be holiday except Good Friday)
-    while not is_trading_day(monthly_date):
-        monthly_date -= timedelta(days=1)
+            monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month + 1)
 
     return odte_date, weekly_date, monthly_date
 

@@ -1,0 +1,186 @@
+"""
+Data ingestion layer for Expected Moves (EM).
+Handles fetching VIX1D, determining expiration dates, and retrieving option chains.
+Uses yfinance for all data to avoid missing provider dependencies.
+"""
+from datetime import date, timedelta, datetime
+import logging
+import pandas as pd
+import yfinance as yf
+from typing import Optional, Tuple, Dict, Any
+
+from mie_lib.utils.trading_calendar import (
+    is_trading_day,
+    get_next_trading_day,
+    last_trading_day_of_week,
+)
+
+LOG = logging.getLogger(__name__)
+
+def fetch_vix1d_close(as_of: date) -> Optional[float]:
+    """
+    Fetches the EOD close for VIX1D (or fallback VIX) for the given date.
+    """
+    # Try VIX1D first, then VIX
+    tickers = ["^VIX1D", "^VIX"]
+    
+    for symbol in tickers:
+        try:
+            # Fetch a small window around the date to ensure we get the close
+            start_date = as_of
+            end_date = as_of + timedelta(days=1)
+            
+            # Use Ticker.history which is more robust for single tickers
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(start=start_date, end=end_date, interval="1d")
+            
+            if df is not None and not df.empty:
+                # history() usually returns a DataFrame with simple columns
+                if "Close" in df.columns:
+                    close_val = df["Close"].iloc[0]
+                    if pd.notna(close_val):
+                        val = float(close_val)
+                        LOG.info(f"Fetched {symbol} close for {as_of}: {val}")
+                        return val
+                    
+        except Exception as e:
+            LOG.warning(f"Failed to fetch {symbol} for {as_of}: {e}")
+            continue
+            
+    LOG.error(f"Could not fetch VIX1D or VIX for {as_of}")
+    return None
+
+def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
+    """
+    Determines the target expiration dates based on the spec.
+    
+    1. ODTE: The next valid trading day.
+    2. Weekly: The first standard weekly expiration (Friday) on or after ODTE.
+    """
+    # 1. ODTE: Today if trading day, else next trading day
+    if is_trading_day(as_of):
+        odte_date = as_of
+    else:
+        odte_date = get_next_trading_day(as_of)
+    
+    # 2. Weekly: First Friday on or after ODTE
+    # Start checking from ODTE
+    current = odte_date
+    while True:
+        # Check if current is a Friday (weekday 4) AND a trading day
+        if current.weekday() == 4 and is_trading_day(current):
+            weekly_date = current
+            break
+        current += timedelta(days=1)
+        # Safety break
+        if (current - odte_date).days > 14:
+            LOG.warning("Could not find a weekly expiration within 2 weeks, defaulting to ODTE")
+            weekly_date = odte_date
+            break
+            
+    # 3. Monthly: Next 3rd Friday
+    # Logic: Find 3rd Friday of current month. If passed (or is today), find 3rd Friday of next month.
+    def get_third_friday(year, month):
+        # Start at day 1
+        d = date(year, month, 1)
+        # Find first Friday
+        while d.weekday() != 4:
+            d += timedelta(days=1)
+        # Add 2 weeks to get 3rd Friday
+        return d + timedelta(weeks=2)
+
+    monthly_date = get_third_friday(as_of.year, as_of.month)
+    
+    # If monthly date is today or in the past, move to next month
+    if monthly_date <= as_of:
+        if as_of.month == 12:
+            monthly_date = get_third_friday(as_of.year + 1, 1)
+        else:
+            monthly_date = get_third_friday(as_of.year, as_of.month + 1)
+            
+    # Ensure it's a trading day (if not, move to previous trading day usually, but let's stick to simple next/prev logic or just assume standard expirations are handled by exchange)
+    # Standard monthly expirations are usually robust, but let's check is_trading_day just in case and move backward if needed (rare for Friday to be holiday except Good Friday)
+    while not is_trading_day(monthly_date):
+        monthly_date -= timedelta(days=1)
+
+    return odte_date, weekly_date, monthly_date
+
+def fetch_option_chain(
+    ticker: str,
+    expiry: date,
+    as_of: date,
+    provider: Any = None # Unused now
+) -> pd.DataFrame:
+    """
+    Fetches the option chain for a specific ticker and expiration date using yfinance.
+    Returns a DataFrame with columns: ['strike', 'option_type', 'prev_close_mid', 'iv']
+    """
+    try:
+        yf_ticker = yf.Ticker(ticker)
+        
+        # yfinance expects expiration as string 'YYYY-MM-DD'
+        exp_str = expiry.isoformat()
+        
+        # Check if expiry is available
+        available_exps = yf_ticker.options
+        if exp_str not in available_exps:
+            LOG.warning(f"Expiration {exp_str} not found for {ticker}. Available: {available_exps[:3]}...")
+            return pd.DataFrame()
+            
+        opts = yf_ticker.option_chain(exp_str)
+        calls = opts.calls
+        puts = opts.puts
+        
+        # Process Calls
+        calls['option_type'] = 'C'
+        calls['mid'] = (calls['bid'] + calls['ask']) / 2
+        # Fallback to lastPrice if bid/ask are 0 or missing (common in EOD/delayed data)
+        calls['mid'] = calls.apply(lambda row: row['lastPrice'] if row['mid'] == 0 else row['mid'], axis=1)
+        
+        # Process Puts
+        puts['option_type'] = 'P'
+        puts['mid'] = (puts['bid'] + puts['ask']) / 2
+        puts['mid'] = puts.apply(lambda row: row['lastPrice'] if row['mid'] == 0 else row['mid'], axis=1)
+        
+        # Combine
+        chain = pd.concat([calls, puts])
+        
+        # Rename columns to match expected schema
+        # Expected: strike, option_type, prev_close_mid, iv, contractSymbol
+        chain = chain.rename(columns={
+            'strike': 'strike',
+            'mid': 'prev_close_mid',
+            'impliedVolatility': 'iv',
+            'contractSymbol': 'contractSymbol'
+        })
+        
+        return chain[['strike', 'option_type', 'prev_close_mid', 'iv', 'contractSymbol']]
+        
+    except Exception as e:
+        LOG.error(f"Error fetching option chain for {ticker} exp {expiry}: {e}")
+        return pd.DataFrame()
+
+def fetch_underlying_close(ticker: str, as_of: date, provider: Any = None) -> Optional[float]:
+    """
+    Fetches the underlying spot close price using yfinance.
+    """
+    try:
+        start_date = as_of
+        end_date = as_of + timedelta(days=1)
+        
+        # Use Ticker.history
+        yf_ticker = yf.Ticker(ticker)
+        # auto_adjust=False ensures we get the raw Close, matching Massive/Yahoo Website "Close" column
+        df = yf_ticker.history(start=start_date, end=end_date, interval="1d", auto_adjust=False)
+        
+        if df is not None and not df.empty:
+            LOG.info(f"yfinance raw data for {ticker}:\n{df.tail(1)}")
+            if "Close" in df.columns:
+                close_val = df["Close"].iloc[0]
+                if pd.notna(close_val):
+                    return float(close_val)
+                
+    except Exception as e:
+        LOG.error(f"Error fetching spot price for {ticker}: {e}")
+        
+    return None

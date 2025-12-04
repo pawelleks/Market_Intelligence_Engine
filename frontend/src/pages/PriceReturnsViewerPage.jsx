@@ -134,8 +134,9 @@ const StyledDataTable = ({ data }) => {
                                     key={header}
                                     style={{
                                         ...(header === 'Date' ? dateCellStyle : cellStyle),
+                                        // Color logic: Green/Red for Change %, and Green/Red/Neutral for State
                                         color: header === 'Daily Change (%)' ? getChangeColor(row[header]) :
-                                            (header === 'State' ? getStateColor(row[header]) : cellStyle.color), // NEW COLOR LOGIC
+                                            (header === 'State' ? getStateColor(row[header]) : cellStyle.color),
                                         fontWeight: header === 'Daily Change (%)' ? 'bold' : 'normal'
                                     }}
                                 >

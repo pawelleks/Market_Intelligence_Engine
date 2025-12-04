@@ -17,15 +17,28 @@ from mie_lib.analytics.hmm.hmm_engine import HMMConfig # Used for HMM configurat
 
 # Data Freshness Imports
 from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
-from mie_lib.utils.paths import features_parquet_path
+from mie_lib.utils.paths import features_parquet_path, options_latest_json_path, options_expected_moves_path
+import json
+import yfinance as yf
 
 # Price Viewer Imports
 from mie_lib.core.state_classification import classify_tri_state
 from mie_lib.analytics.minervini import run_minervini_template
 from mie_lib.utils.ticker_service import get_tickers_for_analysis
 from mie_lib.analytics.seasonality_analytics import get_seasonal_curves, get_calendar_heatmap, get_day_drilldown
+from mie_lib.analytics.downtrend_engine import compute_downtrend_score_latest, compute_downtrend_score_historical, compute_downtrend_signals_historical
+from mie_lib.data_ingest.data_aligner import fetch_and_align_dcs_assets
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
+
+# ... (rest of imports are fine, just updating the specific block if needed, but replace_file_content works on blocks)
+# Actually, I'll just update the endpoint and the import line separately or together if they are close.
+# The import is at line 27. The endpoint is at the end.
+# I'll do two edits or one large one if I can.
+# Let's do the import first.
+
+# Wait, I can't do multiple edits in one replace_file_content call unless I use multi_replace.
+# I'll use multi_replace_file_content.
 
 # -----------------------------------------------------------------
 # FastAPI Initialization
@@ -558,3 +571,264 @@ def api_get_day_drilldown(ticker: str, month: int, day: int, lookback: int = 50)
         raise HTTPException(status_code=404, detail=f"Seasonality data not found for {ticker}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/dcs/latest/{ticker}")
+def get_dcs_latest_status(ticker: str) -> JSONResponse:
+    """Returns the latest Downtrend Confirmation Score (DCS) and signal breakdown."""
+    try:
+        # 1. Fetch and align all assets
+        df_aligned, weights = fetch_and_align_dcs_assets(ticker, lookback_days=500)
+        
+        if df_aligned.empty:
+            raise HTTPException(status_code=404, detail="Multi-asset data alignment failed.")
+
+        # 2. Run the core scoring engine
+        score_data = compute_downtrend_score_latest(df_aligned, weights=weights, ticker=ticker)
+        
+        return JSONResponse(content={
+            "ticker": ticker,
+            "results": score_data,
+            "config_summary": {
+                "weights": weights, 
+                "thresholds": {"Warning": 40, "Alert": 60, "Crisis": 80}
+            }
+        })
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"Data required for DCS missing: {e}")
+    except Exception as e:
+        print(f"FATAL ERROR IN DCS ENDPOINT: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error running DCS analysis: {e}")
+
+@app.get("/api/v1/dcs/history/{ticker}")
+def get_dcs_history(ticker: str) -> JSONResponse:
+    try:
+        # Fetch data aligned over 30 years for a long-term chart window
+        df_aligned, weights = fetch_and_align_dcs_assets(ticker, lookback_days=30*365)
+        
+        if df_aligned.empty:
+            raise HTTPException(status_code=404, detail="Multi-asset data alignment failed for history.")
+
+        # Compute historical scores AND signals
+        history_records = compute_downtrend_signals_historical(df_aligned, weights=weights, ticker=ticker)
+        
+        return JSONResponse(content={"ticker": ticker, "data": history_records})
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"Data required for DCS missing: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error running DCS analysis: {e}")
+
+# -----------------------------------------------------------------
+# Expected Moves Endpoints
+# -----------------------------------------------------------------
+
+@app.get("/api/v1/expected_moves/latest")
+def get_latest_expected_moves() -> JSONResponse:
+    """
+    Returns the latest Expected Moves calculation results.
+    """
+    path = options_latest_json_path()
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No latest Expected Moves data found. Please run build-expected-moves.")
+        
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return JSONResponse(content=data)
+    except Exception as e:
+        print(f"Error reading latest EM json: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading data: {e}")
+
+@app.get("/api/v1/expected_moves/history/{ticker}")
+def get_expected_moves_history(ticker: str) -> JSONResponse:
+    """
+    Returns the historical Expected Moves data for a ticker.
+    """
+    path = options_expected_moves_path(ticker)
+    if not path.exists():
+        # Return empty list if no history yet
+        return JSONResponse(content=[])
+        
+    try:
+        df = pd.read_parquet(path)
+        # Convert dates to strings
+        if "date" in df.columns:
+            df["date"] = df["date"].astype(str)
+        if "expiry_date" in df.columns:
+            df["expiry_date"] = df["expiry_date"].astype(str)
+            
+        data = df.to_dict(orient="records")
+        return JSONResponse(content=data)
+    except Exception as e:
+        print(f"Error reading EM history for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading history: {e}")
+
+@app.get("/api/v1/market/candles/{ticker}")
+def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") -> JSONResponse:
+    """
+    Fetches candle data from yfinance.
+    Intervals: 1h, 4h, 1d.
+    Range: max (default), 2y, 5y, etc.
+    """
+    try:
+        # Validate interval
+        valid_intervals = {"1h", "1d", "5d", "1wk", "1mo"} 
+        
+        yf_interval = interval
+        if interval == "4h":
+            yf_interval = "1h" # Fetch 1h base
+            
+        t = yf.Ticker(ticker)
+        
+        # yfinance limit for 1h is 730 days (~2y). If user asks for 'max' with 1h, yfinance might error or truncate.
+        # Let's handle it gracefully.
+        req_range = range
+        if (interval == "1h" or interval == "4h") and range == "max":
+            req_range = "2y"
+            
+        df = t.history(period=req_range, interval=yf_interval)
+        
+        if df.empty:
+             return JSONResponse(content=[])
+             
+        # Resample if 4h
+        if interval == "4h":
+            # Resample logic
+            agg_dict = {
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum'
+            }
+            # Resample to 4H, offset to market open if possible, but simple '4H' is okay
+            df = df.resample('4h').agg(agg_dict).dropna()
+            
+        # Format for frontend
+        df.reset_index(inplace=True)
+        
+        # yfinance returns datetime with timezone usually
+        # Convert to string
+        if "Date" in df.columns:
+            df["Date"] = df["Date"].astype(str)
+        elif "Datetime" in df.columns:
+             df["Date"] = df["Datetime"].astype(str)
+             
+        # Select columns
+        cols = ["Date", "Open", "High", "Low", "Close", "Volume"]
+        data = df[cols].to_dict(orient="records")
+        
+        return JSONResponse(content=data)
+        
+    except Exception as e:
+        # print(f"Error fetching candles: {e}")
+        return JSONResponse(content=[], status_code=500)
+
+# -----------------------------------------------------------------
+# Massive.com Integration (Experimental)
+# -----------------------------------------------------------------
+from mie_lib.data_ingest.providers.massive import MassiveOptionChainProvider
+from mie_lib.analytics.expected_moves.data_ingest import get_target_expirations, fetch_vix1d_close
+
+@app.get("/api/v1/expected_moves/massive/latest")
+async def get_expected_moves_massive():
+    """
+    Fetches Expected Moves using Massive.com as the provider.
+    Calculates on-the-fly for comparison.
+    """
+    import time # Import time for rate limiting
+    try:
+        provider = MassiveOptionChainProvider()
+        if not provider.api_key:
+             return JSONResponse(content={"error": "MASSIVE_API_KEY not configured"}, status_code=500)
+
+        tickers = ["SPY"] # Limit to SPY per user request to avoid 429s
+        as_of = date.today()
+        
+        # 1. Fetch VIX1D (still from yfinance as Massive might not have it or we use same source)
+        vix1d_val = fetch_vix1d_close(as_of)
+        
+        # 2. Determine Expirations
+        odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
+        
+        results = {
+            "as_of": as_of.isoformat(),
+            "vix1d": vix1d_val,
+            "confidence_score": 80, # Placeholder or calc
+            "tickers": {}
+        }
+        
+        for ticker in tickers:
+            # Fetch Spot
+            spot = provider.fetch_spot(ticker)
+            if spot is None:
+                continue
+            
+            # Determine Expirations
+            odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
+            
+            # Rate limit safety
+            time.sleep(1) 
+                
+            t_data = {
+                "spot_price": spot,
+                "expirations": {}
+            }
+            
+            for exp_type, exp_date in [("ODTE", odte_date), ("WEEKLY", weekly_date), ("MONTHLY", monthly_date)]:
+                # Fetch Chain (Using workaround for now)
+                # Rate limit safety between fetches
+                time.sleep(1)
+                
+                # Calculate ATM Strike
+                # SPY/QQQ/IWM usually have 1.0 or 0.5 strikes. 
+                # Let's assume 1.0 for simplicity as it covers most ATM scenarios.
+                atm_strike = round(spot)
+                
+                # Construct Ticker Symbols
+                # Format: O:{TICKER}{YYMMDD}{T}{PPPPPPPP}
+                # YYMMDD
+                yymmdd = exp_date.strftime("%y%m%d")
+                # PPPPPPPP: Strike * 1000, padded to 8 chars
+                strike_str = f"{int(atm_strike * 1000):08d}"
+                
+                call_ticker = f"O:{ticker}{yymmdd}C{strike_str}"
+                put_ticker = f"O:{ticker}{yymmdd}P{strike_str}"
+                
+                # Fetch Prices
+                call_price = provider.fetch_contract_price(call_ticker)
+                # Rate limit
+                time.sleep(0.5)
+                put_price = provider.fetch_contract_price(put_ticker)
+                
+                if call_price is None or put_price is None:
+                    continue
+                    
+                straddle = call_price + put_price
+                
+                t_data["expirations"][exp_type] = {
+                    "expiry_date": exp_date.isoformat(),
+                    "lower_range": spot - straddle,
+                    "upper_range": spot + straddle,
+                    "em_dollars": straddle,
+                    "debug": {
+                        "atm_strike": atm_strike,
+                        "call_ticker": call_ticker,
+                        "call_price": call_price,
+                        "put_ticker": put_ticker,
+                        "put_price": put_price
+                    }
+                }
+            
+            results["tickers"][ticker] = t_data
+            
+        return JSONResponse(content=results)
+
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+        
+    except Exception as e:
+        print(f"Error fetching candles for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching candles: {e}")

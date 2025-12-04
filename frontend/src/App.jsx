@@ -11,10 +11,14 @@ import MarkovSettings from './components/MarkovSettings';
 import MarkovMultiStepForecast from './components/MarkovMultiStepForecast';
 import MarkovConclusion from './components/MarkovConclusion';
 import MarkovMultiStepConclusion from './components/MarkovMultiStepConclusion';
+import DowntrendPage from './components/DowntrendPage';
 import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
 import PriceReturnsViewerPage from './pages/PriceReturnsViewerPage';
 import MinerviniPage from './pages/MinerviniPage';
 import SeasonalityPage from './pages/SeasonalityPage';
+import DCSDashboardPage from './pages/DCSDashboardPage';
+import ExpectedMovesPage from './pages/ExpectedMovesPage';
+import ExpectedMovesPageMassive from './pages/ExpectedMovesPageMassive';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -372,9 +376,12 @@ function App() {
               <li style={{ marginBottom: '10px' }}><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/expected-moves" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Expected Moves</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/market/seasonality" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Seasonality</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
             </ul>
           </nav>
 
@@ -411,6 +418,8 @@ function App() {
                   error={error}
                 />}
               />
+              <Route path="/analysis/expected-moves" element={<ExpectedMovesPage />} />
+              <Route path="/analysis/expected-moves-massive" element={<ExpectedMovesPageMassive />} />
               <Route
                 path="/utility/price-viewer"
                 element={<PriceReturnsViewerPage
@@ -438,6 +447,19 @@ function App() {
                   settings={settings}
                   onSettingsChange={setSettings}
                 />}
+              />
+              <Route
+                path="/analysis/dcs"
+                element={<DCSDashboardPage
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  loading={loading}
+                  error={error}
+                />}
+              />
+              <Route
+                path="/analysis/downtrend"
+                element={<DowntrendPage />}
               />
             </Routes>
           </main>

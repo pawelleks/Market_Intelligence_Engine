@@ -9,7 +9,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 import yaml
@@ -37,6 +37,7 @@ from mie_lib.cli.expected_moves_snapshots import (
     DEFAULT_TMP_ROOT as DEFAULT_EM_SNAPSHOT_TMP,
     build_expected_moves_snapshots,
 )
+from mie_lib.analytics.expected_moves.engine import run_daily_em_build
 # --- hmm snapshot helpers ---
 from mie_lib.cli.hmm_snapshots import (
     DEFAULT_DESTINATION_ROOT as DEFAULT_HMM_SNAPSHOT_DEST,
@@ -76,11 +77,11 @@ DEFAULT_MARKOV_GRID_TICKERS_FALLBACK = ["SPY", "QQQ", "DIA", "IWM"]
 
 # ---------- New: shared config + runner helpers ----------
 CONFIG_DIR = Path("config")
-TICKERS_YAML = CONFIG_DIR / "tickers.yml"
+TICKERS_YAML = CONFIG_DIR / "ticker_list.yml"
 
 
 def _load_yaml_tickers() -> list[str]:
-    """Load union of tickers from config/tickers.yml.
+    """Load union of tickers from config/ticker_list.yml.
     Supports formats:
       core: [SPY, QQQ, ...]
       groups: { core: [...], indices: ["^GSPC", ...], ... }
@@ -264,20 +265,24 @@ def handle_build_expected_moves(args):
     cfg = ExpectedMovesConfig.load()
     ticker = (getattr(args, "ticker", None) or cfg.spot_ticker).upper()
     start = _parse_iso_date(args.start, "--start")
-    end = _parse_iso_date(args.end, "--end") if getattr(args, "end", None) else None
-    provider = _resolve_expected_moves_provider_arg(getattr(args, "provider", None), cfg)
-    results = build_expected_moves_history(
-        start=start,
-        end=end,
-        ticker=ticker,
-        provider=provider,
-        include_weekly_reference=not getattr(args, "no_weekly_reference", False),
-    )
-    LOG.info(
-        "build-expected-moves complete ticker=%s days=%s provider=%s", ticker, len(results), provider.__class__.__name__
-    )
-    print({"ticker": ticker, "days": len(results)})
-    return results
+    end = _parse_iso_date(args.end, "--end") if getattr(args, "end", None) else start
+    
+    # Loop through dates
+    current = start
+    while current <= end:
+        # We only care if it's a trading day, but the engine/provider handles checks too.
+        # However, to save API calls, we can check here.
+        # But let's just let the engine run, it might have its own logic.
+        # Actually, engine.py doesn't check is_trading_day at the top level, 
+        # but fetch_option_chain might fail gracefully.
+        # Let's check here for efficiency.
+        from mie_lib.utils.trading_calendar import is_trading_day
+        if is_trading_day(current):
+            print(f"Building Expected Moves for {ticker} on {current}")
+            run_daily_em_build([ticker], as_of=current)
+        current += timedelta(days=1)
+        
+    print(f"✅ Build complete for {ticker} from {start} to {end}")
 
 
 def handle_update_expected_moves(args):

@@ -4,11 +4,102 @@ groups:
     - QQQ
     - IWM
     - DIA
-  Big_Tech:
+  Indexes:
+    - .SPX
+    - .DJI
+    - .IXIC
+    - .RUT
+  Sector_ETFs:
+    - XLC # Communication Services
+    - XLY # Consumer Discretionary
+    - XLP # Consumer Staples
+    - XLE # Energy
+    - XLF # Financials
+    - XLV # Health Care
+    - XLI # Industrials
+    - XLB # Materials
+    - XLRE # Real Estate
+    - XLK # Technology
+    - XLU # Utilities
+  Fixed_Income_ETFs:
+    - BND
+    - AGG
+    - BNDX
+    - SGOV
+    - TLT
+    - IEF
+    - SHY
+    - VCIT
+    - VTEB
+    - BIL
+  Mega_Cap_Tech:
     - AAPL
     - MSFT
-    - GOOGL
     - AMZN
+    - GOOGL
+    - META
+    - TSLA
   Semiconductors:
     - NVDA
-    - AMD
+  Energy_Majors:
+    - XOM
+    - CVX
+    - COP
+  Financials_and_Payments:
+    - BRK.B
+    - JPM
+    - V
+    - MA
+    - BAC
+    - WFC
+  Health_Care_and_Pharma:
+    - LLY
+    - JNJ
+    - ABBV
+    - UNH
+    - MRK
+    - TMO
+  Consumer_Staples_Retail:
+    - WMT
+    - COST
+    - PG
+    - PM
+    - KO
+    - PEP
+    - MCD
+  Industrials_and_Manufacturing:
+    - GE
+    - CAT
+    - RTX
+    - HON
+    - DE
+  Materials_and_Chemicals:
+    - LIN
+    - NEM
+    - SHW
+    - ECL
+    - NUE
+    - MLM
+  Real_Estate_REITs:
+    - WELL
+    - PLD
+    - AMT
+    - EQIX
+    - SPG
+    - O
+  Utilities:
+    - NEE
+    - SO
+    - DUK
+    - EXC
+    - AEP
+    - CEG
+  Communication_Services_Media:
+    - DIS
+    - NFLX
+    - VZ
+    - T
+  Other_Large_Cap:
+    - HD
+    - UBER
+    - WMB

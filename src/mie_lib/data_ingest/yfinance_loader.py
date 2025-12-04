@@ -28,12 +28,12 @@ REGISTRY_PATH = META_DIR / "dataset_registry.json"
 REQUIRED_COLUMNS = ["date", "open", "high", "low", "close", "adj_close", "volume", "ticker"]
 
 
-def read_tickers(config_path: str = "config/tickers.yml") -> List[str]:
+def read_tickers(config_path: str = "config/ticker_list.yml") -> List[str]:
     """Read tickers from YAML config file. Allows simple list or top-level 'tickers' key.
     Ignores blank lines and comment lines in a fallback plain-text parsing mode.
     """
     try:
-        cfg = load_named_config("tickers")
+        cfg = load_named_config("ticker_list")
     except Exception:
         # fallback: try to read as plain text lines
         p = Path(config_path)

@@ -102,6 +102,10 @@ def options_weekly_reference_path(ticker: str) -> Path:
     return OPTIONS_DIR / f"{slug}_weekly_reference.parquet"
 
 
+def options_latest_json_path() -> Path:
+    return OPTIONS_DIR / "latest.json"
+
+
 def options_manifest_path() -> Path:
     return META_DIR / "expected_moves_manifest.json"
 

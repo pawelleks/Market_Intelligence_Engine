@@ -505,14 +505,14 @@ def build_features_for_ticker(ticker: str, mode: str = "full", lookback: int = 9
 def build_features_for_all(mode: str = "full", lookback: int = 90, write_csv: bool = False) -> List[Dict]:
     tickers = []
     try:
-        tcfg = load_named_config("tickers")
+        tcfg = load_named_config("ticker_list")
         if isinstance(tcfg, dict):
             tickers = tcfg.get("tickers", [])
         elif isinstance(tcfg, list):
             tickers = tcfg
     except Exception:
         # fallback to reading file
-        p = Path("config/tickers.yml")
+        p = Path("config/ticker_list.yml")
         if p.exists():
             lines = [l.strip() for l in p.read_text().splitlines()]
             tickers = [l for l in lines if l and not l.startswith("#")]

@@ -3,7 +3,7 @@ Data ingestion layer for Expected Moves (EM).
 Handles fetching VIX1D, determining expiration dates, and retrieving option chains.
 Uses yfinance for all data to avoid missing provider dependencies.
 """
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 import logging
 import pandas as pd
 import yfinance as yf
@@ -54,14 +54,47 @@ def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
     """
     Determines the target expiration dates based on the spec.
     
-    1. ODTE: The next valid trading day.
+    1. ODTE: 
+       - If Today and time < 16:30 ET: Today (if trading day) else Next Trading Day.
+       - If Today and time >= 16:30 ET: Next Trading Day.
+       - If not Today: as_of (if trading day) else Next Trading Day.
     2. Weekly: The first standard weekly expiration (Friday) on or after ODTE.
+    3. Monthly: Last Trading Day of Month.
     """
-    # 1. ODTE: Today if trading day, else next trading day
-    if is_trading_day(as_of):
-        odte_date = as_of
+    today = date.today()
+    
+    # 1. ODTE Logic
+    if as_of == today:
+        # Check current time in UTC
+        now_utc = datetime.now(timezone.utc)
+        
+        # NOTE: Using simplistic cutoff 21:30 UTC for now. 
+        cutoff_hour = 21
+        cutoff_minute = 30
+        
+        is_after_market = (now_utc.hour > cutoff_hour) or (now_utc.hour == cutoff_hour and now_utc.minute >= cutoff_minute)
+        
+        LOG.info(f"0DTE Check: NowUTC={now_utc.strftime('%H:%M')} Cutoff={cutoff_hour}:{cutoff_minute} IsAfter={is_after_market} AsOf={as_of}")
+        
+        if is_after_market:
+            # Rollover to next trading day
+            odte_date = get_next_trading_day(as_of)
+            LOG.info(f"  -> Rollover to {odte_date}")
+        else:
+            # Still in session (or pre-market)
+            if is_trading_day(as_of):
+                odte_date = as_of
+                LOG.info(f"  -> Today is trading day: {odte_date}")
+            else:
+                odte_date = get_next_trading_day(as_of)
+                LOG.info(f"  -> Today is NOT trading day: {odte_date}")
     else:
-        odte_date = get_next_trading_day(as_of)
+        # Historical / Backfill
+        if is_trading_day(as_of):
+            odte_date = as_of
+        else:
+            odte_date = get_next_trading_day(as_of)
+        LOG.info(f"0DTE Check (Historical): AsOf={as_of} -> {odte_date}")
     
     # 2. Weekly: First Friday on or after ODTE
     # Start checking from ODTE
@@ -93,12 +126,13 @@ def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
 
     monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month)
     
-    # If monthly date is today or in the past, move to next month
-    if monthly_date <= as_of:
-        if as_of.month == 12:
-            monthly_date = get_last_trading_day_of_month(as_of.year + 1, 1)
+    # If monthly date is passed (relative to ODTE), move to next month
+    # We compare to ODTE because that's our anchor "Live" date
+    if monthly_date < odte_date:
+        if odte_date.month == 12:
+            monthly_date = get_last_trading_day_of_month(odte_date.year + 1, 1)
         else:
-            monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month + 1)
+            monthly_date = get_last_trading_day_of_month(odte_date.year, odte_date.month + 1)
 
     return odte_date, weekly_date, monthly_date
 

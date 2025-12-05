@@ -116,6 +116,26 @@ def _load_yaml_tickers() -> list[str]:
     return sorted(tickers)
 
 
+ANALYSIS_SCOPE_YAML = CONFIG_DIR / "analysis_scope.yml"
+
+def _load_scope_tickers(scope_key: str) -> list[str]:
+    """Load specific list from config/analysis_scope.yml"""
+    if not ANALYSIS_SCOPE_YAML.exists():
+        return []
+    try:
+        cfg = yaml.safe_load(ANALYSIS_SCOPE_YAML.read_text()) or {}
+        # Support "scope" top-level key if present
+        if "scope" in cfg:
+             cfg = cfg["scope"]
+        vals = cfg.get(scope_key, [])
+        if isinstance(vals, list):
+             return sorted(list({str(t).strip().upper() for t in vals if t}))
+        return []
+    except Exception:
+        return []
+
+
+
 def _run(cmd: list[str]):
     """Echo and run a subprocess command; exit on non-zero."""
     print("$", " ".join(cmd))
@@ -409,6 +429,187 @@ def handle_build_markov_snapshots(args):
     return summary
 
 
+def handle_build_gex_daily(args):
+    """
+    Handler for building daily GEX snapshots from Massive Flat Files.
+    """
+    from datetime import date, datetime, timedelta
+    from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader
+    from mie_lib.analytics.gex.gex_engine import GEXEngine
+    from mie_lib.analytics.gex.storage import save_gex_profile
+    import yfinance as yf # Only for spot price if needed
+    import pandas as pd
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    target_date = args.date if args.date else date.today().strftime("%Y-%m-%d")
+    tickers = _load_yaml_tickers()
+    if args.tickers:
+        if args.tickers == "@config":
+            pass # already loaded
+        else:
+            tickers = _parse_csv_str_list(args.tickers, [])
+            
+    logger.info(f"Starting Offline GEX Build for {target_date} for {len(tickers)} tickers...")
+    
+    loader = MassiveOptionsLoader()
+    engine = GEXEngine()
+    
+    # 1. Load Data
+    logger.info(f"Loading options flat file for {target_date}...")
+    df_all = loader.load_day_aggregates(target_date, tickers)
+    
+    if df_all.empty:
+        logger.error(f"FATAL: No CSV data found for {target_date}. Please download Massive files or run 'fetch-options-snapshot'.")
+        return 1
+        
+    # 2. Process Each Ticker
+    for ticker in tickers:
+        try:
+            # Filter from CSV
+            df_ticker = pd.DataFrame()
+            if not df_all.empty:
+                 df_ticker = df_all[df_all['underlying_ticker'] == ticker]
+            
+            # STRICT MODE: If CSV is empty, we SKIP. No YFinance fallback.
+            if df_ticker.empty:
+                logger.warning(f"Skipping {ticker}: No data in CSV.")
+                continue
+
+            # 1. Determine Spot Price (Needed for CSV calculation)
+            spot = None
+            try:
+                # Override if provided by CLI (Simulation Mode)
+                if getattr(args, "spot", None) is not None:
+                     spot = float(args.spot)
+                     logger.info(f"Using manual spot override: {spot}")
+                else:
+                    # Only fetch spot if we have data to process
+                    yf_t = yf.Ticker(ticker)
+                    try:
+                        spot = yf_t.fast_info['last_price']
+                    except:
+                        # Fallback to history
+                        hist = yf_t.history(period="1d")
+                        if not hist.empty:
+                            spot = hist['Close'].iloc[-1]
+            except Exception as e:
+                logger.warning(f"Could not fetch spot for {ticker}: {e}")
+                continue
+
+            # 2. Generate Candidate from CSV
+            if spot:
+                candidate_data = engine.calculate_gex_from_frame(ticker, df_ticker, spot)
+                if candidate_data:
+                    save_gex_profile(ticker, candidate_data)
+                    logger.info(f"Saved GEX for {ticker} using CSV data ({len(df_ticker)} rows).")
+                else:
+                    logger.warning(f"Failed to calculate GEX for {ticker} (CSV data present but calc failed).")
+            else:
+                 logger.warning(f"Skipping {ticker}: No Spot Price available.")
+            
+        except Exception as e:
+            logger.error(f"Failed to build GEX for {ticker}: {e}")
+            
+    logger.info("Daily GEX Build Completed.")
+    return 0
+
+
+def _format_osi(ticker, expiry_str, otype, strike):
+    # expiry: YYYY-MM-DD -> YYMMDD
+    dt = datetime.strptime(expiry_str, "%Y-%m-%d")
+    yymmdd = dt.strftime("%y%m%d")
+    t_char = 'C' if otype == 'call' else 'P'
+    strike_int = int(strike * 1000)
+    strike_str = f"{strike_int:08d}"
+    
+    # Handle indices like ^SPX -> SPX
+    root = ticker.replace("^", "")
+    
+    return f"{root}{yymmdd}{t_char}{strike_str}"
+
+def handle_fetch_options_snapshot(args):
+    """
+    Fetch options chain snapshot from YFinance for specified tickers.
+    Writes to data/raw/massive/options/options_YYYY-MM-DD.csv.
+    """
+    import yfinance as yf
+    import pandas as pd
+    from pathlib import Path
+    
+    logger = logging.getLogger(__name__)
+    today_str = date.today().strftime("%Y-%m-%d")
+    output_dir = Path("data/raw/massive/options")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"options_{today_str}.csv"
+    
+    tickers = _load_yaml_tickers()
+    if args.tickers and args.tickers != "@config":
+        tickers = _parse_csv_str_list(args.tickers, [])
+        
+    logger.info(f"Fetching options snapshot for {len(tickers)} tickers...")
+    
+    all_rows = []
+    
+    for ticker in tickers:
+        logger.info(f"Fetching {ticker}...")
+        try:
+            yf_t = yf.Ticker(ticker)
+            exps = yf_t.options
+            
+            if not exps:
+                logger.warning(f"  No expirations for {ticker}")
+                continue
+                
+            for exp in exps:
+                try:
+                    chain = yf_t.option_chain(exp)
+                    
+                    # Process Calls
+                    for _, row in chain.calls.iterrows():
+                        osi = _format_osi(ticker, exp, 'call', row['strike'])
+                        all_rows.append({
+                            "day": today_str,
+                            "underlying_ticker": ticker,
+                            "option_ticker": osi,
+                            "open_interest": row.get('openInterest', 0) or 0,
+                            "implied_volatility": row.get('impliedVolatility', 0) or 0,
+                            "gamma": 0, 
+                            "delta": 0,
+                        })
+                        
+                    # Process Puts
+                    for _, row in chain.puts.iterrows():
+                        osi = _format_osi(ticker, exp, 'put', row['strike'])
+                        all_rows.append({
+                            "day": today_str,
+                            "underlying_ticker": ticker,
+                            "option_ticker": osi,
+                            "open_interest": row.get('openInterest', 0) or 0,
+                            "implied_volatility": row.get('impliedVolatility', 0) or 0,
+                            "gamma": 0,
+                            "delta": 0,
+                        })
+                        
+                except Exception as e:
+                    logger.warning(f"  Error fetching {exp}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to process {ticker}: {e}")
+            
+    df = pd.DataFrame(all_rows)
+    logger.info(f"Total contracts fetched: {len(df)}")
+    
+    if not df.empty:
+        df.to_csv(output_file, index=False)
+        logger.info(f"Saved snapshot to {output_file}")
+    else:
+        logger.warning("No data fetched.")
+    
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -427,6 +628,18 @@ def build_parser():
     sub.add_parser("update-raw", help="Incrementally update raw data for tickers (append+dedupe)")
     sub.add_parser("rebuild-raw", help="Rebuild raw data for all tickers (full history)")
     sub.add_parser("validate-raw", help="Validate raw data files for tickers")
+
+    # --- GEX (New) ---
+    p_gex = sub.add_parser("build-gex-daily", help="Build Daily GEX from Massive Flat Files (Offline)")
+    p_gex.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
+    p_gex.add_argument("--tickers", type=str, default="@config")
+    p_gex.add_argument("--spot", type=float, help="Manual spot price override")
+    p_gex.set_defaults(func=handle_build_gex_daily)
+
+    p_fetch_gex = sub.add_parser("fetch-options-snapshot", help="Fetch fresh options snapshot from YFinance (Optional)")
+    p_fetch_gex.add_argument("--tickers", type=str, default="@config")
+    p_fetch_gex.set_defaults(func=handle_fetch_options_snapshot)
+
     # Feature build commands
     p_bf = sub.add_parser("build-features", help="Build features for tickers")
     p_bf.add_argument("--mode", choices=["full", "update"], default="update")
@@ -674,6 +887,11 @@ def build_parser():
             "Incremental update: update RAW/FEATURES/SEASONALITY, refresh MARKOV/HMM for all YAML tickers."
         ),
     )
+
+    # Minervini Scanner
+    p_min = sub.add_parser("build-minervini-daily", help="Build Daily Minervini Scanner Snapshot")
+    p_min.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
+    p_min.add_argument("--tickers", type=str, default="@config")
 
     return parser
 
@@ -1263,6 +1481,33 @@ def main(argv=None):
             return
         print(f"Building Seasonality Base Data for {args.ticker}...")
         generate_seasonality_base(args.ticker)
+    elif args.command == "build-minervini-daily":
+        from mie_lib.analytics.scanner.minervini_build import build_minervini_snapshot
+        from datetime import date
+        
+        # Determine Date
+        if args.date:
+             target_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        else:
+             target_date = date.today()
+             
+        # Determine Tickers
+        if not args.tickers or args.tickers == "@config":
+            # 1. Try Specific Scope
+            tickers = _load_scope_tickers("Minervini_Template")
+            if not tickers:
+                 # 2. Fallback
+                 tickers = read_tickers()
+        elif args.tickers.startswith("@scope:"):
+            scope_key = args.tickers.split(":", 1)[1]
+            tickers = _load_scope_tickers(scope_key)
+        else:
+            tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+            
+        print(f"Building Minervini Scanner for {len(tickers)} tickers on {target_date}...")
+        count = build_minervini_snapshot(tickers, target_date)
+        print(f"Analysis complete. {count} records processed.")
+        sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)

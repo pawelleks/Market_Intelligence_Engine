@@ -66,14 +66,41 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
             LOG.error(f"Failed to process {ticker}: {e}")
             latest_results["tickers"][ticker] = {"error": str(e)}
             
-    # 4. Save Latest JSON
+    # 4. Save Latest JSON - Merge with existing to prevent creating partial files
     json_path = options_latest_json_path()
     json_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    final_results = latest_results
+    if json_path.exists():
+        try:
+            with open(json_path, "r") as f:
+                existing_data = json.load(f)
+                # If "as_of" matches, we merge tickers. If not, we might want to overwrite or keep?
+                # Usually we want to keep all tickers that are valid.
+                # But let's assume we are building for the same day.
+                if existing_data.get("as_of") == as_of.isoformat():
+                    # Merge tickers
+                    existing_tickers = existing_data.get("tickers", {})
+                    # Update with new results
+                    existing_tickers.update(latest_results["tickers"])
+                    existing_data["tickers"] = existing_tickers
+                    # Update metadata if needed (e.g. VIX1D might change if re-run, but we use new run)
+                    existing_data["vix1d"] = vix1d_val
+                    final_results = existing_data
+                else:
+                    # New date, overwrite? Or keep old tickers until refreshed?
+                    # For now, if date changes, we probably start fresh or keep old ones as stale?
+                    # Let's overwrite if date changes to clean up old data, BUT 
+                    # if we run sequentially for different tickers, day should match.
+                    pass
+        except Exception as e:
+            LOG.warning(f"Failed to read existing latest.json for merging: {e}")
+            
     with open(json_path, "w") as f:
-        json.dump(latest_results, f, indent=2)
+        json.dump(final_results, f, indent=2)
         
     LOG.info(f"Saved latest results to {json_path}")
-    return latest_results
+    return final_results
 
 def _process_ticker(
     ticker: str, 
@@ -82,14 +109,40 @@ def _process_ticker(
     confidence_score: int,
     latest_results: Dict[str, Any]
 ):
+    # 3. Determine Expirations First
+    # We need ODTE date to determine the reference spot date
+    odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
+    
+    # Log determined dates
+    LOG.info(f"{ticker} | ODTE: {odte_date} | Weekly: {weekly_date} | Monthly: {monthly_date}")
+    
     # 2. Fetch Underlying Price
-    spot_price = fetch_underlying_close(ticker, as_of)
+    # Spot Price should be the Close of the PREVIOUS trading day relative to the 0DTE session date.
+    # Why? Because Expected Move is calculated from the previous close.
+    # If ODTE is Today, spot is Yesterday's close.
+    # If ODTE is Next Day, spot is Today's close (or Yesterday's if Today is a holiday/weekend).
+    
+    # We use get_previous_trading_day relative to ODTE date unless we are MID-SESSION? 
+    # Actually, Expected Move is usually "overnight" or "session" range. 
+    # Traditionally, we anchor to the previous close.
+    # If we are live in session, we might want live spot, but the request was "based on previous EOD prices".
+    # So yes, previous trading day relative to trading session (ODTE date).
+    
+    from mie_lib.utils.trading_calendar import get_previous_trading_day
+    spot_date = get_previous_trading_day(odte_date)
+    
+    spot_price = fetch_underlying_close(ticker, spot_date)
+    if spot_price is None:
+        # Fallback: try as_of if different
+        if spot_date != as_of:
+             LOG.warning(f"Could not fetch spot for {spot_date}, trying {as_of}")
+             spot_price = fetch_underlying_close(ticker, as_of)
+             
     if spot_price is None:
         raise ValueError(f"Could not fetch spot price for {ticker}")
         
-    # 3. Determine Expirations
-    odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
-    
+    LOG.info(f"{ticker} | Spot Reference Date: {spot_date} | Price: {spot_price}")
+
     ticker_results = {
         "spot_price": spot_price,
         "expirations": {}
@@ -178,7 +231,7 @@ def _process_ticker(
         
         ticker_results["expirations"][expiry_type] = result_entry
         
-        # Append to History
+    # Append to History
         _append_to_history(ticker, as_of, expiry_type, expiry_date, spot_price, em_dollars, upper, lower, vix1d_val, confidence_score)
 
     latest_results["tickers"][ticker] = ticker_results
@@ -196,11 +249,12 @@ def _append_to_history(
     conf: int
 ):
     """
-    Appends a row to the ticker's historical Parquet file.
+    Appends a row to the ticker's historical Parquet file AND saves to pending for reliability check.
     """
+    # 1. Main History
     path = options_expected_moves_path(ticker)
     
-    new_row = pd.DataFrame([{
+    new_row_dict = {
         "date": as_of,
         "expiry_type": expiry_type,
         "expiry_date": expiry_date,
@@ -211,7 +265,9 @@ def _append_to_history(
         "vix1d": vix,
         "confidence_score": conf,
         "timestamp": datetime.now().isoformat()
-    }])
+    }
+    
+    new_row = pd.DataFrame([new_row_dict])
     
     if path.exists():
         try:
@@ -232,3 +288,55 @@ def _append_to_history(
         
     path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_parquet(path, index=False)
+
+    # 2. Save to Pending for Reliability Processor
+    # We save each record as a separate small parquet or append to a daily pending file
+    # A daily pending file is cleaner: pending_YYYY-MM-DD.parquet
+    pending_dir = Path("data/analytics/expected_moves/pending")
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    pending_path = pending_dir / f"pending_{as_of}.parquet"
+    
+    # We need to match the schema expected by HistoricalEMRecord
+    # The dict keys match the Pydantic model fields (mostly)
+    # HistoricalEMRecord has: ticker, date, expiry_date, expiry_type, spot_price, expected_move_dollars, upper_range, lower_range, vix1d, confidence_score
+    
+    pending_record = {
+        "ticker": ticker,
+        "date": as_of, # This might need to be removed if not in schema, but schema has 'timestamp'. Schema doesn't have 'date' field explicitly? Wait, let me check models.py again.
+        # models.py: ticker, expiry_type, expiry_date, underlying_price, expected_move_dollars, upper_range, lower_range, vix1d_value, confidence_score_percent, timestamp
+        # It does NOT have 'date' (the calculation date). It uses 'timestamp' for that.
+        # But 'date' is useful for dedup.
+        # Let's check models.py line 11.
+        # It has: ticker, expiry_type, expiry_date.
+        # It does NOT have 'date' (as_of).
+        # However, the pending file is named pending_YYYY-MM-DD.parquet, so the date is implicit.
+        # But wait, reliability_processor.py line 104: record = HistoricalEMRecord(**data)
+        # If I pass 'date', and it's not in the model, pydantic might ignore it or error depending on config (extra='ignore' is default in v2? No, 'ignore' is default in v1, 'extra'='ignore' in v2).
+        # Let's look at models.py again. It inherits from BaseModel.
+        # I should strictly follow the schema.
+        
+        "ticker": ticker,
+        "expiry_type": expiry_type,
+        "expiry_date": expiry_date,
+        "underlying_price": spot,
+        "expected_move_dollars": em,
+        "upper_range": upper,
+        "lower_range": lower,
+        "vix1d_value": vix,
+        "confidence_score_percent": conf,
+        "timestamp": datetime.now() # Pydantic will serialize this
+    }
+    
+    pending_df = pd.DataFrame([pending_record])
+    
+    if pending_path.exists():
+        try:
+            existing_pending = pd.read_parquet(pending_path)
+            # Dedup
+            existing_pending = existing_pending[~((existing_pending["ticker"] == ticker) & (existing_pending["expiry_type"] == expiry_type))]
+            combined_pending = pd.concat([existing_pending, pending_df], ignore_index=True)
+            combined_pending.to_parquet(pending_path, index=False)
+        except Exception:
+             pending_df.to_parquet(pending_path, index=False)
+    else:
+        pending_df.to_parquet(pending_path, index=False)

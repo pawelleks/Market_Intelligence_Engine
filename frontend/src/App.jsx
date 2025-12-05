@@ -15,10 +15,13 @@ import DowntrendPage from './components/DowntrendPage';
 import MarkovOneStepMatrix from './components/MarkovOneStepMatrix';
 import PriceReturnsViewerPage from './pages/PriceReturnsViewerPage';
 import MinerviniPage from './pages/MinerviniPage';
+import MinerviniScannerPage from './pages/MinerviniScannerPage';
 import SeasonalityPage from './pages/SeasonalityPage';
 import DCSDashboardPage from './pages/DCSDashboardPage';
 import ExpectedMovesPage from './pages/ExpectedMovesPage';
 import ExpectedMovesPageMassive from './pages/ExpectedMovesPageMassive';
+import EMReliabilityPage from './pages/EMReliabilityPage';
+import GammaExposurePage from './pages/GammaExposurePage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -377,8 +380,12 @@ function App() {
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/expected-moves" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Expected Moves</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/reliability" style={{ color: '#d7e3f3', textDecoration: 'none' }}>EM Reliability</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/scanner/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Scanner</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/market/seasonality" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Seasonality</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
@@ -420,6 +427,7 @@ function App() {
               />
               <Route path="/analysis/expected-moves" element={<ExpectedMovesPage />} />
               <Route path="/analysis/expected-moves-massive" element={<ExpectedMovesPageMassive />} />
+              <Route path="/analysis/reliability" element={<EMReliabilityPage />} />
               <Route
                 path="/utility/price-viewer"
                 element={<PriceReturnsViewerPage
@@ -432,14 +440,12 @@ function App() {
                 />}
               />
               <Route
+                path="/analysis/scanner/minervini"
+                element={<MinerviniScannerPage />}
+              />
+              <Route
                 path="/theory/minervini"
-                element={<MinerviniPage
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  priceData={priceData} // Pass the price data state
-                  loading={loading}
-                  error={error}
-                />}
+                element={<MinerviniPage settings={settings} setSettings={setSettings} />}
               />
               <Route
                 path="/market/seasonality"
@@ -460,6 +466,10 @@ function App() {
               <Route
                 path="/analysis/downtrend"
                 element={<DowntrendPage />}
+              />
+              <Route
+                path="/analysis/gex"
+                element={<GammaExposurePage />}
               />
             </Routes>
           </main>

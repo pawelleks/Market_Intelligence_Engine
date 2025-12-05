@@ -165,3 +165,76 @@ class MassiveOptionChainProvider:
         except Exception as e:
             LOG.error(f"Massive API spot price error for {ticker}: {e}")
             return None
+    def fetch_candles(self, ticker: str, interval: str = "1d", start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
+        """
+        Fetches historical candle data (aggregates).
+        Interval: '1d', '1h', etc.
+        """
+        if not self.api_key:
+            return pd.DataFrame()
+
+        try:
+            # Map interval to multiplier/timespan
+            multiplier = 1
+            timespan = "day"
+            if interval == "1d":
+                timespan = "day"
+            elif interval == "1h":
+                timespan = "hour"
+            elif interval == "4h":
+                multiplier = 4
+                timespan = "hour"
+            elif interval == "1wk":
+                timespan = "week"
+            elif interval == "1mo":
+                timespan = "month"
+            
+            # Default dates if not provided
+            if not end_date:
+                end_date = date.today()
+            if not start_date:
+                # Default to 2 years ago
+                start_date = end_date.replace(year=end_date.year - 2)
+                
+            from_str = start_date.isoformat()
+            to_str = end_date.isoformat()
+            
+            # Endpoint: /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}
+            url = f"https://api.massive.com/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
+            params = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 50000,
+                "apiKey": self.api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            if not response.ok:
+                LOG.error(f"Massive Candles Error {response.status_code}: {response.text}")
+                return pd.DataFrame()
+                
+            data = response.json()
+            results = data.get('results', [])
+            
+            if not results:
+                return pd.DataFrame()
+                
+            # Parse results
+            # Polygon/Massive format: { "v": volume, "vw": vwap, "o": open, "c": close, "h": high, "l": low, "t": timestamp, "n": transactions }
+            records = []
+            for r in results:
+                records.append({
+                    "Date": pd.to_datetime(r.get('t'), unit='ms'), # Timestamp is usually ms
+                    "Open": r.get('o'),
+                    "High": r.get('h'),
+                    "Low": r.get('l'),
+                    "Close": r.get('c'),
+                    "Volume": r.get('v')
+                })
+                
+            df = pd.DataFrame(records)
+            return df
+            
+        except Exception as e:
+            LOG.error(f"Massive Candles Exception for {ticker}: {e}")
+            return pd.DataFrame()

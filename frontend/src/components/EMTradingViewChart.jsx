@@ -70,6 +70,8 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
         fetchData();
     }, [ticker, interval]);
 
+    const [chartReady, setChartReady] = useState(false);
+
     // Initialize Chart & Series
     useEffect(() => {
         if (!chartContainerRef.current) return;
@@ -121,6 +123,8 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
         });
         volumeSeriesRef.current = volumeSeries;
 
+        setChartReady(true);
+
         // Resize Handler
         const handleResize = () => {
             if (chartContainerRef.current) {
@@ -137,8 +141,11 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
             chartRef.current = null;
             candlestickSeriesRef.current = null;
             volumeSeriesRef.current = null;
+            setChartReady(false);
         };
     }, []);
+
+    // ... (existing Update Data effect)
 
     // Update Data
     useEffect(() => {
@@ -195,7 +202,7 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
         candlestickSeries.setData(candleData);
         volumeSeries.setData(volumeData);
 
-    }, [chartData, interval]); // Only update data when chartData changes
+    }, [chartData, interval, chartReady]); // Update when data changes OR chart becomes ready
 
     // Separate Effect for Price Lines
     useEffect(() => {
@@ -262,9 +269,17 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
         }
 
         return () => {
-            lines.forEach(line => candlestickSeries.removePriceLine(line));
+            if (candlestickSeries) {
+                lines.forEach(line => {
+                    try {
+                        candlestickSeries.removePriceLine(line)
+                    } catch (e) {
+                        // ignore cleanup errors if series is gone
+                    }
+                });
+            }
         };
-    }, [odteData, weeklyData, monthlyData]);
+    }, [odteData, weeklyData, monthlyData, chartReady]);
 
     // Separate Effect for Zoom
     useEffect(() => {

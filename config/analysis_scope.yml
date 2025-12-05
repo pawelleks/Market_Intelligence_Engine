@@ -3,9 +3,54 @@ scope:
     - Index_ETFs
     - Big_Tech
   Minervini_Template: # Specific scope for Minervini
-    - Big_Tech
-    - Semiconductors
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  - XLC
+  - XLY
+  - XLP
+  - XLE
+  - XLF
+  - XLV
+  - XLI
+  - XLB
+  - XLRE
+  - XLK
+  - XLU
+  - BND
+  - AGG
+  - BNDX
+  - SGOV
+  - TLT
+  - IEF
+  - SHY
+  - VCIT
+  - VTEB
+  - BIL
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - TSLA
+  - GOOGL
+  - META
+  - XOM
+  - CVX
+  - BRK.B
+  - JPM
+  - V
+  - MA
+  - LLY
+  - JNJ
   Seasonality_Analysis: # Specific scope for Seasonality
     - Index_ETFs
     - MSFT
     - AAPL
+  Expected_Moves_Reliability: # Scope for EM Reliability Dashboard
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+    - ^SPX
+    - ^NDX

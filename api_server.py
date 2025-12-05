@@ -28,6 +28,8 @@ from mie_lib.utils.ticker_service import get_tickers_for_analysis
 from mie_lib.analytics.seasonality_analytics import get_seasonal_curves, get_calendar_heatmap, get_day_drilldown
 from mie_lib.analytics.downtrend_engine import compute_downtrend_score_latest, compute_downtrend_score_historical, compute_downtrend_signals_historical
 from mie_lib.data_ingest.data_aligner import fetch_and_align_dcs_assets
+from mie_lib.analytics.expected_moves.api_endpoints import router as reliability_router
+from mie_lib.analytics.gex.api_endpoints import router as gex_router
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -50,6 +52,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Include Routers
+app.include_router(reliability_router)
+app.include_router(gex_router)
+from mie_lib.analytics.scanner.api_endpoints import router as minervini_router
+app.include_router(minervini_router)
+
+# Configure CORS
 origins = [
     # Allow the default React development port (Vite, CRA) to access the API
     "http://localhost:3000",
@@ -498,6 +507,40 @@ def get_price_features(ticker: str) -> JSONResponse:
     })
 
 
+@app.get("/api/v1/hmm/regime/{ticker}")
+def get_hmm_regime(
+    ticker: str,
+    n_states: int = HMMConfig.n_states,
+    window_years: Union[int, str] = HMMConfig.train_window_years,
+) -> JSONResponse:
+    """Retrieves the pre-computed HMM regime sequence (State IDs and Names)."""
+    
+    ticker = ticker.upper()
+    
+    # 1. Determine the standardized path 
+    out_dir = hmm_std_out_dir(ticker, window_years, n_states)
+    path = out_dir / "hmm_states.parquet"
+    
+    # 2. Read and format the data
+    data = _read_parquet_and_format(path)
+    
+    if data is None:
+        raise HTTPException(
+            status_code=404, 
+            detail=(
+                f"HMM Regime not found for {ticker} (States={n_states}, Window={window_years}y). "
+                f"Run the CLI job (e.g., build-hmm) first."
+            )
+        )
+    
+    return JSONResponse(content={
+        "ticker": ticker,
+        "n_states": n_states,
+        "window_years": window_years,
+        "data": data
+    })
+
+
 @app.get("/api/v1/hmm/metrics/{ticker}")
 def get_hmm_metrics(
     ticker: str,
@@ -635,6 +678,25 @@ def get_latest_expected_moves() -> JSONResponse:
     try:
         with open(path, "r") as f:
             data = json.load(f)
+            
+        # Filter by Scope
+        try:
+            import yaml
+            from mie_lib.utils.paths import ROOT
+            scope_path = ROOT / "config" / "analysis_scope.yml"
+            if scope_path.exists():
+                with open(scope_path, "r") as f:
+                    scope_cfg = yaml.safe_load(f)
+                    allowed_tickers = scope_cfg.get("scope", {}).get("Expected_Moves_Reliability", [])
+                    
+                if allowed_tickers:
+                    # Filter existing tickers
+                    filtered_tickers = {k: v for k, v in data.get("tickers", {}).items() if k in allowed_tickers}
+                    data["tickers"] = filtered_tickers
+        except Exception as e:
+            print(f"Error filtering EM data by scope: {e}")
+            # Fallback to returning all data if filter fails
+            
         return JSONResponse(content=data)
     except Exception as e:
         print(f"Error reading latest EM json: {e}")
@@ -672,6 +734,36 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
     Range: max (default), 2y, 5y, etc.
     """
     try:
+        # 1. Try Massive.com Provider first (Better data, 15min delayed usually)
+        try:
+            provider = MassiveOptionChainProvider()
+            if provider.api_key:
+                # Calculate start date based on range
+                end_date = date.today()
+                start_date = end_date.replace(year=end_date.year - 2) # Default 2y
+                
+                if range == "5y":
+                    start_date = end_date.replace(year=end_date.year - 5)
+                elif range == "1y":
+                    start_date = end_date.replace(year=end_date.year - 1)
+                elif range == "max":
+                    start_date = date(2000, 1, 1) # Reasonable max
+                
+                df_massive = provider.fetch_candles(ticker, interval=interval, start_date=start_date, end_date=end_date)
+                
+                if not df_massive.empty:
+                    # Format for frontend
+                    if "Date" in df_massive.columns:
+                        df_massive["Date"] = df_massive["Date"].astype(str)
+                    
+                    cols = ["Date", "Open", "High", "Low", "Close", "Volume"]
+                    data = df_massive[cols].to_dict(orient="records")
+                    return JSONResponse(content=data)
+                    
+        except Exception as e:
+            print(f"Massive Candle Fetch Failed (falling back to yfinance): {e}")
+
+        # 2. Fallback to yfinance
         # Validate interval
         valid_intervals = {"1h", "1d", "5d", "1wk", "1mo"} 
         
@@ -728,99 +820,227 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
 # -----------------------------------------------------------------
 # Massive.com Integration (Experimental)
 # -----------------------------------------------------------------
+# Force Reload Trigger: 0DTE Fix
 from mie_lib.data_ingest.providers.massive import MassiveOptionChainProvider
 from mie_lib.analytics.expected_moves.data_ingest import get_target_expirations, fetch_vix1d_close
 
 @app.get("/api/v1/expected_moves/massive/latest")
 async def get_expected_moves_massive():
     """
-    Fetches Expected Moves using Massive.com as the provider.
-    Calculates on-the-fly for comparison.
+    Fetches 'Live' (Delayed) Expected Moves using yfinance.
+    (Massive.com API key does not support real-time data, so we fallback to yfinance for 'Live' view).
     """
-    import time # Import time for rate limiting
-    try:
-        provider = MassiveOptionChainProvider()
-        if not provider.api_key:
-             return JSONResponse(content={"error": "MASSIVE_API_KEY not configured"}, status_code=500)
+    import yfinance as yf
+    import pandas as pd
+    from datetime import datetime, timedelta
+    import numpy as np
 
-        tickers = ["SPY"] # Limit to SPY per user request to avoid 429s
+    try:
+        # Load scope from config
+        import yaml
+        from mie_lib.utils.paths import ROOT
+        scope_path = ROOT / "config" / "analysis_scope.yml"
+        
+        tickers = ["SPY", "QQQ", "IWM", "DIA"] # Default fallback
+        if scope_path.exists():
+            try:
+                with open(scope_path, "r") as f:
+                    scope_cfg = yaml.safe_load(f)
+                    tickers = scope_cfg.get("scope", {}).get("Expected_Moves_Reliability", tickers)
+            except Exception as e:
+                print(f"Error loading scope: {e}")
+
         as_of = date.today()
         
-        # 1. Fetch VIX1D (still from yfinance as Massive might not have it or we use same source)
+        # 1. Fetch VIX1D (still from yfinance)
         vix1d_val = fetch_vix1d_close(as_of)
-        
-        # 2. Determine Expirations
-        odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
         
         results = {
             "as_of": as_of.isoformat(),
             "vix1d": vix1d_val,
-            "confidence_score": 80, # Placeholder or calc
+            "confidence_score": 80, 
             "tickers": {}
         }
         
         for ticker in tickers:
-            # Fetch Spot
-            spot = provider.fetch_spot(ticker)
-            if spot is None:
+            yf_ticker = yf.Ticker(ticker)
+            
+            # 1. Fetch Live Spot (1m history)
+            # Try to get the absolute latest price
+            try:
+                hist = yf_ticker.history(period="1d", interval="1m")
+                if not hist.empty:
+                    spot = float(hist.iloc[-1]['Close'])
+                else:
+                    # Fallback to daily if market closed or no 1m data
+                    hist_day = yf_ticker.history(period="1d")
+                    if not hist_day.empty:
+                        spot = float(hist_day.iloc[-1]['Close'])
+                    else:
+                        continue # Cannot get spot
+            except Exception:
                 continue
+
+            # 2. Determine Expirations
+            # We need to match the logic: ODTE, Weekly, Monthly
+            # To ensure alignment with EOD data, we try to read the target dates from latest.json
             
-            # Determine Expirations
-            odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
-            
-            # Rate limit safety
-            time.sleep(1) 
+            target_dates = {}
+            try:
+                from mie_lib.utils.paths import options_latest_json_path
+                import json
+                path = options_latest_json_path()
+                if path.exists():
+                    with open(path, "r") as f:
+                        latest_data = json.load(f)
+                        if ticker in latest_data.get("tickers", {}):
+                            t_exps = latest_data["tickers"][ticker].get("expirations", {})
+                            for k in ["ODTE", "WEEKLY", "MONTHLY"]:
+                                if k in t_exps and "expiry_date" in t_exps[k]:
+                                    target_dates[k] = datetime.strptime(t_exps[k]["expiry_date"], "%Y-%m-%d").date()
+            except Exception as e:
+                print(f"Failed to read target dates from latest.json: {e}")
+
+            # yfinance expirations are strings 'YYYY-MM-DD'
+            avail_expirations = yf_ticker.options
+            if not avail_expirations:
+                continue
                 
+            # Helper to find closest expiration to target date
+            def find_closest_expiry(target_date, options):
+                # options is list of date strings
+                # target_date is datetime.date
+                min_diff = 9999
+                best_exp = None
+                target_str = target_date.isoformat()
+                
+                # First try exact match
+                if target_str in options:
+                    return target_str
+                
+                # Else find closest future date
+                for exp_str in options:
+                    exp_d = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                    diff = (exp_d - target_date).days
+                    if 0 <= diff < min_diff:
+                        min_diff = diff
+                        best_exp = exp_str
+                return best_exp
+
+            # Target Dates
+            # Use shared logic to determine target dates (consistent with EOD)
+            odte_target, weekly_target, monthly_target = get_target_expirations(date.today())
+            
+            # Helper to find closest expiry to target date
+            def find_closest_expiry(target_date, options):
+                # options is list of date strings
+                # target_date is datetime.date
+                min_diff = 9999
+                best_exp = None
+                target_str = target_date.isoformat()
+                
+                # First try exact match
+                if target_str in options:
+                    return target_str
+                
+                # Else find closest future date
+                for exp_str in options:
+                    exp_d = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                    diff = (exp_d - target_date).days
+                    if 0 <= diff < min_diff:
+                        min_diff = diff
+                        best_exp = exp_str
+                return best_exp
+
+            # ODTE
+            odte_exp = find_closest_expiry(odte_target, avail_expirations)
+            
+            # Weekly
+            weekly_exp = find_closest_expiry(weekly_target, avail_expirations)
+            
+            # Monthly
+            monthly_exp = find_closest_expiry(monthly_target, avail_expirations)
+            
             t_data = {
                 "spot_price": spot,
                 "expirations": {}
             }
             
-            for exp_type, exp_date in [("ODTE", odte_date), ("WEEKLY", weekly_date), ("MONTHLY", monthly_date)]:
-                # Fetch Chain (Using workaround for now)
-                # Rate limit safety between fetches
-                time.sleep(1)
-                
-                # Calculate ATM Strike
-                # SPY/QQQ/IWM usually have 1.0 or 0.5 strikes. 
-                # Let's assume 1.0 for simplicity as it covers most ATM scenarios.
-                atm_strike = round(spot)
-                
-                # Construct Ticker Symbols
-                # Format: O:{TICKER}{YYMMDD}{T}{PPPPPPPP}
-                # YYMMDD
-                yymmdd = exp_date.strftime("%y%m%d")
-                # PPPPPPPP: Strike * 1000, padded to 8 chars
-                strike_str = f"{int(atm_strike * 1000):08d}"
-                
-                call_ticker = f"O:{ticker}{yymmdd}C{strike_str}"
-                put_ticker = f"O:{ticker}{yymmdd}P{strike_str}"
-                
-                # Fetch Prices
-                call_price = provider.fetch_contract_price(call_ticker)
-                # Rate limit
-                time.sleep(0.5)
-                put_price = provider.fetch_contract_price(put_ticker)
-                
-                if call_price is None or put_price is None:
+            # Process each
+            # Map our keys to the found expirations
+            exp_map = {
+                "ODTE": odte_exp,
+                "WEEKLY": weekly_exp,
+                "MONTHLY": monthly_exp
+            }
+            
+            for label, exp_date_str in exp_map.items():
+                if not exp_date_str:
                     continue
                     
-                straddle = call_price + put_price
-                
-                t_data["expirations"][exp_type] = {
-                    "expiry_date": exp_date.isoformat(),
-                    "lower_range": spot - straddle,
-                    "upper_range": spot + straddle,
-                    "em_dollars": straddle,
-                    "debug": {
-                        "atm_strike": atm_strike,
-                        "call_ticker": call_ticker,
-                        "call_price": call_price,
-                        "put_ticker": put_ticker,
-                        "put_price": put_price
+                try:
+                    chain = yf_ticker.option_chain(exp_date_str)
+                    calls = chain.calls
+                    puts = chain.puts
+                    
+                    # Find ATM Strike
+                    # Minimize |strike - spot|
+                    # We can merge calls and puts or just look at one. 
+                    # Ideally we find the strike where strike is closest to spot.
+                    
+                    # Let's use calls to find strikes
+                    if calls.empty:
+                        continue
+                        
+                    # Calculate distance to spot
+                    calls['dist'] = abs(calls['strike'] - spot)
+                    atm_row = calls.loc[calls['dist'].idxmin()]
+                    atm_strike = atm_row['strike']
+                    
+                    # Get Call Price (lastPrice or (bid+ask)/2)
+                    # Prefer mid if bid/ask available and non-zero, else lastPrice
+                    def get_price(row):
+                        bid = row.get('bid', 0)
+                        ask = row.get('ask', 0)
+                        last = row.get('lastPrice', 0)
+                        if bid > 0 and ask > 0:
+                            return (bid + ask) / 2
+                        return last
+                        
+                    call_price = get_price(atm_row)
+                    
+                    # Find corresponding Put
+                    put_row = puts[puts['strike'] == atm_strike]
+                    if put_row.empty:
+                        # Try to find closest put if exact match missing (unlikely for ATM)
+                        puts['dist'] = abs(puts['strike'] - spot)
+                        put_row = puts.loc[puts['dist'].idxmin()]
+                        
+                    if isinstance(put_row, pd.DataFrame):
+                         put_row = put_row.iloc[0]
+                         
+                    put_price = get_price(put_row)
+                    
+                    straddle = call_price + put_price
+                    
+                    t_data["expirations"][label] = {
+                        "expiry_date": exp_date_str,
+                        "lower_range": spot - straddle,
+                        "upper_range": spot + straddle,
+                        "em_dollars": straddle,
+                        "debug": {
+                            "atm_strike": float(atm_strike),
+                            "call_ticker": f"C_{atm_strike}",
+                            "call_price": float(call_price),
+                            "put_ticker": f"P_{atm_strike}",
+                            "put_price": float(put_price)
+                        }
                     }
-                }
-            
+                    
+                except Exception as e:
+                    # print(f"Error processing {label} for {ticker}: {e}")
+                    continue
+
             results["tickers"][ticker] = t_data
             
         return JSONResponse(content=results)

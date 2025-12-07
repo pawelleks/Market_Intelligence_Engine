@@ -1,0 +1,41 @@
+# Cron Service Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies (same as backend to ensure scripts run)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Supercronic
+ENV SUPERCRONIC_URL=https://github.com/aptible/supercronic/releases/download/v0.2.29/supercronic-linux-amd64 \
+    SUPERCRONIC=supercronic-linux-amd64 \
+    SUPERCRONIC_SHA1SUM=cd48d45c4b10f3f0bfdd3a57d054cd05ac96812b
+
+RUN curl -fsSLO "$SUPERCRONIC_URL" \
+    && echo "$SUPERCRONIC_SHA1SUM  $SUPERCRONIC" | sha1sum -c - \
+    && chmod +x "$SUPERCRONIC" \
+    && mv "$SUPERCRONIC" "/usr/local/bin/${SUPERCRONIC}" \
+    && ln -s "/usr/local/bin/${SUPERCRONIC}" /usr/local/bin/supercronic
+
+# Copy Source & Script
+COPY src/ ./src/
+COPY scripts/daily_job.sh .
+COPY config/ ./config/
+
+RUN chmod +x daily_job.sh
+
+# Create crontab
+# 23:00 Daily -> 0 23 * * *
+RUN echo "0 23 * * * /app/daily_job.sh >> /proc/1/fd/1 2>&1" > crontab
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+# Run Supercronic
+CMD ["supercronic", "crontab"]

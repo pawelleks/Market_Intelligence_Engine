@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # 1. API Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mie-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data               # Persist Data
+      - ./config:/app/config           # Live Config
+      - ./src:/app/src                 # Live Code Reload (Optional)
+    environment:
+      - PYTHONPATH=/app/src
+    restart: unless-stopped
+    networks:
+      - mie-net
+
+  # 2. Frontend
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mie-web
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src        # Live Code Reload
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.js:/app/vite.config.js
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - mie-net
+
+  # 3. Cron Scheduler
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.cron
+    container_name: mie-cron
+    volumes:
+      - ./data:/app/data               # Share Data with API
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app/src
+    restart: unless-stopped
+    networks:
+      - mie-net
+
+networks:
+  mie-net:
+    driver: bridge

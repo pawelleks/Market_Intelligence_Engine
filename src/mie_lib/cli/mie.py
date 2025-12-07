@@ -610,6 +610,42 @@ def handle_fetch_options_snapshot(args):
     return 0
 
 
+def handle_backtest_gaf(args):
+    """
+    Run Walk-Forward Backtest for GAF Model.
+    """
+    from mie_lib.analytics.gaf.backtest_engine import GAFBacktester
+    from datetime import datetime, timedelta
+    
+    ticker = args.ticker
+    start_date = args.start_date
+    
+    if args.years:
+        start_dt = datetime.today() - timedelta(days=args.years*365)
+        start_date = start_dt.strftime('%Y-%m-%d')
+        
+    end_date = datetime.today().strftime('%Y-%m-%d')
+        
+    print(f"Starting GAF Backtest for {ticker} from {start_date}...")
+    
+    engine = GAFBacktester(ticker=ticker, start_date=start_date, end_date=end_date)
+    engine.run()
+
+
+def handle_backtest_hmm(args):
+    """
+    Run Grid Search Optimization for HMM.
+    """
+    from mie_lib.analytics.hmm.backtest_engine import HMMBacktester
+    
+    ticker = args.ticker
+    print(f"Starting HMM Grid Search for {ticker}...")
+    
+    engine = HMMBacktester(ticker=ticker)
+    engine.run_grid_search()
+    engine.print_leaderboard()
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -639,6 +675,18 @@ def build_parser():
     p_fetch_gex = sub.add_parser("fetch-options-snapshot", help="Fetch fresh options snapshot from YFinance (Optional)")
     p_fetch_gex.add_argument("--tickers", type=str, default="@config")
     p_fetch_gex.set_defaults(func=handle_fetch_options_snapshot)
+
+    # --- GAF (New) ---
+    p_backtest_gaf = sub.add_parser("backtest-gaf", help="Run Walk-Forward Backtest for GAF Model")
+    p_backtest_gaf.add_argument("--ticker", default="SPY", help="Ticker symbol")
+    p_backtest_gaf.add_argument("--start-date", default="2020-01-01", help="Start date for backtest (YYYY-MM-DD)")
+    p_backtest_gaf.add_argument("--years", type=int, help="Number of years to look back (overrides start-date)")
+    p_backtest_gaf.set_defaults(func=handle_backtest_gaf) # Assuming a handler function exists or will be added
+
+    # --- HMM Backtest (New) ---
+    p_backtest_hmm = sub.add_parser("backtest-hmm", help="Run Grid Search Optimization for HMM")
+    p_backtest_hmm.add_argument("--ticker", default="SPY", help="Ticker symbol")
+    p_backtest_hmm.set_defaults(func=handle_backtest_hmm)
 
     # Feature build commands
     p_bf = sub.add_parser("build-features", help="Build features for tickers")
@@ -892,6 +940,14 @@ def build_parser():
     p_min = sub.add_parser("build-minervini-daily", help="Build Daily Minervini Scanner Snapshot")
     p_min.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
     p_min.add_argument("--tickers", type=str, default="@config")
+
+    # GAF Analysis
+    p_gaf_train = sub.add_parser("train-gaf", help="Train GAF CNN Model")
+    p_gaf_train.add_argument("--ticker", type=str, default="SPY")
+    p_gaf_train.add_argument("--epochs", type=int, default=20)
+    
+    p_gaf_build = sub.add_parser("build-gaf-daily", help="Run GAF Inference")
+    p_gaf_build.add_argument("--ticker", type=str, default="SPY")
 
     return parser
 
@@ -1483,6 +1539,7 @@ def main(argv=None):
         generate_seasonality_base(args.ticker)
     elif args.command == "build-minervini-daily":
         from mie_lib.analytics.scanner.minervini_build import build_minervini_snapshot
+        from mie_lib.analytics.gaf.backtest_engine import GAFBacktestersnapshot
         from datetime import date
         
         # Determine Date
@@ -1507,6 +1564,19 @@ def main(argv=None):
         print(f"Building Minervini Scanner for {len(tickers)} tickers on {target_date}...")
         count = build_minervini_snapshot(tickers, target_date)
         print(f"Analysis complete. {count} records processed.")
+        sys.exit(0)
+    elif args.command == "train-gaf":
+        from mie_lib.analytics.gaf.pipeline import run_training_pipeline
+        ticker = args.ticker or "SPY"
+        epochs = int(args.epochs) if args.epochs else 20
+        print(f"Training GAF Model on {ticker} for {epochs} epochs...")
+        run_training_pipeline(ticker=ticker, epochs=epochs)
+        sys.exit(0)
+    elif args.command == "build-gaf-daily":
+        from mie_lib.analytics.gaf.pipeline import run_inference_latest
+        ticker = args.ticker or "SPY"
+        print(f"Developing GAF Prediction for {ticker}...")
+        run_inference_latest(ticker=ticker)
         sys.exit(0)
     else:
         parser.print_help()

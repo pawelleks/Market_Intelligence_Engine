@@ -57,6 +57,10 @@ app.include_router(reliability_router)
 app.include_router(gex_router)
 from mie_lib.analytics.scanner.api_endpoints import router as minervini_router
 app.include_router(minervini_router)
+from mie_lib.analytics.gaf.api_endpoints import router as gaf_router
+app.include_router(gaf_router, prefix="/api/v1/gaf", tags=["gaf"])
+from mie_lib.analytics.hmm.api_endpoints import router as hmm_router
+app.include_router(hmm_router, prefix="/api/v1/hmm", tags=["hmm"])
 
 # Configure CORS
 origins = [

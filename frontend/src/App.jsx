@@ -22,6 +22,8 @@ import ExpectedMovesPage from './pages/ExpectedMovesPage';
 import ExpectedMovesPageMassive from './pages/ExpectedMovesPageMassive';
 import EMReliabilityPage from './pages/EMReliabilityPage';
 import GammaExposurePage from './pages/GammaExposurePage';
+import GAFAnalysisPage from './pages/GAFAnalysisPage';
+import HMMBacktestPage from './pages/HMMBacktestPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -162,6 +164,12 @@ const useAnalyticalData = (settings) => {
 
 
 // --- Individual Page/Module Components ---
+
+const SidebarLink = ({ to, label }) => (
+  <Link to={to} style={{ color: '#d7e3f3', textDecoration: 'none' }}>
+    {label}
+  </Link>
+);
 
 const DashboardHome = () => (
   <div style={{ padding: '20px' }}>
@@ -378,16 +386,17 @@ function App() {
             <ul style={{ listStyle: 'none', padding: 0, fontSize: '13px' }}>
               <li style={{ marginBottom: '10px' }}><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/hmm-backtest" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Backtest</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/expected-moves" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Expected Moves</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/reliability" style={{ color: '#d7e3f3', textDecoration: 'none' }}>EM Reliability</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/scanner/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Scanner</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/market/seasonality" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Seasonality</Link></li>
+              <li style={{ marginBottom: '10px' }}><SidebarLink to="/market/seasonality" label="Seasonality & Time" /></li>
+              <li style={{ marginBottom: '10px' }}><SidebarLink to="/analysis/neural/gaf" label="GAF Neural Net" /></li>
               <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
             </ul>
           </nav>
@@ -471,6 +480,11 @@ function App() {
                 path="/analysis/gex"
                 element={<GammaExposurePage />}
               />
+              <Route
+                path="/analysis/neural/gaf"
+                element={<GAFAnalysisPage />}
+              />
+              <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
             </Routes>
           </main>
 

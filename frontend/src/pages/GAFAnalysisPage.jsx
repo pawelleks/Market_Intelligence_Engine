@@ -86,6 +86,12 @@ const GAFAnalysisPage = () => {
                             </div>
                             <div style={{ color: '#c9d1d9', fontSize: '16px' }}>Confidence: {(data.probability * 100).toFixed(1)}%</div>
                             <div style={{ fontSize: '12px', color: '#484f58', marginTop: '10px' }}>Raw Score: {data.raw_score.toFixed(4)}</div>
+
+                            {/* Metadata Section */}
+                            <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #30363d' }}>
+                                <div style={{ marginBottom: '2px' }}>Analysis Date: {data.analysis_date}</div>
+                                <div>Last Trading Day: {data.last_trading_day}</div>
+                            </div>
                         </div>
 
                         {/* B. GAF Image (Input) */}

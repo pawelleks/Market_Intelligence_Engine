@@ -69,5 +69,9 @@ log "Running build-gex-daily (Gamma Exposure)..."
 python cli/mie.py build-gex-daily --date "${TODAY}" >> "${LOG_FILE}" 2>&1
 log "build-gex-daily completed."
 
+log "Running build-gaf-daily (Neural Net Prediction)..."
+python cli/mie.py build-gaf-daily >> "${LOG_FILE}" 2>&1
+log "build-gaf-daily completed."
+
 log "=== Pipeline Completed Successfully ==="
 log "All artifacts generated for ${TODAY}."

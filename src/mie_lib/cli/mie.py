@@ -645,6 +645,18 @@ def handle_backtest_hmm(args):
     engine.run_grid_search()
     engine.print_leaderboard()
 
+def handle_build_gaf_daily(args):
+    """
+    Run Daily GAF Inference (Prediction for next day).
+    """
+    from mie_lib.analytics.gaf.pipeline import run_inference_latest
+    
+    ticker = args.ticker
+    window = args.window
+    
+    print(f"Running Daily GAF Inference for {ticker} (Window={window})...")
+    run_inference_latest(ticker=ticker, window_size=window)
+    return 0
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
@@ -682,6 +694,12 @@ def build_parser():
     p_backtest_gaf.add_argument("--start-date", default="2020-01-01", help="Start date for backtest (YYYY-MM-DD)")
     p_backtest_gaf.add_argument("--years", type=int, help="Number of years to look back (overrides start-date)")
     p_backtest_gaf.set_defaults(func=handle_backtest_gaf) # Assuming a handler function exists or will be added
+
+    p_gaf_daily = sub.add_parser("build-gaf-daily", help="Run Daily GAF Inference")
+    p_gaf_daily.add_argument("--ticker", default="SPY", help="Ticker symbol")
+    p_gaf_daily.add_argument("--window", type=int, default=20, help="Window size")
+    p_gaf_daily.set_defaults(func=handle_build_gaf_daily)
+
 
     # --- HMM Backtest (New) ---
     p_backtest_hmm = sub.add_parser("backtest-hmm", help="Run Grid Search Optimization for HMM")
@@ -946,8 +964,7 @@ def build_parser():
     p_gaf_train.add_argument("--ticker", type=str, default="SPY")
     p_gaf_train.add_argument("--epochs", type=int, default=20)
     
-    p_gaf_build = sub.add_parser("build-gaf-daily", help="Run GAF Inference")
-    p_gaf_build.add_argument("--ticker", type=str, default="SPY")
+
 
     return parser
 

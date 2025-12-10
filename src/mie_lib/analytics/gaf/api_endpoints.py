@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
 import json
+from datetime import datetime
+
 
 router = APIRouter()
 LATEST_JSON = Path("data/analytics/gaf/latest.json")
@@ -14,6 +16,18 @@ async def get_latest_gaf_prediction():
     try:
         with open(LATEST_JSON, 'r') as f:
             data = json.load(f)
+            
+        # Inject Metadata on the fly
+        # 1. Analysis Date (File Creation/Mod Time)
+        mtime = LATEST_JSON.stat().st_mtime
+        data["analysis_date"] = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 2. Last Trading Day (from OHLC data)
+        if "ohlc_data" in data and data["ohlc_data"]:
+            data["last_trading_day"] = data["ohlc_data"][-1].get("time", "Unknown")
+        else:
+            data["last_trading_day"] = "Unknown"
+            
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load GAF data: {str(e)}")

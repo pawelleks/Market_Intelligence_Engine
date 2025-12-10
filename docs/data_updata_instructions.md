@@ -21,6 +21,7 @@ docker-compose exec api bash cli/orchestrator.sh
     *   Markov Chain Snapshots (`build-markov-snapshots`)
     *   HMM Regimes (`build-hmm-snapshots`)
     *   Gamma Exposure (`build-gex-daily`)
+    *   GAF Prediction (`build-gaf-daily`)
 
 ---
 
@@ -76,6 +77,12 @@ Generates the static files for the "Market State" and "HMM Backtest" pages.
 ```bash
 docker-compose exec api python cli/mie.py build-markov-snapshots
 docker-compose exec api python cli/mie.py build-hmm-snapshots
+```
+
+**GAF Prediction**
+Generates the daily prediction (`latest.json`) for the GAF Analysis page.
+```bash
+docker-compose exec api python cli/mie.py build-gaf-daily
 ```
 
 ---

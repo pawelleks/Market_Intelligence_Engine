@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
         plugins: [react()],
         server: {
             // Set the development server to run on the standard frontend port 3000
-            port: 3000, 
+            port: 5173,
             proxy: {
                 // When the frontend requests '/api/v1/markov/matrix/SPY', it will be redirected to:
                 // 'http://127.0.0.1:8000/api/v1/markov/matrix/SPY'

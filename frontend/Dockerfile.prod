@@ -1,0 +1,28 @@
+# Stage 1: Build the React Application
+FROM node:22-alpine as build
+
+WORKDIR /app
+
+# Install dependencies (caching layer)
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy source and build
+COPY . .
+# Set API URL for build time (if baked in) or rely on runtime proxy (nginx)
+# Since we are using Nginx, we can't easily bake in runtime env vars without a script.
+# However, usually for these SPA + API setups, we proxy /api to the backend in Nginx.
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+FROM nginx:alpine
+
+# Copy built assets from builder stage
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copy custom Nginx config (we will need to create this)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -61,6 +61,8 @@ from mie_lib.analytics.gaf.api_endpoints import router as gaf_router
 app.include_router(gaf_router, prefix="/api/v1/gaf", tags=["gaf"])
 from mie_lib.analytics.hmm.api_endpoints import router as hmm_router
 app.include_router(hmm_router, prefix="/api/v1/hmm", tags=["hmm"])
+from mie_lib.api.routers.system import router as system_router
+app.include_router(system_router)
 
 # Configure CORS
 origins = [

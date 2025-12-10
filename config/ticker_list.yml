@@ -1,8 +1,8 @@
 tickers:
- - .SPX
- - .DJI
- - .IXIC
- - .RUT
+ - ^GSPC
+ - ^DJI
+ - ^IXIC
+ - ^RUT
  - SPY
  - QQQ
  - IWM
@@ -87,3 +87,5 @@ tickers:
  - DUK
  - EXC
  - AEP
+ - ^SPX
+ - ^NDX

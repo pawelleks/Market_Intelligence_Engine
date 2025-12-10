@@ -267,7 +267,7 @@ class PolygonOptionChainProvider(OptionChainProvider):
             next_trading_day(as_of),
             last_trading_day_of_week(as_of),
             last_trading_day_of_next_week(as_of),
-            last_trading_day_of_month(as_of),
+            last_trading_day_of_month(as_of.year, as_of.month),
         }
         lookahead = int(self.config.get("expiries_lookahead_days", 45))
         current = as_of
@@ -285,6 +285,7 @@ class PolygonOptionChainProvider(OptionChainProvider):
         expiry: date,
         as_of: date,
         strike_band: Optional[int] = None,
+        strike_band_pct: float = 0.03,
     ) -> pd.DataFrame:
         strike_band = strike_band or int(self.config.get("strike_band", 10))
         spot_close = self._spot_override or self.fetch_spot_close(ticker, as_of)

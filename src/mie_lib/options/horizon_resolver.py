@@ -98,7 +98,7 @@ def resolve_horizons(
     resolved.append(_build("Next Session", next_trading_day(as_of)))
     resolved.append(_build("Through Friday", last_trading_day_of_week(as_of)))
     resolved.append(_build("End of Next Week", last_trading_day_of_next_week(as_of)))
-    resolved.append(_build("Month End", last_trading_day_of_month(as_of)))
+    resolved.append(_build("Month End", last_trading_day_of_month(as_of.year, as_of.month)))
 
     if include_weekly_reference:
         resolved.append(

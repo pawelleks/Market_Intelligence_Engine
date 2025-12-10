@@ -3,7 +3,7 @@
 # All keys are pure data (no Python code) to keep loading simple.
 
 spot_ticker: SPY
-provider: mock  # default provider used by CLI (polygon|mock).
+provider: polygon  # default provider used by CLI (polygon|mock).
 max_api_calls_per_day: 0  # mock provider ignores this; polygon can override per-day budget.
 
 # Horizons correspond to the canonical dashboard views. Keys must be stable.

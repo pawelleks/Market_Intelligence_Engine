@@ -24,6 +24,7 @@ import EMReliabilityPage from './pages/EMReliabilityPage';
 import GammaExposurePage from './pages/GammaExposurePage';
 import GAFAnalysisPage from './pages/GAFAnalysisPage';
 import HMMBacktestPage from './pages/HMMBacktestPage';
+import DataPipelines from './pages/DataPipelines';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -398,6 +399,9 @@ function App() {
               <li style={{ marginBottom: '10px' }}><SidebarLink to="/market/seasonality" label="Seasonality & Time" /></li>
               <li style={{ marginBottom: '10px' }}><SidebarLink to="/analysis/neural/gaf" label="GAF Neural Net" /></li>
               <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
+              <li style={{ marginTop: '20px', marginBottom: '10px', borderTop: '1px solid #203049', paddingTop: '10px' }}>
+                <Link to="/system/pipelines" style={{ color: '#9ec4ff', textDecoration: 'none', fontWeight: 'bold' }}>Data Pipelines</Link>
+              </li>
             </ul>
           </nav>
 
@@ -485,6 +489,7 @@ function App() {
                 element={<GAFAnalysisPage />}
               />
               <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
+              <Route path="/system/pipelines" element={<DataPipelines />} />
             </Routes>
           </main>
 

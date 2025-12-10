@@ -12,27 +12,32 @@ services:
     volumes:
       - ./data:/app/data               # Persist Data
       - ./config:/app/config           # Live Config
+      - ./cli:/app/cli                 # Management CLI
+      - ./cli:/app/cli                 # Management CLI
       - ./src:/app/src                 # Live Code Reload (Optional)
+      - ./api_server.py:/app/api_server.py # Mount entrypoint for updates
     environment:
       - PYTHONPATH=/app/src
     restart: unless-stopped
     networks:
       - mie-net
 
-  # 2. Frontend
+  # 2. Frontend (Production Build served by Nginx)
   web:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     container_name: mie-web
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src        # Live Code Reload
-      - ./frontend/public:/app/public
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/vite.config.js:/app/vite.config.js
-    restart: unless-stopped
+      - "5173:80"
+    # volumes:
+      # - ./frontend/src:/app/src        # Live Code Reload
+      # - ./frontend/public:/app/public
+      # - ./frontend/index.html:/app/index.html
+      # - ./frontend/vite.config.js:/app/vite.config.js
+      # - ./frontend/package.json:/app/package.json
+    environment:
+      - VITE_API_URL=http://api:8000
     depends_on:
       - api
     networks:
@@ -48,6 +53,7 @@ services:
       - ./data:/app/data               # Share Data with API
       - ./config:/app/config
       - ./logs:/app/logs
+      - ./cli:/app/cli                 # Mount CLI for updates
     environment:
       - PYTHONPATH=/app/src
     restart: unless-stopped

@@ -48,7 +48,7 @@ const GammaExposurePage = () => {
         // Fetch allowed tickers
         const fetchTickers = async () => {
             try {
-                const response = await fetch('http://localhost:8000/api/v1/tickers/Expected_Moves_Reliability');
+                const response = await fetch('/api/v1/tickers/Gamma_Exposure');
                 const data = await response.json();
                 if (data.tickers) {
                     setAvailableTickers(data.tickers);
@@ -242,6 +242,11 @@ const GammaExposurePage = () => {
                     <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
                         ${data && data.spot_price ? data.spot_price.toFixed(2) : '---'}
                     </div>
+                    {data && data.timestamp && (
+                        <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                            {new Date(data.timestamp).toLocaleDateString()}
+                        </div>
+                    )}
                 </div>
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                     <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Net GEX ($)</div>
@@ -255,6 +260,14 @@ const GammaExposurePage = () => {
                     <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Max GEX Strike</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196f3' }}>
                         ${maxGexStrike}
+                    </div>
+                </div>
+
+                {/* Last Updated Card */}
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
+                    <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Last Updated</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#e0e0e0' }}>
+                        {data && data.timestamp ? new Date(data.timestamp).toLocaleString() : '---'}
                     </div>
                 </div>
 

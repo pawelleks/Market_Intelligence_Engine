@@ -144,6 +144,16 @@ const SeasonalityPage = ({ settings, onSettingsChange }) => {
                         </select>
                     </div>
                 </div>
+
+                {/* Last Data Date Display */}
+                {curvesData && curvesData.current_path && curvesData.current_path.data.length > 0 && (
+                    <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049' }}>
+                        <label style={{ display: 'block', color: '#9e9e9e', fontSize: '12px' }}>Analysis based on data up to:</label>
+                        <div style={{ color: '#4caf50', fontWeight: 'bold', fontSize: '14px', marginTop: '4px' }}>
+                            {curvesData.current_path.data[curvesData.current_path.data.length - 1].date || "Unknown"}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* RIGHT PANEL: VISUALIZATION */}

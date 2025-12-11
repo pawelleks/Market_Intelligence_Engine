@@ -54,3 +54,9 @@ scope:
     - DIA
     - ^SPX
     - ^NDX
+  Gamma_Exposure: # Scope for GEX Analysis
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+ 

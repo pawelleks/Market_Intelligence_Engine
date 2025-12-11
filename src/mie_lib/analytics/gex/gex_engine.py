@@ -137,6 +137,9 @@ class GEXEngine:
                         # Call GEX is Positive
                         gex = gamma * oi * (spot ** 2) * 0.01 * 100
                         
+                        if strike == 680 or strike == 683:
+                             print(f"DEBUG: type=call strike={strike} iv={iv} gamma={gamma} oi={oi} gex={gex}")
+                        
                         all_gex_data.append({
                             "strike": strike,
                             "gex": gex,
@@ -154,7 +157,7 @@ class GEXEngine:
                         
                         if pd.isna(iv) or iv <= 0 or pd.isna(oi) or oi <= 0:
                             continue
-                            
+                        
                         gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
                         
                         # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100 (Multiplier)

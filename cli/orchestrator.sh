@@ -32,46 +32,63 @@ log "Logs will be written to ${LOG_FILE}"
 log "=== Phase 1: Ingestion ==="
 
 log "Running update-raw (Fetching historical prices)..."
-python cli/mie.py update-raw >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie update-raw >> "${LOG_FILE}" 2>&1
 log "update-raw completed successfully."
 
 log "Running fetch-options-snapshot (Fetching daily GEX data)..."
-python cli/mie.py fetch-options-snapshot >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie fetch-options-snapshot || echo "Options fetch warning" >> "${LOG_FILE}" 2>&1
 log "fetch-options-snapshot completed successfully."
 
 # 3. Feature Engineering Phase
 log "=== Phase 2: Feature Engineering ==="
 
 log "Running build-features (Calculating technicals)..."
-# Using --mode full to ensure complete consistency, though update is faster
-python cli/mie.py build-features --mode full >> "${LOG_FILE}" 2>&1
+# Using --mode update for efficiency in daily cron, full is too heavy
+python -m mie_lib.cli.mie build-features --mode update --lookback 90 >> "${LOG_FILE}" 2>&1
 log "build-features completed successfully."
 
-# 4. Analytics Phase (Analysis)
-log "=== Phase 3: Analytics Generation ==="
+# 3. Update Minervini Scanner
+log "=== Phase 3: Scanners & Analytics ==="
+log "Running build-minervini-daily..."
+python -m mie_lib.cli.mie build-minervini-daily --tickers @config >> "${LOG_FILE}" 2>&1
+log "build-minervini-daily completed."
 
-# Note: These can run in parallel if simple backgrounding & wait is used,
-# but for safety and clear logging, we run sequentially here.
+# 4. Update Markov Data
+log "Running build-markov-grid (Updating Windows)..."
+python -m mie_lib.cli.mie build-markov-grid --state-modes binary,tri --thresholds 0,5,10,15,20,25,30,35,40,45,50 --windows 1Y,2Y,5Y,10Y,15Y,MAX --orders 1,2 >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-markov-snapshots >> "${LOG_FILE}" 2>&1
+log "build-markov-grid completed."
 
-log "Running build-expected-moves (Daily/Weekly/Monthly ranges)..."
-python cli/mie.py build-expected-moves --ticker @config --start "${TODAY}" >> "${LOG_FILE}" 2>&1
-log "build-expected-moves completed."
-
-log "Running build-markov-snapshots (States & Predictions)..."
-python cli/mie.py build-markov-snapshots >> "${LOG_FILE}" 2>&1
-log "build-markov-snapshots completed."
-
-log "Running build-hmm-snapshots (Regime Classification)..."
-python cli/mie.py build-hmm-snapshots >> "${LOG_FILE}" 2>&1
+# 5. Update HMM Data
+log "Running build-hmm-daily..."
+python -m mie_lib.cli.mie build-hmm-daily --tickers @config >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-hmm-snapshots >> "${LOG_FILE}" 2>&1
 log "build-hmm-snapshots completed."
 
-log "Running build-gex-daily (Gamma Exposure)..."
-python cli/mie.py build-gex-daily --date "${TODAY}" >> "${LOG_FILE}" 2>&1
+# 6. Update GEX Data
+log "Running build-gex-daily..."
+python -m mie_lib.cli.mie build-gex-daily --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-gex-daily completed."
 
-log "Running build-gaf-daily (Neural Net Prediction)..."
-python cli/mie.py build-gaf-daily >> "${LOG_FILE}" 2>&1
+# 7. Update Expected Moves
+log "Running update-expected-moves..."
+python -m mie_lib.cli.mie update-expected-moves --lookback 5 --include-weekly-reference >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-expected-moves-snapshots >> "${LOG_FILE}" 2>&1
+log "update-expected-moves completed."
+
+# 8. Update Seasonality Data
+log "Running update-seasonality..."
+python -m mie_lib.cli.mie update-seasonality >> "${LOG_FILE}" 2>&1
+log "update-seasonality completed."
+
+# 9. GAF Prediction
+log "Running build-gaf-daily..."
+python -m mie_lib.cli.mie build-gaf-daily >> "${LOG_FILE}" 2>&1
 log "build-gaf-daily completed."
 
-log "=== Pipeline Completed Successfully ==="
+log "======================================================="
+log "       🚀 DAILY UPDATE COMPLETED SUCCESSFULLY 🚀       "
+log "======================================================="
 log "All artifacts generated for ${TODAY}."
+log "You can now view the latest data in the MIE Dashboard."
+log "======================================================="

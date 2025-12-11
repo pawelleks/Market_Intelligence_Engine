@@ -60,3 +60,57 @@ html,
 .read-the-docs {
   color: #888;
 }
+
+/* STRICT TERMINAL WINDOW CSS - DO NOT EDIT */
+.terminal-window {
+  position: relative;
+
+  /* Layout & Spacing Updates */
+  width: 96%;
+  /* Narrower than full width */
+  margin: 20px auto;
+  /* Adds space on top and centers it horizontally */
+  height: 500px;
+  /* Keep the fixed height */
+  overflow-y: auto;
+  /* Keep the scrollbar */
+
+  /* Visual Updates */
+  background-color: #1e1e1e;
+  color: #ffffff;
+  /* Text is now White */
+
+  /* Standard Styling */
+  font-family: 'Consolas', 'Monaco', 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  box-shadow: inset 0 0 10px #000000;
+  white-space: pre-wrap;
+}
+
+/* Color Definitions */
+.log-error {
+  color: #ff5555;
+  font-weight: bold;
+}
+
+/* Red for Errors */
+.log-warn {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+/* Orange for Warnings */
+.log-info {
+  color: #50fa7b;
+}
+
+/* Green for Info */
+.log-timestamp {
+  color: #6272a4;
+}
+
+/* Dimmed Blue/Gray for dates */

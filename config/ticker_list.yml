@@ -3,6 +3,8 @@ tickers:
  - ^DJI
  - ^IXIC
  - ^RUT
+ - ^SPX
+ - ^NDX
  - SPY
  - QQQ
  - IWM
@@ -18,16 +20,9 @@ tickers:
  - XLRE
  - XLK
  - XLU
- - BND
- - AGG
- - BNDX
- - SGOV
  - TLT
  - IEF
  - SHY
- - VCIT
- - VTEB
- - BIL
  - AAPL
  - MSFT
  - NVDA
@@ -37,7 +32,7 @@ tickers:
  - META
  - XOM
  - CVX
- - BRK.B
+ - BRK-B
  - JPM
  - V
  - MA
@@ -50,23 +45,14 @@ tickers:
  - GE
  - CAT
  - RTX
- - LIN
  - NEM
- - SHW
- - WELL
- - PLD
  - AMT
  - NEE
- - SO
- - CEG
  - DIS
  - HD
  - MCD
  - NFLX
- - VZ
- - T
  - COP
- - WMB
  - BAC
  - WFC
  - UNH
@@ -78,14 +64,4 @@ tickers:
  - UBER
  - HON
  - DE
- - ECL
  - NUE
- - MLM
- - EQIX
- - SPG
- - O
- - DUK
- - EXC
- - AEP
- - ^SPX
- - ^NDX

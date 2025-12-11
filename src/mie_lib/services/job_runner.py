@@ -15,17 +15,21 @@ class JobRunner:
     # Allowed jobs mapping to commands
     # We execute them relative to project root. 
     # In Docker API container, root is /app, so 'cli/orchestrator.sh' works if cwd=/app.
+    # In Local dev, we need to be careful with CWD.
     JOBS = {
-        "daily-pipeline": ["bash", "cli/orchestrator.sh"],
-        "update-raw": ["python", "cli/mie.py", "update-raw"],
-        "fetch-options": ["python", "cli/mie.py", "fetch-options-snapshot"],
-        "build-features": ["python", "cli/mie.py", "build-features", "--mode", "update"],
-        "rebuild-features": ["python", "cli/mie.py", "build-features", "--mode", "full"],
-        "build-gex": ["python", "cli/mie.py", "build-gex-daily", "--date", "today"], # 'today' needs handling or pass actual date
-        "update-expected-moves": ["python", "cli/mie.py", "build-expected-moves", "--ticker", "@config", "--start", "today"]
+        "daily-pipeline": ["python", "-m", "mie_lib.cli.mie", "update-everything"],
+        "update-raw": ["python", "-m", "mie_lib.cli.mie", "update-raw"],
+        "fetch-options": ["python", "-m", "mie_lib.cli.mie", "fetch-options-snapshot"],
+        "build-features": ["python", "-m", "mie_lib.cli.mie", "build-features", "--mode", "update"],
+        "rebuild-features": ["python", "-m", "mie_lib.cli.mie", "build-features", "--mode", "full"],
+        "build-gex": ["python", "-m", "mie_lib.cli.mie", "build-gex-daily", "--date", "today"],
+        "update-expected-moves": ["python", "-m", "mie_lib.cli.mie", "update-expected-moves", "--ticker", "@config", "--lookback", "5"],
+        "build-hmm": ["python", "-m", "mie_lib.cli.mie", "build-hmm-daily", "--tickers", "@config"],
+        "build-minervini": ["python", "-m", "mie_lib.cli.mie", "build-minervini-daily", "--tickers", "@config"],
+        "rebuild-reliability": ["python", "-m", "mie_lib.cli.mie", "rebuild-reliability"],
     }
 
-    def __init__(self, log_dir: str = "data/logs"):
+    def __init__(self, log_dir: str = "logs"): # Changed default to 'logs' to match script
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.current_process: Optional[subprocess.Popen] = None
@@ -37,7 +41,7 @@ class JobRunner:
         # Orchestrator writes to pipeline_YYYY-MM-DD.log
         # But individual commands might write to stdout/stderr.
         # We should redirect their output to the same log file for consistency in this UI.
-        return self.log_dir / f"pipeline_{run_date}.log"
+        return self.log_dir / f"cron_{run_date}.log" # Changed to cron_ prefix to match script
 
     def run_job(self, job_name: str) -> bool:
         """
@@ -56,8 +60,10 @@ class JobRunner:
             
             cmd = self.JOBS[job_name].copy()
             
-            # Handle 'today' replacement
+            # Handle 'today' and 'python' replacement
             today_str = date.today().strftime("%Y-%m-%d")
+            import sys
+            cmd = [sys.executable if arg == "python" else arg for arg in cmd]
             cmd = [arg.replace("today", today_str) for arg in cmd]
             
             log_path = self._get_log_path()
@@ -70,11 +76,24 @@ class JobRunner:
                     f.write(f"{'='*30}\n\n")
                     
                     # Spawn process
+                    # Determine CWD: If /app exists (Docker), use it. Else use current PWD.
+                    import os
+                    cwd = "/app" if Path("/app").exists() else os.getcwd()
+                    
+                    # Prepare environment with src in PYTHONPATH
+                    env = os.environ.copy()
+                    src_path = str(Path(cwd) / "src")
+                    if "PYTHONPATH" in env:
+                        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}"
+                    else:
+                        env["PYTHONPATH"] = src_path
+                    
                     self.current_process = subprocess.Popen(
                         cmd,
                         stdout=f,
                         stderr=subprocess.STDOUT,
-                        cwd="/app" # Docker container root
+                        cwd=cwd,
+                        env=env
                     )
                     
                 logger.info(f"Started job {job_name} PID={self.current_process.pid}")

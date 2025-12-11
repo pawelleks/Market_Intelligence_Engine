@@ -653,6 +653,11 @@ def main():
             "has_features": feat_path.exists(),
         })
 
+    # Display Last Data Date
+    if base_df is not None and not base_df.empty and "date" in base_df.columns:
+        last_dt = pd.to_datetime(base_df["date"]).max()
+        st.info(f"Analysis based on data up to: **{last_dt.strftime('%Y-%m-%d')}**")
+
     # Guard rails: show clear hints if artifacts missing
     if base_df is None or base_df.empty:
         render_missing_artifact(
@@ -696,7 +701,7 @@ def main():
                 legend_title_text="Horizon",
                 margin=dict(l=10, r=10, t=10, b=10), height=380,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key=f"seasonality_chart_{ticker}")
     except Exception as e:
         render_exception("Failed to render Seasonality vs Actual", e)
 

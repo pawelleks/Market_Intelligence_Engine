@@ -38,6 +38,14 @@ def _compute_facts(df: pd.DataFrame, lookback: str | int) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     d = df.copy().sort_values("date")
+    
+    # Ensure derived columns exist
+    if "year" not in d.columns:
+        d["year"] = d["date"].dt.year
+    if "doy_trading" not in d.columns:
+        # Calculate trading day of year (1..252 approx)
+        d["doy_trading"] = d.groupby("year")["date"].rank().astype(int)
+
     if lookback != "ALL":
         max_year = int(d["year"].max())
         try:

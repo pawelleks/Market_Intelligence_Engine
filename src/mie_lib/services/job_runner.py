@@ -19,10 +19,10 @@ class JobRunner:
     JOBS = {
         "daily-pipeline": ["python", "-m", "mie_lib.cli.mie", "update-everything"],
         "update-raw": ["python", "-m", "mie_lib.cli.mie", "update-raw"],
-        "fetch-options": ["python", "-m", "mie_lib.cli.mie", "fetch-options-snapshot"],
+        "fetch-options": ["python", "-m", "mie_lib.cli.mie", "fetch-options-snapshot", "--tickers", "@config"],
         "build-features": ["python", "-m", "mie_lib.cli.mie", "build-features", "--mode", "update"],
         "rebuild-features": ["python", "-m", "mie_lib.cli.mie", "build-features", "--mode", "full"],
-        "build-gex": ["python", "-m", "mie_lib.cli.mie", "build-gex-daily", "--date", "today"],
+        "build-gex": ["python", "-m", "mie_lib.cli.mie", "build-gex-daily", "--date", "today", "--tickers", "@config"],
         "update-expected-moves": ["python", "-m", "mie_lib.cli.mie", "update-expected-moves", "--ticker", "@config", "--lookback", "5"],
         "build-hmm": ["python", "-m", "mie_lib.cli.mie", "build-hmm-daily", "--tickers", "@config"],
         "build-minervini": ["python", "-m", "mie_lib.cli.mie", "build-minervini-daily", "--tickers", "@config"],

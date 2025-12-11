@@ -124,6 +124,21 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
         }
     });
 
+    // 4. Max GEX Line
+    if (maxGexVal > 0) {
+        shapes.push({
+            type: 'line',
+            xref: 'paper', yref: 'y',
+            x0: 0, x1: 1,
+            y0: maxGexStrike, y1: maxGexStrike,
+            line: {
+                color: '#2196f3', // Blue
+                width: 2,
+                dash: 'dash'
+            }
+        });
+    }
+
     // Annotations
     const annotations = [];
 

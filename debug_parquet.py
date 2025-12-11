@@ -1,13 +1,24 @@
 import pandas as pd
-from pathlib import Path
+import sys
 
-path = Path("data/analytics/options/spy_expected_moves.parquet")
-if path.exists():
+try:
+    print("Pandas version:", pd.__version__)
+    path = "data/raw/AAPL.parquet"
+    print(f"Reading {path}...")
     df = pd.read_parquet(path)
-    print("Columns:", df.columns)
-    print("First 5 rows:")
+    print("Success!")
     print(df.head())
-    print("\nUnique Tickers:", df["ticker"].unique())
-    print("Unique Expiry Types:", df["expiry_type"].unique())
-else:
-    print(f"File not found: {path}")
+    print("Columns:", df.columns)
+except Exception as e:
+    print("Failed to read parquet:", e)
+    # Check dependencies
+    try:
+        import pyarrow
+        print("Pyarrow version:", pyarrow.__version__)
+    except ImportError:
+        print("Pyarrow not installed.")
+    try:
+        import fastparquet
+        print("Fastparquet version:", fastparquet.__version__)
+    except ImportError:
+        print("Fastparquet not installed.")

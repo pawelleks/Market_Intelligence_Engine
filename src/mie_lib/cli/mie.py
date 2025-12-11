@@ -322,26 +322,19 @@ def handle_update_expected_moves(args):
     lookback = int(getattr(args, "lookback", 5) or 5)
     include_weekly = bool(getattr(args, "include_weekly_reference", False))
     
-    total_results = []
-    for ticker in tickers:
-        print(f"Updating Expected Moves for {ticker}...")
-        try:
-            results = update_expected_moves(
-                ticker=ticker,
-                lookback_days=lookback,
-                provider=provider,
-                include_weekly_reference=include_weekly,
-            )
-            total_results.extend(results)
-            LOG.info(
-                "update-expected-moves complete ticker=%s days=%s provider=%s", ticker, len(results), provider.__class__.__name__
-            )
-            print({"ticker": ticker, "days": len(results)})
-        except Exception as e:
-            LOG.error(f"Error updating EM for {ticker}: {e}")
-            print(f"Error updating EM for {ticker}: {e}")
-
-    return total_results
+    from mie_lib.analytics.expected_moves.engine import run_daily_em_build
+    
+    # Run the build (Engine handles looping and saving latest.json)
+    print(f"Starting Expected Moves Build for {len(tickers)} tickers...")
+    try:
+        results = run_daily_em_build(tickers)
+        print(f"Build complete. Processed {len(results.get('tickers', {}))} tickers.")
+        LOG.info("handle_update_expected_moves completed successfully.")
+        return [results]
+    except Exception as e:
+        LOG.error(f"Error in Expected Moves Build: {e}")
+        print(f"Error: {e}")
+        return []
 
 
 def handle_build_expected_moves_snapshots(args):

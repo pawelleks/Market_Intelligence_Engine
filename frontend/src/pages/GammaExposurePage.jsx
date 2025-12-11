@@ -135,7 +135,7 @@ const GammaExposurePage = () => {
     const horizonDisplay = {
         'eow': 'EOW', 'eom': 'EOM', 'eoq': 'EOQ', 'next5': '+5 Days', 'next30': '+30 Days'
     };
-    const chartTitle = `${horizonDisplay[horizon]} GEX - ${ticker}${validTill ? ` (til ${validTill})` : ''}`;
+    const chartTitle = `${horizonDisplay[horizon]} GEX - ${ticker}${validTill ? ` (til ${validTill})` : ''} - ${viewMode === 'split' ? '(Split View)' : '(Net View)'}`;
 
     // Calculate Zoom Range (Monthly EM + 10%)
     const getZoomRange = () => {

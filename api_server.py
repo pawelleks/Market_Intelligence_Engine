@@ -827,6 +827,10 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
 # Massive.com Integration (Experimental)
 # -----------------------------------------------------------------
 # Force Reload Trigger: 0DTE Fix
+# -----------------------------------------------------------------
+# Massive.com Integration (Experimental)
+# -----------------------------------------------------------------
+# Force Reload Trigger: 0DTE Fix
 from mie_lib.data_ingest.providers.massive import MassiveOptionChainProvider
 from mie_lib.analytics.expected_moves.data_ingest import get_target_expirations, fetch_vix1d_close
 
@@ -838,13 +842,12 @@ async def get_expected_moves_massive():
     """
     import yfinance as yf
     import pandas as pd
-    from datetime import datetime, timedelta
-    import numpy as np
+    from datetime import datetime
+    import yaml
+    from mie_lib.utils.paths import ROOT, options_latest_json_path
 
     try:
         # Load scope from config
-        import yaml
-        from mie_lib.utils.paths import ROOT
         scope_path = ROOT / "config" / "analysis_scope.yml"
         
         tickers = ["SPY", "QQQ", "IWM", "DIA"] # Default fallback
@@ -852,13 +855,15 @@ async def get_expected_moves_massive():
             try:
                 with open(scope_path, "r") as f:
                     scope_cfg = yaml.safe_load(f)
+                    # Use .get() chains to avoid KeyErrors
                     tickers = scope_cfg.get("scope", {}).get("Expected_Moves_Reliability", tickers)
             except Exception as e:
                 print(f"Error loading scope: {e}")
 
-        as_of = date.today()
+        # Limit concurrency or just iterate. For 60 tickers, serial is slow but acceptable for "massive/latest" trigger.
+        # Ideally this should be async or cached.
         
-        # 1. Fetch VIX1D (still from yfinance)
+        as_of = date.today()
         vix1d_val = fetch_vix1d_close(as_of)
         
         results = {
@@ -868,193 +873,272 @@ async def get_expected_moves_massive():
             "tickers": {}
         }
         
+        # Load Target Dates reference from latest.json once
+        latest_json_dates = {}
+        try:
+            if options_latest_json_path().exists():
+                with open(options_latest_json_path(), "r") as f:
+                    latest_data = json.load(f)
+                    latest_json_dates = latest_data.get("tickers", {})
+        except Exception:
+            pass
+
         for ticker in tickers:
-            yf_ticker = yf.Ticker(ticker)
-            
-            # 1. Fetch Live Spot (1m history)
-            # Try to get the absolute latest price
             try:
-                hist = yf_ticker.history(period="1d", interval="1m")
-                if not hist.empty:
-                    spot = float(hist.iloc[-1]['Close'])
+                yf_ticker = yf.Ticker(ticker)
+                
+                # 1. Fetch Live Spot
+                # Fast track: use fast_info if available (newer yfinance)
+                spot = None
+                if hasattr(yf_ticker, 'fast_info'):
+                     spot = yf_ticker.fast_info.get('last_price')
+                
+                if spot is None:
+                    try:
+                        hist = yf_ticker.history(period="1d", interval="1m")
+                        if not hist.empty:
+                            spot = float(hist.iloc[-1]['Close'])
+                        else:
+                            hist_day = yf_ticker.history(period="1d")
+                            if not hist_day.empty:
+                                spot = float(hist_day.iloc[-1]['Close'])
+                    except Exception:
+                        pass
+                
+                if spot is None:
+                    continue
+
+                # 2. Determine Expirations matches
+                target_dates = {}
+                if ticker in latest_json_dates:
+                     t_exps = latest_json_dates[ticker].get("expirations", {})
+                     for k in ["ODTE", "WEEKLY", "MONTHLY"]:
+                         if k in t_exps and "expiry_date" in t_exps[k]:
+                             try:
+                                 target_dates[k] = datetime.strptime(t_exps[k]["expiry_date"], "%Y-%m-%d").date()
+                             except: pass
                 else:
-                    # Fallback to daily if market closed or no 1m data
-                    hist_day = yf_ticker.history(period="1d")
-                    if not hist_day.empty:
-                        spot = float(hist_day.iloc[-1]['Close'])
-                    else:
-                        continue # Cannot get spot
-            except Exception:
-                continue
+                    # Fallback to calc if missing in JSON
+                     odte, weekly, monthly = get_target_expirations(as_of)
+                     target_dates = {"ODTE": odte, "WEEKLY": weekly, "MONTHLY": monthly}
 
-            # 2. Determine Expirations
-            # We need to match the logic: ODTE, Weekly, Monthly
-            # To ensure alignment with EOD data, we try to read the target dates from latest.json
-            
-            target_dates = {}
-            try:
-                from mie_lib.utils.paths import options_latest_json_path
-                import json
-                path = options_latest_json_path()
-                if path.exists():
-                    with open(path, "r") as f:
-                        latest_data = json.load(f)
-                        if ticker in latest_data.get("tickers", {}):
-                            t_exps = latest_data["tickers"][ticker].get("expirations", {})
-                            for k in ["ODTE", "WEEKLY", "MONTHLY"]:
-                                if k in t_exps and "expiry_date" in t_exps[k]:
-                                    target_dates[k] = datetime.strptime(t_exps[k]["expiry_date"], "%Y-%m-%d").date()
-            except Exception as e:
-                print(f"Failed to read target dates from latest.json: {e}")
-
-            # yfinance expirations are strings 'YYYY-MM-DD'
-            avail_expirations = yf_ticker.options
-            if not avail_expirations:
-                continue
-                
-            # Helper to find closest expiration to target date
-            def find_closest_expiry(target_date, options):
-                # options is list of date strings
-                # target_date is datetime.date
-                min_diff = 9999
-                best_exp = None
-                target_str = target_date.isoformat()
-                
-                # First try exact match
-                if target_str in options:
-                    return target_str
-                
-                # Else find closest future date
-                for exp_str in options:
-                    exp_d = datetime.strptime(exp_str, "%Y-%m-%d").date()
-                    diff = (exp_d - target_date).days
-                    if 0 <= diff < min_diff:
-                        min_diff = diff
-                        best_exp = exp_str
-                return best_exp
-
-            # Target Dates
-            # Use shared logic to determine target dates (consistent with EOD)
-            odte_target, weekly_target, monthly_target = get_target_expirations(date.today())
-            
-            # Helper to find closest expiry to target date
-            def find_closest_expiry(target_date, options):
-                # options is list of date strings
-                # target_date is datetime.date
-                min_diff = 9999
-                best_exp = None
-                target_str = target_date.isoformat()
-                
-                # First try exact match
-                if target_str in options:
-                    return target_str
-                
-                # Else find closest future date
-                for exp_str in options:
-                    exp_d = datetime.strptime(exp_str, "%Y-%m-%d").date()
-                    diff = (exp_d - target_date).days
-                    if 0 <= diff < min_diff:
-                        min_diff = diff
-                        best_exp = exp_str
-                return best_exp
-
-            # ODTE
-            odte_exp = find_closest_expiry(odte_target, avail_expirations)
-            
-            # Weekly
-            weekly_exp = find_closest_expiry(weekly_target, avail_expirations)
-            
-            # Monthly
-            monthly_exp = find_closest_expiry(monthly_target, avail_expirations)
-            
-            t_data = {
-                "spot_price": spot,
-                "expirations": {}
-            }
-            
-            # Process each
-            # Map our keys to the found expirations
-            exp_map = {
-                "ODTE": odte_exp,
-                "WEEKLY": weekly_exp,
-                "MONTHLY": monthly_exp
-            }
-            
-            for label, exp_date_str in exp_map.items():
-                if not exp_date_str:
+                avail_expirations = yf_ticker.options
+                if not avail_expirations:
                     continue
-                    
-                try:
-                    chain = yf_ticker.option_chain(exp_date_str)
-                    calls = chain.calls
-                    puts = chain.puts
-                    
-                    # Find ATM Strike
-                    # Minimize |strike - spot|
-                    # We can merge calls and puts or just look at one. 
-                    # Ideally we find the strike where strike is closest to spot.
-                    
-                    # Let's use calls to find strikes
-                    if calls.empty:
-                        continue
+                
+                t_data = {
+                    "spot_price": spot,
+                    "expirations": {}
+                }
+
+                # Helper to find expiry
+                def find_closest(target, options):
+                    t_str = target.isoformat()
+                    if t_str in options: return t_str
+                    # Find closest future
+                    candidates = []
+                    for o in options:
+                        try:
+                            d = datetime.strptime(o, "%Y-%m-%d").date()
+                            if d >= target:
+                                candidates.append((d, o))
+                        except: pass
+                    if candidates:
+                        candidates.sort(key=lambda x: (x[0] - target).days)
+                        return candidates[0][1]
+                    return None
+
+                for k, target_date in target_dates.items():
+                    exp_str = find_closest(target_date, avail_expirations)
+                    if not exp_str: continue
+
+                    try:
+                        chain = yf_ticker.option_chain(exp_str)
+                        calls = chain.calls
+                        puts = chain.puts
                         
-                    # Calculate distance to spot
-                    calls['dist'] = abs(calls['strike'] - spot)
-                    atm_row = calls.loc[calls['dist'].idxmin()]
-                    atm_strike = atm_row['strike']
-                    
-                    # Get Call Price (lastPrice or (bid+ask)/2)
-                    # Prefer mid if bid/ask available and non-zero, else lastPrice
-                    def get_price(row):
-                        bid = row.get('bid', 0)
-                        ask = row.get('ask', 0)
-                        last = row.get('lastPrice', 0)
-                        if bid > 0 and ask > 0:
-                            return (bid + ask) / 2
-                        return last
+                        if calls.empty or puts.empty: continue
+
+                        # Find ATM
+                        calls['dist'] = abs(calls['strike'] - spot)
+                        atm_idx = calls['dist'].idxmin()
+                        atm_call = calls.loc[atm_idx]
+                        atm_strike = atm_call['strike']
                         
-                    call_price = get_price(atm_row)
-                    
-                    # Find corresponding Put
-                    put_row = puts[puts['strike'] == atm_strike]
-                    if put_row.empty:
-                        # Try to find closest put if exact match missing (unlikely for ATM)
-                        puts['dist'] = abs(puts['strike'] - spot)
-                        put_row = puts.loc[puts['dist'].idxmin()]
+                        # Price logic: prefer mid, then last
+                        def get_p(row):
+                            b, a, l = row.get('bid', 0), row.get('ask', 0), row.get('lastPrice', 0)
+                            if b > 0 and a > 0: return (b+a)/2
+                            return l
                         
-                    if isinstance(put_row, pd.DataFrame):
-                         put_row = put_row.iloc[0]
-                         
-                    put_price = get_price(put_row)
-                    
-                    straddle = call_price + put_price
-                    
-                    t_data["expirations"][label] = {
-                        "expiry_date": exp_date_str,
-                        "lower_range": spot - straddle,
-                        "upper_range": spot + straddle,
-                        "em_dollars": straddle,
-                        "debug": {
-                            "atm_strike": float(atm_strike),
-                            "call_ticker": f"C_{atm_strike}",
-                            "call_price": float(call_price),
-                            "put_ticker": f"P_{atm_strike}",
-                            "put_price": float(put_price)
+                        call_price = get_p(atm_call)
+                        
+                        # Put
+                        puts['dist'] = abs(puts['strike'] - atm_strike) # Match strike
+                        if puts['dist'].min() > 0.01: # allow small float error
+                             # If exact strike missing, find closest Strike to ATM strike
+                             # actually just re-calc closest to spot if exact missing
+                             puts['dist'] = abs(puts['strike'] - spot)
+                        
+                        atm_put_idx = puts['dist'].idxmin()
+                        atm_put = puts.loc[atm_put_idx]
+                        put_price = get_p(atm_put)
+                        
+                        straddle = call_price + put_price
+                        
+                        t_data["expirations"][k] = {
+                            "expiry_date": exp_str,
+                            "lower_range": spot - straddle,
+                            "upper_range": spot + straddle,
+                            "em_dollars": straddle,
+                            "debug": {
+                                "atm_strike": float(atm_strike),
+                                "call_price": float(call_price),
+                                "put_price": float(put_price)
+                            }
                         }
-                    }
-                    
-                except Exception as e:
-                    # print(f"Error processing {label} for {ticker}: {e}")
-                    continue
+                    except Exception:
+                        continue
+                
+                if t_data["expirations"]:
+                    results["tickers"][ticker] = t_data
 
-            results["tickers"][ticker] = t_data
-            
+            except Exception as e:
+                # print(f"Error processing {ticker} in massive: {e}")
+                continue
+                
         return JSONResponse(content=results)
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+
+@app.get("/api/v1/market/candles/{ticker}")
+def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") -> JSONResponse:
+    """
+    Fetches candle data.
+    Priority:
+    1. Local Parquet (data/raw/{ticker}.parquet) - ONLY for 1d interval (unless we support resampling).
+    2. Massive.com API (Live/Delayed).
+    3. YFinance (Fallback).
+    """
+    import pandas as pd
+    from pathlib import Path
+    
+    # 0. Try Local Parquet First (Speed/Reliability)
+    # Most raw data is daily. If request is for 1d, this is perfect.
+    if interval == "1d":
+        local_path = Path(f"data/raw/{ticker.upper()}.parquet")
+        if local_path.exists():
+            try:
+                # Use pyarrow engine explicitly to avoid potential hangs in some envs
+                df = pd.read_parquet(local_path, engine="pyarrow")
+                
+                # Check for required columns
+                required = {'open', 'high', 'low', 'close', 'date'}
+                # Normalize columns to lower for checking
+                cols_map = {c.lower(): c for c in df.columns}
+                
+                if all(r in cols_map for r in required):
+                    # Rename to standard Capitalized
+                    df = df.rename(columns={
+                        cols_map['date']: 'Date',
+                        cols_map['open']: 'Open', 
+                        cols_map['high']: 'High', 
+                        cols_map['low']: 'Low', 
+                        cols_map['close']: 'Close',
+                        cols_map.get('volume', 'Volume'): 'Volume'
+                    })
+                    
+                    # Ensure Date is string
+                    if "Date" in df.columns:
+                        try:
+                            df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
+                        except Exception as e_date:
+                            # Fallback conversion
+                            df["Date"] = df["Date"].astype(str)
+                            
+                    # Fill missing volume
+                    if "Volume" not in df.columns:
+                        df["Volume"] = 0
+                        
+                    # Filter and Sort
+                    out_cols = ["Date", "Open", "High", "Low", "Close", "Volume"]
+                    df = df[out_cols].sort_values("Date")
+                    
+                    return JSONResponse(content=df.to_dict(orient="records"))
+            except Exception as e:
+                print(f"Error reading local parquet for {ticker}: {e}")
+                pass
+
+    # 1. Fallback to yfinance immediately if Massive is risky or not configured
+    
+    df_massive = pd.DataFrame()
+    try:
+        provider = MassiveOptionChainProvider()
+        if provider.api_key:
+             end_date = date.today()
+             start_date = end_date.replace(year=end_date.year - 2)
+             if range == "5y": start_date = end_date.replace(year=end_date.year - 5)
+             elif range == "max": start_date = date(2000, 1, 1)
+             
+             df_massive = provider.fetch_candles(ticker, interval=interval, start_date=start_date, end_date=end_date)
+    except Exception as e:
+        # print(f"Massive Candle Fetch Failed: {e}")
+        pass
+
+    if not df_massive.empty:
+         # Format massive
+        try:
+            if "Date" in df_massive.columns:
+                df_massive["Date"] = df_massive["Date"].astype(str)
+            cols = ["Date", "Open", "High", "Low", "Close", "Volume"]
+            return JSONResponse(content=df_massive[cols].to_dict(orient="records"))
+        except Exception:
+            pass # Fallback to yF
+
+    # 2. yfinance
+    try:
+        valid_intervals = {"1h", "1d", "5d", "1wk", "1mo"} 
+        yf_interval = interval
+        if interval == "4h":
+            yf_interval = "1h" 
+            
+        t = yf.Ticker(ticker)
+        
+        req_range = range
+        if (interval == "1h" or interval == "4h") and range == "max":
+            req_range = "2y"
+            
+        df = t.history(period=req_range, interval=yf_interval)
+        
+        if df.empty:
+             return JSONResponse(content=[])
+             
+        # Resample if 4h
+        if interval == "4h":
+            agg_dict = {
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum'
+            }
+            df = df.resample('4h').agg(agg_dict).dropna()
+            
+        df.reset_index(inplace=True)
+        
+        if "Date" in df.columns:
+            df["Date"] = df["Date"].astype(str)
+        elif "Datetime" in df.columns:
+             df["Date"] = df["Datetime"].astype(str)
+             
+        # Filter for desired columns only
+        out_cols = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+        data = df[out_cols].to_dict(orient="records")
+        
+        return JSONResponse(content=data)
         
     except Exception as e:
         print(f"Error fetching candles for {ticker}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching candles: {e}")
+        return JSONResponse(content={"error": f"YFinance Error: {str(e)}"}, status_code=500)

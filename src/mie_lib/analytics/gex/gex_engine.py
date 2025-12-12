@@ -330,8 +330,17 @@ class GEXEngine:
             all_gex_data = []
             
             for _, row in df.iterrows():
-                expiry_str = str(row['expiration']) # YYYY-MM-DD
-                exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                expiry_str = str(row['expiration']).strip() # YYYY-MM-DD
+                
+                # Validate date string before parsing
+                if not expiry_str or expiry_str.lower() in ('none', 'nan', 'nat', ''):
+                    continue
+                    
+                try:
+                    exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                except ValueError:
+                    # Log debug if needed, but skipping is safer for pipeline resilience
+                    continue
                 
                 T = self._get_time_to_expiration(expiry_str)
                 

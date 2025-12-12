@@ -9,14 +9,33 @@ import logging
 import os
 import subprocess
 import sys
+
+# --- FIX for Mac M1/M2 Mutex Deadlocks ---
+# Resolves conflict between TensorFlow 2.20+ and PyArrow on macOS
+# Order matters: PyArrow MUST be imported BEFORE TensorFlow
+try:
+    import pyarrow
+except ImportError:
+    pass
+
+os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# -----------------------------------------
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 import yaml
 
 # Ensure project root is on sys.path so `src` is importable when running cli scripts
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+# file: .../src/mie_lib/cli/mie.py
+# roots: .../src/mie_lib/cli -> .../src/mie_lib -> .../src -> .../ProjectRoot
+_CURRENT_FILE = Path(__file__).resolve()
+PROJECT_ROOT = _CURRENT_FILE.parents[3]
+SRC_ROOT = _CURRENT_FILE.parents[2]
+
+# Insert both to allow imports from 'scripts' (in ProjectRoot) and 'mie_lib' (in src)
+sys.path.insert(0, str(SRC_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from mie_lib.data_ingest.yfinance_loader import (
     read_tickers,
@@ -375,7 +394,7 @@ def handle_build_expected_moves_snapshots(args):
 
 def handle_build_hmm_snapshots(args):
     tickers_arg = getattr(args, "tickers", None)
-    if tickers_arg:
+    if tickers_arg and tickers_arg.strip().upper() != "@CONFIG":
         tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
     else:
         tickers = _default_hmm_snapshot_tickers()
@@ -407,7 +426,7 @@ def handle_build_hmm_snapshots(args):
 
 def handle_build_markov_snapshots(args):
     tickers_arg = getattr(args, "tickers", None)
-    if tickers_arg:
+    if tickers_arg and tickers_arg.strip().upper() != "@CONFIG":
         tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
     else:
         tickers = _default_markov_snapshot_tickers()

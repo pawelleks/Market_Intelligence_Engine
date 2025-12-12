@@ -28,7 +28,12 @@ def _load_archive_data() -> pd.DataFrame:
     for f in files:
         try:
             df_temp = pd.read_parquet(f)
-            print(f"Loaded {len(df_temp)} rows from {f}")
+            # Fix: Inject ticker if missing (inferred from filename)
+            if "ticker" not in df_temp.columns:
+                # filename assumption: {ticker}_expected_moves.parquet
+                ticker_derived = f.name.replace("_expected_moves.parquet", "").upper()
+                df_temp["ticker"] = ticker_derived
+                
             dfs.append(df_temp)
         except Exception as e:
             logger.error(f"Failed to read archive file {f}: {e}")

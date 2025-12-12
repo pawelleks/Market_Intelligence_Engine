@@ -47,6 +47,10 @@ python -m mie_lib.analytics.expected_moves.reliability_processor
 echo "[$(date)] Running update-seasonality..."
 python -m mie_lib.cli.mie update-seasonality
 
+# 9. Update GAF Prediction
+echo "[$(date)] Running build-gaf-daily..."
+python -m mie_lib.cli.mie build-gaf-daily
+
 echo "======================================================="
 echo "       🚀 DAILY UPDATE COMPLETED SUCCESSFULLY 🚀       "
 echo "======================================================="

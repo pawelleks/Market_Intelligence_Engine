@@ -26,6 +26,7 @@ class JobRunner:
         "update-expected-moves": ["python", "-m", "mie_lib.cli.mie", "update-expected-moves", "--ticker", "@config", "--lookback", "5"],
         "build-hmm": ["python", "-m", "mie_lib.cli.mie", "build-hmm-daily", "--tickers", "@config"],
         "build-minervini": ["python", "-m", "mie_lib.cli.mie", "build-minervini-daily", "--tickers", "@config"],
+        "build-gaf-daily": ["python", "-m", "mie_lib.cli.mie", "build-gaf-daily"],
         "rebuild-reliability": ["python", "-m", "mie_lib.cli.mie", "rebuild-reliability"],
     }
 

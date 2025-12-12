@@ -3,6 +3,13 @@ import os
 # Disable OneDNN optimization if not already disabled
 os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
 
+# Force CPU (Fix for Metal Mutex Locks)
+try:
+    import tensorflow as tf
+    tf.config.set_visible_devices([], 'GPU')
+except Exception:
+    pass
+
 import tensorflow as tf
 import numpy as np
 import pandas as pd
@@ -216,7 +223,8 @@ def run_inference_latest(ticker="SPY", window_size=20):
             plt.axis('off')
             plt.savefig(buf_cam, format='png', bbox_inches='tight', pad_inches=0)
             plt.close()
-            gradcam_base64 = base64.b64encode(buf_cam.getvalue()).decode('utf-8')
+            raw_b64 = base64.b64encode(buf_cam.getvalue()).decode('utf-8')
+            gradcam_base64 = f"data:image/png;base64,{raw_b64}"
             
         except Exception as e:
             print(f"Grad-CAM generation failed: {e}")

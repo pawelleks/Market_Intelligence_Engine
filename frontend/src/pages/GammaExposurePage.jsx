@@ -12,38 +12,6 @@ const GammaExposurePage = () => {
     const [availableTickers, setAvailableTickers] = useState([]); // Restore missing state
     const [refreshTrigger, setRefreshTrigger] = useState(0);      // Restore missing state
 
-    const fetchGEX = async (force = false) => {
-        setLoading(true);
-        setError(null);
-        try {
-            // Fetch GEX
-            const res = await fetch(`/api/v1/gex/latest/${ticker}${force ? '?force_refresh=true' : ''}`);
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.detail || 'Failed to fetch GEX data');
-            }
-            const json = await res.json();
-            setData(json);
-
-            // Fetch Expected Moves for Ranges
-            const resEM = await fetch('/api/v1/expected_moves/massive/latest');
-            if (resEM.ok) {
-                const jsonEM = await resEM.json();
-                if (jsonEM.tickers && jsonEM.tickers[ticker]) {
-                    setEmData(jsonEM.tickers[ticker]);
-                } else {
-                    setEmData(null);
-                }
-            }
-        } catch (err) {
-            console.error(err);
-            setError(err.message);
-            setData(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
         // Fetch allowed tickers
         const fetchTickers = async () => {
@@ -64,8 +32,56 @@ const GammaExposurePage = () => {
     }, []);
 
     useEffect(() => {
-        // Fetch GEX data whenever ticker or horizon changes (or refresh trigger)
-        fetchGEX();
+        let active = true;
+
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                // 1. Fetch GEX
+                const queryParams = ''; // we can add force refresh logic if needed later
+                const res = await fetch(`/api/v1/gex/latest/${ticker}?_t=${Date.now()}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to fetch GEX data');
+                }
+                const json = await res.json();
+
+                // 2. Fetch Expected Moves
+                const resEM = await fetch(`/api/v1/expected_moves/latest?_t=${Date.now()}`);
+                let emJson = null;
+                if (resEM.ok) {
+                    emJson = await resEM.json();
+                }
+
+                // Update State ONLY if still active
+                if (active) {
+                    setData(json);
+
+                    if (emJson && emJson.tickers && emJson.tickers[ticker]) {
+                        setEmData(emJson.tickers[ticker]);
+                    } else {
+                        setEmData(null);
+                    }
+                }
+            } catch (err) {
+                if (active) {
+                    console.error(err);
+                    setError(err.message);
+                    setData(null);
+                }
+            } finally {
+                if (active) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+
+        return () => {
+            active = false;
+        };
     }, [ticker, horizon, refreshTrigger]); // We will trigger refresh when SELECT changes manually
 
     // Prepare Data based on Horizon
@@ -139,10 +155,24 @@ const GammaExposurePage = () => {
 
     // Calculate Zoom Range (Monthly EM + 10%)
     const getZoomRange = () => {
-        // Prefer Monthly EM for consistent scale, even if viewing Weekly
-        if (!emData?.expirations?.MONTHLY) return null;
-        const m = emData.expirations.MONTHLY;
+        // Fallback strategy: Monthly -> Weekly -> ODTE
+        const m = emData?.expirations?.MONTHLY || emData?.expirations?.WEEKLY || emData?.expirations?.ODTE;
+
+        // Strict safety check: Need m object AND defined numeric ranges
+        if (!m || typeof m.upper_range !== 'number' || typeof m.lower_range !== 'number') {
+            return null;
+        }
+
         const width = m.upper_range - m.lower_range;
+
+        // Safety against zero/negative width or tiny width
+        if (width < 0.1) {
+            if (data?.spot_price && typeof data.spot_price === 'number') {
+                return [data.spot_price * 0.95, data.spot_price * 1.05];
+            }
+            return null;
+        }
+
         const buffer = width * 0.10;
         return [m.lower_range - buffer, m.upper_range + buffer];
     };
@@ -337,4 +367,40 @@ const GammaExposurePage = () => {
     );
 };
 
-export default GammaExposurePage;
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        console.error("GEX Page Error:", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: '20px', color: '#f44336', backgroundColor: '#0e1525', minHeight: '100vh' }}>
+                    <h2>Something went wrong displaying GEX.</h2>
+                    <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error && this.state.error.toString()}</pre>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
+const GammaExposurePageWrapper = () => {
+    return (
+        <ErrorBoundary>
+            <GammaExposurePage />
+        </ErrorBoundary>
+    );
+};
+
+export default GammaExposurePageWrapper;

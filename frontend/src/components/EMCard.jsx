@@ -98,7 +98,7 @@ const EMCard = ({ ticker, data, asOf, liveData, lastUpdated, onClick, isSelected
                         <span style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#fff' }}>${fmt(spot)}</span>
                     </div>
 
-                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '15px', fontWeight: 'bold' }}>EOD (yfinance)</div>
+                    <div style={{ fontSize: '12px', color: '#888', marginBottom: '15px', fontWeight: 'bold' }}>Polygon EOD</div>
                     {[
                         { label: 'ODTE', d: odte },
                         { label: 'WEEKLY', d: weekly },

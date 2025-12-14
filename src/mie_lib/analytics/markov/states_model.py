@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any, Union
 from datetime import datetime, timedelta, timezone
 import json
 import os
+
 
 import pandas as pd
 import numpy as np
@@ -13,7 +15,18 @@ import numpy as np
 from mie_lib.core.state_classification import classify_tri_state as _tri_label
 
 # Atomic parquet writer (idempotent, same-dir temp file)
-def _atomic_write_parquet(df: pd.DataFrame, path: Path):
+def _atomic_write_parquet(df: pd.DataFrame, path: Union[str, Path]) -> None:
+    """
+    Atomically write a DataFrame to a Parquet file.
+
+    Writes to a temporary file in the same directory first, then renames it
+    to the target path to ensure the file is either fully written or not present.
+    Also attempts to fsync the directory to ensure durability.
+
+    Args:
+        df: The pandas DataFrame to write.
+        path: The target file path.
+    """
     path = Path(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +50,17 @@ def _atomic_write_parquet(df: pd.DataFrame, path: Path):
 
 # Atomic JSON writer
 
-def _atomic_write_json(obj: dict, path: Path):
+def _atomic_write_json(obj: Dict[str, Any], path: Union[str, Path]) -> None:
+    """
+    Atomically write a dictionary to a JSON file.
+
+    Writes to a temporary file first, then renames to target path.
+    Ensures non-ASCII characters are preserved.
+
+    Args:
+        obj: The dictionary object to serialize.
+        path: The target file path.
+    """
     path = Path(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,11 +92,31 @@ _EPS = 5e-8  # tolerance retained for binary fallback paths
 
 
 def _threshold_decimal(threshold_bps: int) -> float:
+    """
+    Convert basis points to decimal format (e.g., 50 bps -> 0.005).
+
+    Args:
+        threshold_bps: Threshold in basis points.
+
+    Returns:
+        float: The decimal representation rounded to 10 digits.
+    """
     return round(float(int(threshold_bps)) / 10000.0, 10)
 
 
 def classify_tri_state(ret_value: float, threshold_bps: int) -> str:
-    """Return raw code 'U'|'N'|'D' using core classify_tri_state as single source of truth."""
+    """
+    Classify a return value into a tri-state code ('U', 'N', 'D').
+
+    Delegates to the core `_tri_label` function.
+    
+    Args:
+        ret_value: The return value to classify (e.g., daily percent change).
+        threshold_bps: The threshold in basis points for defining Up/Down.
+
+    Returns:
+        str: 'U' (Up), 'N' (Neutral), or 'D' (Down).
+    """
     try:
         label = _tri_label(float(ret_value), int(threshold_bps))  # 'Green'|'Neutral'|'Red'
     except Exception:
@@ -82,9 +125,19 @@ def classify_tri_state(ret_value: float, threshold_bps: int) -> str:
 
 
 def classify_binary_state(ret_value: float, threshold_bps: int) -> str:
-    """Binary mode classification: delegate to tri logic then collapse N to nearest side.
+    """
+    Classify a return value into a binary state ('U', 'D').
+
+    Binary mode classification: delegate to tri logic then collapse N to nearest side.
     We keep inclusive upper boundary semantics. If Neutral, treat as 'D' by default to
     preserve historical binary behavior unless overridden elsewhere.
+
+    Args:
+        ret_value: The return value to classify.
+        threshold_bps: The threshold in basis points.
+
+    Returns:
+        str: 'U' (Up) or 'D' (Down).
     """
     code = classify_tri_state(ret_value, threshold_bps)
     if code == "U":
@@ -93,11 +146,31 @@ def classify_binary_state(ret_value: float, threshold_bps: int) -> str:
 
 
 def classify_tri_state_display(ret_value: float, threshold_bps: int) -> str:
+    """
+    Get the display label for tri-state classification ('Green', 'Neutral', 'Red').
+
+    Args:
+        ret_value: The return value to classify.
+        threshold_bps: The threshold in basis points.
+
+    Returns:
+        str: 'Green', 'Neutral', or 'Red'.
+    """
     raw = classify_tri_state(ret_value, threshold_bps)
     return {"U": "Green", "N": "Neutral", "D": "Red"}.get(raw, "Neutral")
 
 
 def classify_binary_state_display(ret_value: float, threshold_bps: int) -> str:
+    """
+    Get the display label for binary state classification ('Green', 'Red').
+
+    Args:
+        ret_value: The return value to classify.
+        threshold_bps: The threshold in basis points.
+
+    Returns:
+        str: 'Green' or 'Red'.
+    """
     raw = classify_binary_state(ret_value, threshold_bps)
     return {"U": "Green", "D": "Red"}.get(raw, "Red")
 
@@ -105,11 +178,17 @@ def classify_binary_state_display(ret_value: float, threshold_bps: int) -> str:
 # Add allowed window mapping & helper
 _ALLOWED_WINDOWS = {"1Y":252, "2Y":504, "5Y":1260, "10Y":2520, "20Y":5040, "MAX":None}
 
-def _window_key_from_arg(arg) -> str:
-    """Normalize a window argument into canonical key.
-    Accepts:
-      - str preset (1Y,2Y,5Y,10Y,20Y,MAX)
-      - tuple(start_iso,end_iso) custom range -> CUSTOM_YYYYMMDD_YYYYMMDD
+def _window_key_from_arg(arg: Union[str, Tuple[Any, Any], List[Any]]) -> str:
+    """
+    Normalize a window argument into a canonical key string.
+
+    Args:
+        arg: The window argument. Can be:
+             - A predefined string: "1Y", "2Y", "5Y", "10Y", "20Y", "MAX".
+             - A tuple or list of (start_date, end_date) for a custom range.
+
+    Returns:
+        str: The canonical window key (e.g., "1Y", "MAX", "CUSTOM_20230101_20231231").
     """
     if isinstance(arg, str):
         key = arg.upper().strip()
@@ -129,9 +208,23 @@ def _window_key_from_arg(arg) -> str:
 FEATURES_DIR = DATA_DIR / "features"
 
 def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
-    """Build (or overwrite) states parquet for (ticker, threshold, mode).
-    Parquet path pattern: data/analytics/markov/{T}/states_thr{thr}_{mode}.parquet
-    Returns path as str.
+    """
+    Build (or overwrite) the states parquet file for a given ticker, threshold, and mode.
+    
+    It reads the features parquet file, computes state classifications for each day,
+    and writes the result to: `data/analytics/markov/{T}/states_thr{thr}_{mode}.parquet`.
+
+    Args:
+        ticker: The stock ticker symbol (e.g., 'SPY').
+        thr_bps: Threshold in basis points.
+        mode: 'tri' or 'binary'.
+
+    Returns:
+        str: The absolute path to the generated parquet file.
+    
+    Raises:
+        FileNotFoundError: If the features file does not exist.
+        ValueError: If 'ret_1d' column is missing or mode is unsupported.
     """
     t = ticker.upper().strip()
     mode = mode.lower().strip()
@@ -165,7 +258,19 @@ def build_states_from_features(ticker: str, thr_bps: int, mode: str) -> str:
 
 
 def states_for(ticker: str, thr_bps: int, mode: str) -> pd.DataFrame:
-    """Load states parquet for existing (ticker, threshold, mode)."""
+    """
+    Load the states DataFrame for a given ticker, threshold, and mode.
+
+    If the parquet file does not exist, it builds it automatically.
+
+    Args:
+        ticker: The stock ticker symbol.
+        thr_bps: Threshold in basis points.
+        mode: 'tri' or 'binary'.
+
+    Returns:
+        pd.DataFrame: DataFrame with columns ['date', 'state', 'ret_1d', ...].
+    """
     t = ticker.upper().strip()
     p = AN_MKV_DIR / t / f"states_thr{int(thr_bps)}_{mode.lower()}.parquet"
     if not p.exists():
@@ -175,10 +280,18 @@ def states_for(ticker: str, thr_bps: int, mode: str) -> pd.DataFrame:
 
 
 def states_stale(ticker: str, thr_bps: int, mode: str) -> bool:
-    """Minimal staleness check used by CLI helpers.
+    """
+    Check if the states parquet file is missing (stale).
+    
+    Used by CLI helpers to determine if a rebuild is needed.
 
-    Returns True if states parquet for (ticker, thr_bps, mode) is missing.
-    More elaborate mtime/content comparisons can be added later without breaking CLI.
+    Args:
+        ticker: The stock ticker symbol.
+        thr_bps: Threshold in basis points.
+        mode: 'tri' or 'binary'.
+
+    Returns:
+        bool: True if the file does not exist, False otherwise.
     """
     t = ticker.upper().strip()
     p = AN_MKV_DIR / t / f"states_thr{int(thr_bps)}_{mode.lower()}.parquet"
@@ -187,6 +300,16 @@ def states_stale(ticker: str, thr_bps: int, mode: str) -> bool:
 # --- Matrix derivation ---
 
 def _slice_window(df_states: pd.DataFrame, window_key: str) -> pd.DataFrame:
+    """
+    Slice the states DataFrame according to the window key.
+
+    Args:
+        df_states: The full history states DataFrame.
+        window_key: Canonical window key (e.g. "1Y", "MAX", "CUSTOM_...").
+
+    Returns:
+        pd.DataFrame: A copy of the sliced DataFrame.
+    """
     if df_states.empty:
         return df_states
     if window_key.startswith("CUSTOM_"):
@@ -207,6 +330,17 @@ def _slice_window(df_states: pd.DataFrame, window_key: str) -> pd.DataFrame:
 
 
 def _contexts(series: List[str], order: int) -> List[str]:
+    """
+    Generate the sequence of contexts (previous states) for a given Markov order.
+
+    Args:
+        series: List of state codes (e.g. ['U', 'N', ...]).
+        order: The Markov order (number of previous states to look back).
+
+    Returns:
+        List[str]: List of context strings (e.g. "U-N" for order 2).
+                   The length is len(series) - order.
+    """
     if order <= 0:
         return []
     ctx = []
@@ -217,11 +351,30 @@ def _contexts(series: List[str], order: int) -> List[str]:
 
 
 def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window_key: str) -> pd.DataFrame:
-    """Derive (or load cached) transition matrix for given configuration.
-    Cached path: data/analytics/markov/{T}/matrices/{mode}/thr{thr}/order{K}/{window_key}.parquet
-    Columns tri: mc_prob_up, mc_prob_neutral, mc_prob_down
-    Columns binary: mc_prob_up, mc_prob_down
-    Includes counts & row_sum.
+    """
+    Derive (or load cached) the transition matrix for a given configuration.
+    
+    If the matrix doesn't exist, it is computed from the states history.
+    It calculates the probability of moving to the next state given a sequence of previous states (context).
+    Uses Laplace smoothing (+1 to counts).
+
+    Cached path: `data/analytics/markov/{T}/matrices/{mode}/thr{thr}/order{K}/{window_key}.parquet`
+    
+    Returns a DataFrame with columns:
+        - `context`: The sequence of previous states (e.g., "U-D").
+        - `counts`: Total occurrences of this context.
+        - `row_sum`: Sum of probabilities (should be ~1.0).
+        - `mc_prob_up`, `mc_prob_down` (and `mc_prob_neutral` if tri-state).
+
+    Args:
+        ticker: The stock ticker symbol.
+        thr_bps: Threshold in basis points.
+        mode: 'tri' or 'binary'.
+        order: Markov order.
+        window_key: Time window key.
+
+    Returns:
+        pd.DataFrame: The transition matrix.
     """
     t = ticker.upper().strip(); mode = mode.lower().strip(); order = int(order); thr_bps = int(thr_bps)
     mdir = AN_MKV_DIR / t / "matrices" / mode / f"thr{thr_bps}" / f"order{order}"
@@ -338,8 +491,21 @@ def derive_matrix(ticker: str, thr_bps: int, mode: str, order: int, window_key: 
 # --- One-step & Multi-step helpers ---
 
 def one_step(matrix_df: pd.DataFrame, mode: str) -> pd.Series:
-    """Return average next-day probability distribution across contexts.
-    For order=1 matrix where contexts represent states, this equals mean row.
+    """
+    Return the average next-day probability distribution across all contexts.
+    
+    For an order=1 matrix where contexts represent single states, this effectively
+    calculates the steady-state or marginal probability of the next state if the
+    context distribution is uniform (which is a simplification).
+    
+    Detailed: It takes the mean of the probability columns.
+
+    Args:
+        matrix_df: The transition matrix DataFrame.
+        mode: 'tri' or 'binary'.
+
+    Returns:
+        pd.Series: A Series with the mean probability for each state (e.g., mc_prob_up).
     """
     if matrix_df is None or matrix_df.empty:
         return pd.Series(dtype=float)
@@ -352,11 +518,20 @@ def one_step(matrix_df: pd.DataFrame, mode: str) -> pd.Series:
 
 
 def multi_step(matrix_df: pd.DataFrame, horizons: List[int], mode: str) -> pd.DataFrame:
-    """Compute multi-step probabilities for a first-order Markov chain.
+    """
+    Compute multi-step probabilities (predictive bands) for a first-order Markov chain.
 
-    matrix_df should contain columns mc_prob_up/down and optional mc_prob_neutral.
-    Horizons are positive integers. Returns DataFrame indexed by horizon with
-    one column per state, each row normalized to 1.
+    It extracts the transition matrix P from the input DataFrame and computes P^h for each horizon h.
+    The result assumes a uniform starting distribution over the states.
+
+    Args:
+        matrix_df: The transition matrix DataFrame. Must contain prob columns.
+        horizons: List of integer horizons (e.g. [1, 5, 10, 20]).
+        mode: 'tri' or 'binary'.
+
+    Returns:
+        pd.DataFrame: DataFrame indexed by horizon, with columns for each state probability.
+                      Each row sums to 1.
     """
 
     if matrix_df is None or matrix_df.empty:

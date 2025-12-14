@@ -56,9 +56,15 @@ class GEXEngine:
             expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
             today = date.today()
             delta = (expiry_date - today).days
-            # If expiration is today, use a small fraction to avoid div by zero (e.g. 0.5/365)
-            if delta <= 0:
+            
+            # Explicitly handle expired options
+            if delta < 0:
+                return -1.0 # Expired
+                
+            # If expiration is today, use a small fraction (0DTE)
+            if delta == 0:
                 return 1.0 / 365.0 / 2.0 # Half a day
+                
             return delta / 365.0
         except Exception:
             return 0.0
@@ -100,6 +106,11 @@ class GEXEngine:
             # 3. Iterate Expirations and Calculate GEX
             for expiry in expirations:
                 T = self._get_time_to_expiration(expiry)
+                
+                # Skip expired options
+                if T < 0:
+                    continue
+                    
                 days_to_expiry = T * 365.0
                 
                 # Determine Group (Weekly vs Monthly)

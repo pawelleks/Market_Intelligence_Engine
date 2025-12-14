@@ -475,7 +475,11 @@ def handle_build_gex_daily(args):
     
     logger = logging.getLogger(__name__)
     
-    target_date = args.date if args.date else date.today().strftime("%Y-%m-%d")
+    today_val = date.today()
+    if args.date and args.date.lower() == "today":
+        target_date = today_val.strftime("%Y-%m-%d")
+    else:
+        target_date = args.date if args.date else today_val.strftime("%Y-%m-%d")
     tickers = []
     if args.tickers == "@config":
         tickers = _load_scope_tickers("Gamma_Exposure")
@@ -487,63 +491,76 @@ def handle_build_gex_daily(args):
     if not tickers:
         tickers = _load_yaml_tickers()
             
-    logger.info(f"Starting Offline GEX Build for {target_date} for {len(tickers)} tickers...")
+    logger.info(f"Starting GEX Build for {target_date} for {len(tickers)} tickers. Mode: {'ONLINE' if args.online else 'OFFLINE'}")
     
     loader = MassiveOptionsLoader()
     engine = GEXEngine()
     
-    # 1. Load Data
-    logger.info(f"Loading options flat file for {target_date}...")
-    df_all = loader.load_day_aggregates(target_date, tickers)
-    
-    if df_all.empty:
-        logger.error(f"FATAL: No CSV data found for {target_date}. Please download Massive files or run 'fetch-options-snapshot'.")
-        return 1
+    # 1. Load Data (Offline Mode)
+    df_all = pd.DataFrame()
+    if not args.online:
+        logger.info(f"Loading options flat file for {target_date}...")
+        df_all = loader.load_day_aggregates(target_date, tickers)
+        
+        if df_all.empty:
+            logger.warning(f"No CSV data found for {target_date}. Switching to ONLINE mode if possible, otherwise this is a failure.")
+            # Optional: Automatic fallback? For now, fail unless --online is explicitly requested, or maybe imply it?
+            # User request: "pls check...". Better to fail clearly if not asked.
+            # But here I am fixing it for the user. I'll make it fail if not --online, to avoid accidental API spam.
+            if not args.online:
+                 logger.error("FATAL: No CSV data. Use --online to fetch from Yahoo Finance.")
+                 return 1
         
     # 2. Process Each Ticker
     for ticker in tickers:
         try:
-            # Filter from CSV
-            df_ticker = pd.DataFrame()
-            if not df_all.empty:
-                 df_ticker = df_all[df_all['underlying_ticker'] == ticker]
+            candidate_data = {}
             
-            # STRICT MODE: If CSV is empty, we SKIP. No YFinance fallback.
-            if df_ticker.empty:
-                logger.warning(f"Skipping {ticker}: No data in CSV.")
-                continue
-
-            # 1. Determine Spot Price (Needed for CSV calculation)
-            spot = None
-            try:
-                # Override if provided by CLI (Simulation Mode)
-                if getattr(args, "spot", None) is not None:
-                     spot = float(args.spot)
-                     logger.info(f"Using manual spot override: {spot}")
-                else:
-                    # Only fetch spot if we have data to process
-                    yf_t = yf.Ticker(ticker)
-                    try:
-                        spot = yf_t.fast_info['last_price']
-                    except:
-                        # Fallback to history
-                        hist = yf_t.history(period="1d")
-                        if not hist.empty:
-                            spot = hist['Close'].iloc[-1]
-            except Exception as e:
-                logger.warning(f"Could not fetch spot for {ticker}: {e}")
-                continue
-
-            # 2. Generate Candidate from CSV
-            if spot:
-                candidate_data = engine.calculate_gex_from_frame(ticker, df_ticker, spot)
-                if candidate_data:
-                    save_gex_profile(ticker, candidate_data)
-                    logger.info(f"Saved GEX for {ticker} using CSV data ({len(df_ticker)} rows).")
-                else:
-                    logger.warning(f"Failed to calculate GEX for {ticker} (CSV data present but calc failed).")
+            # ONLINE MODE
+            if args.online:
+                logger.info(f"Fetching GEX for {ticker} (Online)...")
+                candidate_data = engine.fetch_and_calculate_gex(ticker)
+                
+            # OFFLINE MODE
             else:
-                 logger.warning(f"Skipping {ticker}: No Spot Price available.")
+                # Filter from CSV
+                df_ticker = pd.DataFrame()
+                if not df_all.empty:
+                     df_ticker = df_all[df_all['underlying_ticker'] == ticker]
+                
+                if df_ticker.empty:
+                    logger.warning(f"Skipping {ticker}: No data in CSV.")
+                    continue
+
+                # Determine Spot
+                spot = None
+                try:
+                    if getattr(args, "spot", None) is not None:
+                         spot = float(args.spot)
+                    else:
+                        # Only fetch spot if we have data to process
+                        yf_t = yf.Ticker(ticker)
+                        try:
+                            spot = yf_t.fast_info['last_price']
+                        except:
+                            hist = yf_t.history(period="1d")
+                            if not hist.empty:
+                                spot = hist['Close'].iloc[-1]
+                except Exception as e:
+                    logger.warning(f"Could not fetch spot for {ticker}: {e}")
+                    continue
+
+                if spot:
+                    candidate_data = engine.calculate_gex_from_frame(ticker, df_ticker, spot)
+                else:
+                     logger.warning(f"Skipping {ticker}: No Spot Price available.")
+
+            # SAVE RESULT
+            if candidate_data:
+                save_gex_profile(ticker, candidate_data)
+                logger.info(f"Saved GEX for {ticker}.")
+            else:
+                logger.warning(f"Failed to calculate GEX for {ticker}.")
             
         except Exception as e:
             logger.error(f"Failed to build GEX for {ticker}: {e}")
@@ -637,7 +654,8 @@ def handle_fetch_options_snapshot(args):
         final_df.to_csv(output_file, index=False)
         logger.info(f"Saved Polygon snapshot to {output_file} ({len(final_df)} rows).")
     else:
-        logger.warning("No data fetched.")
+        logger.error("No data fetched for any ticker. Aborting.")
+        return 1
     
     return 0
 
@@ -833,6 +851,37 @@ def handle_build_minervini_daily(args):
         # Let's catch and log.
     return 0
 
+def handle_build_tsmom_daily(args):
+    """
+    Run Daily TSMOM Update.
+    """
+    from mie_lib.analytics.tsmom.engine import run_tsmom_daily_update
+    from datetime import date, datetime
+    
+    target_date = None
+    if args.date:
+        target_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        
+    # Parse tickers if provided
+    tickers = None
+    if args.tickers:
+        if args.tickers == "@config":
+             # Will be handled by engine if passed None or we load here?
+             # Engine handles it if None is passed (defaults to config load).
+             pass
+        else:
+             tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+
+    print(f"Running TSMOM Update (Date={target_date or 'Today'})...")
+    res = run_tsmom_daily_update(asof_date=target_date, lookback_days=args.lookback, tickers=tickers, backfill=args.backfill)
+    
+    if res.get("status") == "success":
+        print(f"TSMOM Success: Processed {res['processed']} tickers, Generated {res['signals_generated']} signals.")
+        return 0
+    else:
+        print(f"TSMOM Failed: {res.get('message')}")
+        return 1
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -857,6 +906,7 @@ def build_parser():
     p_gex.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
     p_gex.add_argument("--tickers", type=str, default="@config")
     p_gex.add_argument("--spot", type=float, help="Manual spot price override")
+    p_gex.add_argument("--online", action="store_true", help="Use online data fetch (yfinance) instead of CSV")
     p_gex.set_defaults(func=handle_build_gex_daily)
 
     p_fetch_gex = sub.add_parser("fetch-options-snapshot", help="Fetch fresh options snapshot from YFinance (Optional)")
@@ -875,6 +925,8 @@ def build_parser():
     p_gaf_daily.add_argument("--window", type=int, default=20, help="Window size")
     p_gaf_daily.set_defaults(func=handle_build_gaf_daily)
 
+    # Analyze EM Reliability
+    sub.add_parser("analyze-expected-moves-reliability", help="Compute Expected Moves Reliability Stats")
 
     # --- HMM Backtest (New) ---
     p_backtest_hmm = sub.add_parser("backtest-hmm", help="Run Grid Search Optimization for HMM")
@@ -1157,6 +1209,13 @@ def build_parser():
     p_gaf_train.add_argument("--epochs", type=int, default=20)
     
 
+
+    p_tsmom = sub.add_parser("build-tsmom-daily", help="Build Daily TSMOM Dashboard Data")
+    p_tsmom.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
+    p_tsmom.add_argument("--tickers", type=str, default=None)
+    p_tsmom.add_argument("--lookback", type=int, default=252)
+    p_tsmom.add_argument("--backfill", action="store_true", help="Generate signals from full history")
+    p_tsmom.set_defaults(func=handle_build_tsmom_daily)
 
     return parser
 
@@ -1626,7 +1685,7 @@ def main(argv=None):
         if not tickers:
             print("build-seasonality-facts: no tickers resolved from config or args")
             sys.exit(2)
-        from scripts.seasonality.build_facts import build_facts_for_ticker, load_seasonality_config
+        from mie_lib.analytics.seasonality.build_facts import build_facts_for_ticker, load_seasonality_config
         cfg = load_seasonality_config()
         horizons = cfg.get("LOOKBACK_WINDOWS", [5,10,20,30,50,"ALL"])
         rows = []
@@ -1643,7 +1702,7 @@ def main(argv=None):
                 tickers = []
         else:
             tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-        from scripts.seasonality.update import update_seasonality
+        from mie_lib.analytics.seasonality.update import update_seasonality
         out = update_seasonality(tickers, since=getattr(args, "since", None), dry_run=getattr(args, "dry_run", False))
         print(json.dumps([str(p) for p in out]))
         sys.exit(0)
@@ -1761,6 +1820,13 @@ def main(argv=None):
         except Exception as e:
             print(f"WARN: build-gex-daily failed: {e}")
 
+        # TSMOM DAILY UPDATE
+        try:
+             _run([py, mie, "build-tsmom-daily", "--tickers", "@config"])
+        except Exception as e:
+             print(f"WARN: build-tsmom-daily failed: {e}")
+
+
         print("✅ Done.")
         sys.exit(0)
     elif args.command == "rebuild-reliability":
@@ -1819,6 +1885,11 @@ def main(argv=None):
         ticker = args.ticker or "SPY"
         print(f"Developing GAF Prediction for {ticker}...")
         run_inference_latest(ticker=ticker)
+        sys.exit(0)
+    elif args.command == "analyze-expected-moves-reliability":
+        from mie_lib.analytics.expected_moves.reliability_processor import process_reliability
+        print("Running Expected Moves Reliability Analysis...")
+        process_reliability()
         sys.exit(0)
     else:
         parser.print_help()

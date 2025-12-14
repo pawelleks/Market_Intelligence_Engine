@@ -16,8 +16,6 @@ from mie_lib.analytics.expected_moves.core import (
 )
 from mie_lib.analytics.expected_moves.data_ingest import (
     fetch_vix1d_close,
-)
-from mie_lib.analytics.expected_moves.data_ingest_polygon import (
     get_target_expirations,
     fetch_option_chain,
     fetch_underlying_close,
@@ -45,41 +43,17 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
         
     LOG.info(f"Starting Expected Moves build for {as_of} tickers={tickers}")
     
-    # 0. Global Setup: Determine Target Dates for Output vs Input
-    # Expected Move Standard:
-    # - Output Date: Today (or Next Session) -> 'as_of'
-    # - Input Data: Previous Close (EOD) -> 'spot_date'
-    
-    from mie_lib.utils.trading_calendar import get_previous_trading_day
-    
-    # Calculate Expirations first to know the context (0DTE rollover)
-    odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
-    
-    # The reference "Spot Date" is the previous trading day relative to the 0DTE session.
-    spot_date = get_previous_trading_day(odte_date)
-    
-    LOG.info(f"Context: AsOf={as_of} -> ODTE={odte_date} -> SpotDate (Data Source)={spot_date}")
-
-    # 1. Fetch Global VIX1D (using Spot Date / EOD)
-    vix1d_val = fetch_vix1d_close(spot_date)
+    # 1. Fetch Global VIX1D
+    vix1d_val = fetch_vix1d_close(as_of)
     confidence_score = 0
     if vix1d_val is not None:
         confidence_score = calculate_confidence_score(vix1d_val)
-        LOG.info(f"VIX1D ({spot_date}): {vix1d_val}, Confidence Score: {confidence_score}")
+        LOG.info(f"VIX1D: {vix1d_val}, Confidence Score: {confidence_score}")
     else:
-        # Fallback to as_of if spot_date failed? (Rare)
-        LOG.warning(f"VIX1D not available for {spot_date}, trying {as_of}...")
-        vix1d_val = fetch_vix1d_close(as_of)
-        
-        if vix1d_val is not None:
-             confidence_score = calculate_confidence_score(vix1d_val)
-             LOG.info(f"VIX1D ({as_of}): {vix1d_val}, Confidence Score: {confidence_score}")
-        else:
-             LOG.warning("VIX1D not available, defaulting confidence to 0")
+        LOG.warning("VIX1D not available, defaulting confidence to 0")
         
     latest_results = {
         "as_of": as_of.isoformat(),
-        "source": "Polygon",
         "vix1d": vix1d_val,
         "confidence_score": confidence_score,
         "tickers": {}
@@ -87,7 +61,7 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
     
     for ticker in tickers:
         try:
-            _process_ticker(ticker, as_of, spot_date, odte_date, weekly_date, monthly_date, vix1d_val, confidence_score, latest_results)
+            _process_ticker(ticker, as_of, vix1d_val, confidence_score, latest_results)
         except Exception as e:
             LOG.error(f"Failed to process {ticker}: {e}")
             latest_results["tickers"][ticker] = {"error": str(e)}
@@ -130,27 +104,40 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
 
 def _process_ticker(
     ticker: str, 
-    as_of: date,
-    spot_date: date,
-    odte_date: date,
-    weekly_date: date,
-    monthly_date: date,
+    as_of: date, 
     vix1d_val: Optional[float], 
     confidence_score: int,
     latest_results: Dict[str, Any]
 ):
+    # 3. Determine Expirations First
+    # We need ODTE date to determine the reference spot date
+    odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
+    
     # Log determined dates
     LOG.info(f"{ticker} | ODTE: {odte_date} | Weekly: {weekly_date} | Monthly: {monthly_date}")
     
-    # 2. Fetch Underlying Price (from Spot Date)
-    spot_price = fetch_underlying_close(ticker, spot_date)
+    # 2. Fetch Underlying Price
+    # Spot Price should be the Close of the PREVIOUS trading day relative to the 0DTE session date.
+    # Why? Because Expected Move is calculated from the previous close.
+    # If ODTE is Today, spot is Yesterday's close.
+    # If ODTE is Next Day, spot is Today's close (or Yesterday's if Today is a holiday/weekend).
     
+    # We use get_previous_trading_day relative to ODTE date unless we are MID-SESSION? 
+    # Actually, Expected Move is usually "overnight" or "session" range. 
+    # Traditionally, we anchor to the previous close.
+    # If we are live in session, we might want live spot, but the request was "based on previous EOD prices".
+    # So yes, previous trading day relative to trading session (ODTE date).
+    
+    from mie_lib.utils.trading_calendar import get_previous_trading_day
+    spot_date = get_previous_trading_day(odte_date)
+    
+    spot_price = fetch_underlying_close(ticker, spot_date)
     if spot_price is None:
-         # Fallback to as_of
-         if spot_date != as_of:
+        # Fallback: try as_of if different
+        if spot_date != as_of:
              LOG.warning(f"Could not fetch spot for {spot_date}, trying {as_of}")
              spot_price = fetch_underlying_close(ticker, as_of)
-
+             
     if spot_price is None:
         raise ValueError(f"Could not fetch spot price for {ticker}")
         
@@ -165,8 +152,8 @@ def _process_ticker(
     for expiry_type, expiry_date in [("ODTE", odte_date), ("WEEKLY", weekly_date), ("MONTHLY", monthly_date)]:
         days_to_expiry = (expiry_date - as_of).days
         
-        # Fetch Chain (Using Spot Date/EOD Data for input)
-        chain = fetch_option_chain(ticker, expiry_date, spot_date, spot_price=spot_price)
+        # Fetch Chain
+        chain = fetch_option_chain(ticker, expiry_date, as_of)
         
         if chain.empty:
             LOG.warning(f"No chain found for {ticker} {expiry_type} ({expiry_date})")

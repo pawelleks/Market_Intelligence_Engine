@@ -88,6 +88,7 @@ const DataPipelines = () => {
             "build-hmm": "Analytics: Build HMM",
             "build-minervini": "Analytics: Minervini",
             "build-gaf-daily": "Analytics: GAF Prediction (AI)",
+            "build-tsmom-daily": "Analytics: TSMOM (Momentum)",
             "rebuild-reliability": "🎯 Update Reliability (Exp. Moves + Snapshots)"
         };
         return map[job] || job;

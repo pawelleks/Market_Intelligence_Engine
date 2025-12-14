@@ -27,6 +27,7 @@ class JobRunner:
         "build-hmm": ["python", "-m", "mie_lib.cli.mie", "build-hmm-daily", "--tickers", "@config"],
         "build-minervini": ["python", "-m", "mie_lib.cli.mie", "build-minervini-daily", "--tickers", "@config"],
         "build-gaf-daily": ["python", "-m", "mie_lib.cli.mie", "build-gaf-daily"],
+        "build-tsmom-daily": ["python", "-m", "mie_lib.cli.mie", "build-tsmom-daily", "--tickers", "@config"],
         "rebuild-reliability": ["python", "-m", "mie_lib.cli.mie", "rebuild-reliability"],
     }
 

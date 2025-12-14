@@ -122,13 +122,17 @@ def build_hmm_snapshots(
             if stage_dir.exists():
                 shutil.rmtree(stage_dir, ignore_errors=True)
 
-        files_copied[ticker] = _list_files_relative(dest_dir)
-        succeeded.append(ticker)
-        LOG.info(
-            "hmm snapshot complete ticker=%s files=%s",
-            ticker,
-            len(files_copied[ticker]),
-        )
+        if dest_dir.exists():
+            files_copied[ticker] = _list_files_relative(dest_dir)
+            LOG.info(
+                "hmm snapshot complete ticker=%s files=%s",
+                ticker,
+                len(files_copied[ticker]),
+            )
+        else:
+            LOG.error("Snapshot destination directory missing after move: %s", dest_dir)
+            files_copied[ticker] = []
+            succeeded.remove(ticker) # Remove from succeeded list if move failed effectively
 
     metadata = {
         "generated_at": generated_at,

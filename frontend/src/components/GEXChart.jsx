@@ -235,7 +235,7 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
                     color: '#aaa',
                     gridcolor: '#333',
                     zerolinecolor: '#666',
-                    range: yAxisRange, // Apply dynamic zoom
+                    range: yAxisRange || undefined, // Apply dynamic zoom safely
                     // automargin: true
                 },
                 legend: {

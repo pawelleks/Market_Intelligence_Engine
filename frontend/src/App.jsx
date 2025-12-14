@@ -25,6 +25,7 @@ import GammaExposurePage from './pages/GammaExposurePage';
 import GAFAnalysisPage from './pages/GAFAnalysisPage';
 import HMMBacktestPage from './pages/HMMBacktestPage';
 import DataPipelines from './pages/DataPipelines';
+import TsmomDashboardPage from './pages/TsmomDashboardPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -393,6 +394,7 @@ function App() {
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/reliability" style={{ color: '#d7e3f3', textDecoration: 'none' }}>EM Reliability</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/tsmom" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Time Series Momentum (TSMOM)</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/scanner/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Scanner</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
@@ -489,6 +491,7 @@ function App() {
                 element={<GAFAnalysisPage />}
               />
               <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
+              <Route path="/analysis/tsmom" element={<TsmomDashboardPage />} />
               <Route path="/system/pipelines" element={<DataPipelines />} />
             </Routes>
           </main>

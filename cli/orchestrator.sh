@@ -36,7 +36,7 @@ python -m mie_lib.cli.mie update-raw >> "${LOG_FILE}" 2>&1
 log "update-raw completed successfully."
 
 log "Running fetch-options-snapshot (Fetching daily GEX data)..."
-python -m mie_lib.cli.mie fetch-options-snapshot || echo "Options fetch warning" >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie fetch-options-snapshot
 log "fetch-options-snapshot completed successfully."
 
 # 3. Feature Engineering Phase
@@ -67,7 +67,7 @@ log "build-hmm-snapshots completed."
 
 # 6. Update GEX Data
 log "Running build-gex-daily..."
-python -m mie_lib.cli.mie build-gex-daily --tickers @config >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-gex-daily --date "${TODAY}" --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-gex-daily completed."
 
 # 7. Update Expected Moves

@@ -6,7 +6,7 @@ This document summarizes the analytics modules and their artifacts. It does not 
 
 - Package: `mie_lib.analytics.markov`
 - Public API: `MarkovConfig`, `build_markov_for_ticker`, `load_markov_matrix_grid`, `get_markov_features_alignment`, `load_features_for_markov`
-- Helpers/shims: `mie_lib.analytics.markov.aggregation` exposes `aggregate_to_state_matrix`, `select_context_row`, `compute_multi_horizon_probs` for page/tests compatibility.
+- Helpers/shims: `mie_lib.analytics.markov.aggregation` exposes `aggregate_to_state_matrix`, `select_context_row`, `compute_multi_horizon_probs` for API/tests compatibility.
 
 ### Outputs (per ticker)
 - `states.parquet` — daily classified states and context (columns include `mc_state_today`, `mc_state_window`)
@@ -39,7 +39,7 @@ Parquet files for specific `(state_mode, threshold_bps, order, window)`:
 
 ## Usage Notes
 
-- Streamlit pages must not recompute analytics; they read these artifacts.
+- The API/Frontend must not recompute analytics; endpoints serve these precomputed artifacts.
 - Path helpers in `mie_lib.utils.paths` should be used by library code when constructing paths.
 
 ## Markov Chain Analysis Endpoints

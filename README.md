@@ -1,86 +1,89 @@
-Market Intelligence Engine
+# Market Intelligence Engine (MIE)
 
-- Scaffold only: initial project structure following `docs/CORE/ARCHITECT_BIBLE.md`.
+A high-performance market analytics platform combining traditional quantitative models (Markov, HMM) with advanced Deep Learning (GAF-CNN) to provide actionable market intelligence.
 
-## Environment setup
+## Architecture
 
-Use a virtual environment and install the package in editable mode so tests and pages import `mie_lib` correctly.
+The project follows a modern, containerized microservices architecture:
 
+-   **Frontend**: React (Vite) + Tailwind CSS + Recharts/Plotly (Port 5173).
+-   **Backend**: FastAPI (Python) serving analytics endpoints (Port 8000).
+-   **Scheduler**: background service managing data pipelines and daily builds.
+-   **Services**: All components are orchestrated via **Docker Compose**.
+
+## Features
+
+-   **Markov Market States**: Statistical analysis of market regimes (Up/Down/Neutral) using transition matrices.
+-   **Hidden Markov Models (HMM)**: Unsupervised learning to detect hidden market regimes (Volatile/Trending).
+-   **GAF Analysis**: Convolutional Neural Networks (CNN) applied to Gramian Angular Fields for visual pattern recognition.
+-   **Seasonality**: Historical seasonal trend analysis (daily/monthly).
+-   **Reliability**: Expected moves and win-rate tracking.
+
+## Quick Start (Docker)
+
+The recommended way to run the full application stack is via Docker.
+
+### 1. Start Services
+```bash
+docker-compose up -d --build
+```
+This starts:
+-   `mie-web` (Frontend): http://localhost:5173
+-   `mie-api` (Backend): http://localhost:8000
+-   `mie-cron` (Scheduler): Runs daily tasks at 22:00 UTC.
+
+### 2. Verify Status
+```bash
+docker-compose ps
+```
+
+### 3. Stop Services
+```bash
+docker-compose down
+```
+
+## CLI Usage (Python)
+
+For development or manual data operations, you can use the `mie` CLI tool.
+(Note: Ensure you are in the python virtual environment)
+
+```bash
+# Main entrypoint
+python -m mie_lib.cli.mie --help
+
+# Rebuild everything (Raw -> Features -> Analytics)
+python -m mie_lib.cli.mie rebuild-everything
+
+# Update daily data
+python -m mie_lib.cli.mie update-everything
+
+# Train GAF Model
+python -m mie_lib.cli.mie train-gaf --ticker SPY --epochs 20
+```
+
+## Development Setup (Local)
+
+If you wish to develop without Docker:
+
+### Backend
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -U pip
 pip install -e .
 pip install -r requirements.txt
+uvicorn src.mie_lib.api.app:app --reload --port 8000
 ```
 
-Run tests:
-
+### Frontend
 ```bash
-pytest -q
-```
-
-This README is plain text per project guidelines.
-
-## UI quickstart (dark-only scaffold)
-
-Precomputed files are expected under `data/` as produced by the offline pipelines.
-
-Run pages locally:
-
-- `streamlit run app/pages/01_Market_Regime_Dashboard.py`
-- `streamlit run app/pages/02_Regime_Research_Lab.py`
-- `streamlit run app/pages/03_Alpha_Signals_Lab.py`
-- `streamlit run app/pages/04_Data_Control_Panel.py`
-
-## Running Streamlit pages
-
-Run from the repository root so absolute imports (`from app.ui ...`) resolve correctly:
-
-- `streamlit run app/pages/01_Market_Regime_Dashboard.py`
-- `streamlit run app/pages/02_Regime_Research_Lab.py`
-- `streamlit run app/pages/03_Alpha_Signals_Lab.py`
-- `streamlit run app/pages/04_Data_Control_Panel.py`
-
-Notes:
-- The `app/` directory is a Python package (with `__init__.py`).
-- Pages include a safe file-relative path shim to handle IDE executions where CWD may differ.
-
-## Multipage app (recommended)
-
-Run the multipage UI from the repository root:
-
-- `streamlit run app/Home.py`
-
-Note: launching an individual page directly (e.g., a file under `app/pages/`) will bypass the multipage sidebar.
-
-Notes:
-- Theming comes from `config/ui.yml` and is loaded via `app.ui.theme.get_tokens()`.
-- Pages render lightweight placeholders and show warnings if files are missing.
-- No heavy compute runs in the UI; all data must be precomputed and saved (Parquet primary, CSV as needed).
-
-Important:
-- Pages must live under `app/pages/`.
-- When using `st.page_link` from `app/Home.py`, use paths relative to the entrypoint folder, e.g., `"pages/01_Market_Regime_Dashboard.py"`.
-
-## Optional dependencies
-
-Some visuals (e.g., heatmaps on V2 Markov page) can use Plotly if installed. To add:
-
-```bash
-pip install plotly
+cd frontend
+npm install
+npm run dev
 ```
 
 ## Documentation
 
-Canonical documentation lives under `docs/`:
-- docs/CORE/ARCHITECT_BIBLE.md — Master architecture document
-- docs/CORE/ANALYTICS_REFERENCE.md — Markov, HMM, Seasonality outputs
-- docs/CORE/DATA_REFERENCE.md — Data directories and file patterns
-- docs/CORE/CLI_REFERENCE.md — Command-line and scripts reference
-- docs/DEVELOPMENT/DEV_GUIDE.md — Environment, tests, and running the app
-- docs/DEVELOPMENT/CONTRIBUTING.md — Contributing guidelines
-- docs/UI_SYSTEM/ — UI specifications (v2)
-- docs/CHANGELOG.md — Documentation changes
-
-Legacy drafts/specs are preserved under `docs/legacy/` (marked for deletion after 2026-05-14).
+Detailed documentation is available in `docs/`:
+-   `docs/CORE/ARCHITECT_BIBLE.md`: System Architecture.
+-   `docs/CORE/CLI_REFERENCE.md`: Full CLI command reference.
+-   `docs/DEVELOPMENT/`: Developer guides and standards.

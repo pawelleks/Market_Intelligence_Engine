@@ -1,71 +1,77 @@
 # CLI Reference
 
-This reference captures typical command patterns and expected effects. Where commands are not present, prefer the scripts under `scripts/` and consult `developer_commands_cheatsheet.md`.
+This reference captures typical command patterns for the `mie_lib` CLI.
+All commands should be run as a module: `python -m mie_lib.cli.mie <command>`.
 
-Note: If `cli/mie.py` is not present, use the `scripts/*.sh` or Python scripts under `scripts/` to perform rebuilds and validations.
+## Main Pipelines
 
-## Features
+- **Rebuild Everything (Full Reset)**
+  Destroys (or overwrites) features and analytics with a fresh build.
+  ```bash
+  python -m mie_lib.cli.mie rebuild-everything
+  ```
 
-- Build features (full):
-```
-python scripts/rebuild_all_from_scratch.py
-# Or
-python scripts/rebuild_all_analytics.py
-```
+- **Update Everything (Daily)**
+  Incremental update of raw data, features, and analytics (Markov, HMM).
+  ```bash
+  python -m mie_lib.cli.mie update-everything
+  ```
 
-- Update features (lookback):
-```
-python scripts/rebuild_all_analytics.py --lookback 90
-```
+## Individual Modules
 
-## Markov
+### Features
+- Update features (incremental):
+  ```bash
+  python -m mie_lib.cli.mie build-features --mode update --lookback 90
+  ```
 
-- Ensure Markov matrices available for a ticker and window (if a coordinating script exists):
-```
-python scripts/rebuild_all_analytics.py --markov-only --tickers SPY --windows 1Y 2Y 5Y
-```
+### Markov
+- Build specific Markov output:
+  ```bash
+  python -m mie_lib.cli.mie build-markov --ticker SPY --state-mode tri --threshold-bps 10 --order 2 --window 1Y
+  ```
+- Build Grid (Batch):
+  ```bash
+  python -m mie_lib.cli.mie build-markov-grid --tickers SPY,QQQ
+  ```
 
-- List produced matrices:
-```
-ls data/analytics/markov/SPY/matrices/*/*/2Y*
-```
+### HMM
+- Build HMM (Standardized):
+  ```bash
+  python -m mie_lib.cli.mie build-hmm --ticker SPY --states 2 --window-years 5
+  ```
 
-## HMM
+### Seasonality
+- Build/refresh seasonality facts:
+  ```bash
+  python -m mie_lib.cli.mie build-seasonality-facts
+  ```
 
-- Build standardized HMM paths if a script exists in `scripts/`:
-```
-python scripts/rebuild_all_analytics.py --hmm-only --tickers SPY --windows 5 --states 2
-```
+### Minervini Scanner
+- Build daily snapshot:
+  ```bash
+  python -m mie_lib.cli.mie build-minervini-daily --date 2024-01-01
+  ```
 
-## Seasonality
+### GAF (Deep Learning)
+- Train Model:
+  ```bash
+  python -m mie_lib.cli.mie train-gaf --ticker SPY --epochs 20
+  ```
+- Run Inference:
+  ```bash
+  python -m mie_lib.cli.mie build-gaf-daily --ticker SPY
+  ```
 
-- Build seasonality base per ticker if a script exists:
-```
-python scripts/fix_seasonality_schema.py --rebuild SPY QQQ
-python scripts/check_seasonality_integrity.py
-```
+## Validation & Reliability
 
-## Validation
+- Data Integrity Check:
+  ```bash
+  python -m mie_lib.cli.mie validate-raw
+  ```
 
-- Data integrity:
-```
-python scripts/check_data_integrity.py
-```
-
-- Seasonality alignment:
-```
-python scripts/validate_seasonality_alignment.py
-```
-
-## Streamlit
-
-- Multipage app:
-```
-streamlit run app/Home.py
-```
-
-- Individual pages:
-```
-streamlit run app/pages/01_Markov_Chain.py
-```
+- Reliability Snapshot:
+  ```bash
+  python -m mie_lib.cli.mie rebuild-reliability
+  ```
 

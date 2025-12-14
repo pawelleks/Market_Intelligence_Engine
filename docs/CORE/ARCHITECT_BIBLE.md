@@ -1,803 +1,138 @@
-# ARCHITECT_BIBLE — Market Intelligence Engine Architecture
+# ARCHITECT_BIBLE — Market Intelligence Engine (MIE) Architecture
 
-**Status**: Authoritative architecture document (supersedes all prior drafts)  
-**Last Updated**: 2025-11-14  
+**Status**: Authoritative architecture document  
+**Last Updated**: 2025-12-12  
 **Scope**: System design, principles, data flow, module structure, and invariants
 
-**Related Documentation**:
-- [`ANALYTICS_REFERENCE.md`](ANALYTICS_REFERENCE.md) — Complete analytics engine reference
-- [`DATA_REFERENCE.md`](DATA_REFERENCE.md) — Data schemas and storage patterns
-- [`CLI_REFERENCE.md`](CLI_REFERENCE.md) — Command-line interface documentation
-- [`../DEVELOPMENT/DEV_GUIDE.md`](../DEVELOPMENT/DEV_GUIDE.md) — Developer setup and workflows
-- [`../UI_SYSTEM/UI_README_v2.md`](../UI_SYSTEM/UI_README_v2.md) — UI system overview
+---
+
+## 1. System Overview
+
+MIE is a **containerized market analytics platform** designed to provide diverse market intelligence through rigorous statistical and machine learning models. It follows a **Microservices Architecture** orchestrated by Docker Compose.
+
+### Core Philosophy
+1.  **Offline-First Data Layer**: Heavy compute (Markov, HMM, GAF) happens in background pipelines, not on user request. API serves precomputed JSON/Parquet artifacts.
+2.  **Service Isolation**: Frontend, Backend, and Scheduler are isolated containers.
+3.  **Deterministic Pipelines**: Data ingestion and analytics generation are idempotent and reproducible.
+4.  **Modern Stack**: React (Vite) for UI, FastAPI for API, Python for Data Engineering.
 
 ---
 
-## Quick Reference (High-Level Overview)
+## 2. Technology Stack & Components
 
-The Market Intelligence Engine (MIE) is an **offline-first analytics stack**:
-- **Data layers**: `data/` (raw → features → analytics → UI consumption)
-- **Library**: `mie_lib` provides reusable modules (analytics, utilities, page shims)
-- **UI**: Streamlit app (`app/`) reads precomputed artifacts and renders pages
-- **Scripts**: Batch processing (`scripts/`) creates/updates artifacts; Streamlit does no heavy compute
+### 2.1 Backend (`mie-api`)
+-   **Framework**: FastAPI (Python)
+-   **Role**: Serves analytics data, historical prices, and app configuration to the frontend via REST endpoints.
+-   **Port**: 8000
+-   **Key Libraries**: `pandas`, `numpy`, `fastapi`, `pydantic`.
 
-**Key design rules:**
-- Offline-first: Streamlit reads Parquet/JSON only; no network calls
-- Deterministic writes: analytics builders write idempotent files with atomic replace
-- Stable API: shims and re-exports keep `mie_lib` imports stable across pages/tests
+### 2.2 Frontend (`mie-web`)
+-   **Framework**: React (Vite)
+-   **Role**: Interactive dashboard for visualizing market regimes, signals, and charts.
+-   **Port**: 5173
+-   **Key Libraries**: `recharts` / `plotly.js` (charts), `tailwind` (styling), `axios` (data fetch).
 
-For implementation details, see the detailed Parts below. For API references, see [`ANALYTICS_REFERENCE.md`](ANALYTICS_REFERENCE.md), [`DATA_REFERENCE.md`](DATA_REFERENCE.md), and [`CLI_REFERENCE.md`](CLI_REFERENCE.md).
+### 2.3 Scheduler / Worker (`mie-cron`)
+-   **Framework**: Supercronic + Bash Scripts
+-   **Role**: Runs daily data ingestion, feature engineering, and model training tasks.
+-   **Schedule**: 
+    -   Daily Market Close (22:00 UTC): Full data update + model refresh.
+
+### 2.4 Infrastructure
+-   **Orchestration**: Docker Compose
+-   **Volumes**: 
+    -   `mie_data`: Shared volume for proper persistence of `data/` directory (Raw, Features, Analytics) across containers.
 
 ---
 
-## Detailed Architecture (Parts 1-10)
+## 3. Directory Structure
 
-### ARCHITECT_BIBLE — PART 1 (TXT)
-SYSTEM PURPOSE & PRINCIPLES
-
-Project Purpose:
-Build a scalable, reliable market analysis engine that powers multiple analytics pages (Markov chain, HMM regimes, seasonality, trend detection, breadth, etc.).
-
-The system should:
-	•	Download & store price data for many tickers
-	•	Enrich data (returns, volatility, moving averages, etc.)
-	•	Save clean + enriched datasets for fast UI use
-	•	Precompute advanced analytics (Markov, HMM, signals)
-	•	Serve data to dashboards and eventually API users
-
-⸻
-
-HIGH-LEVEL SYSTEM GOALS
-	1.	Fast data access (no slow recalculation in UI)
-	2.	Modular architecture (each feature separate)
-	3.	Offline compute + online read model
-	4.	Expandable dataset (SPY → sectors → indexes → crypto etc.)
-	5.	Easy to maintain and extend
-	6.	No lookahead bias or overfitting
-
-⸻
-
-PHILOSOPHY
-	•	Compute once, reuse everywhere
-	•	UI = display, not heavy compute
-	•	Raw data never modified
-	•	Feature data separate from raw
-	•	Analytics separate from features
-	•	Each layer feeds the next
-
-⸻
-
-DATA LAYERS
-
-Layer 1 — Raw market data
-Input: Yahoo Finance or API
-Output folder: data/raw/
-Format: Parquet (fast) + CSV backup
-
-Layer 2 — Cleaned data
-Fix missing days, adjust dtypes, ensure date index
-Folder: data/clean/
-
-Layer 3 — Features
-Example fields: returns, vol, MA ratios
-Folder: data/features/
-
-Layer 4 — Analytics
-Markov chain, HMM, seasonality etc
-Folder: data/analytics/*
-
-Layer 5 — UI / Dashboards
-Read from analytics layer only
-
-⸻
-
-KEY CONSTRAINTS
-
-No recalculating everything every time
-No heavy ML inside dashboard
-No single huge script
-No touching raw data after save
-No guessing — ask if unclear
-
-⸻
-
-OUTPUT FORMAT
-
-Primary: Parquet
-Backup: CSV
-Index: Date
-Columns include ticker
-
-⸻
-
-PERFORMANCE TARGETS
-
-Full dataset refresh: < 30 seconds
-Daily update: < 5 seconds
-Dashboard load: < 2 seconds
-Chart interaction: < 100ms perceived delay
-
-⸻
-
-EXTENSIBILITY GOALS
-
-Future support for:
-	•	Sector ETFs
-	•	Indices (SPX, NDX, RUT, DJI)
-	•	Crypto
-	•	Breadth metrics
-	•	AI signal scoring
-	•	API + monitoring
-
-⸻
-
-NEXT STEPS (in order)
-
-✅ Part 1 — vision (this doc)
-➡️ Part 2 — folder structure + files
-➡️ Part 3 — data pipeline design
-➡️ Part 4 — feature design
-➡️ Part 5 — analytics module breakdown
-
-⸻
-
-END PART 1
-
-ARCHITECT_BIBLE — PART 2 (TXT)
-PROJECT STRUCTURE & FILE STANDARDS
-
-⸻
-
-OVERVIEW
-This section defines the required folder layout.
-Goal: clarity, modularity, predictable structure.
-
-No guessing. No mixing responsibilities.
-
-⸻
-
-ROOT PROJECT STRUCTURE
-
+```text
 project_root/
-│
-├── src/
-│   ├── data_ingest/
-│   ├── data_clean/
-│   ├── features/
-│   ├── analytics/
-│   │   ├── markov/
-│   │   ├── hmm/
-│   │   └── seasonality/
-│   ├── signals/
-│   └── utils/
-│
-├── data/
-│   ├── raw/           # untouched market data
-│   ├── clean/         # cleaned + aligned prices
-│   ├── features/      # all indicators
-│   ├── analytics/     # markov, hmm, seasonality, etc
-│   └── logs/
-│
-├── notebooks/         # research only, not production code
-│
-├── app/               # streamlit / UI
-│   ├── pages/
-│   └── assets/
-│
-├── config/            # yaml config files
-│
-└── docs/
-    └── arch/
+├── app/                    # Legacy Streamlit (Deprecated/Reference)
+├── cli/                    # Production Shell Scripts (Entrypoints for Docker)
+├── config/                 # YAML Configuration (Tickers, Parameters)
+├── data/                   # MANAGED DATA STORAGE (Do not edit manually)
+│   ├── raw/                # Raw Price Data (Parquet)
+│   ├── features/           # Engineered Features (Parquet)
+│   ├── analytics/          # Output Models (Markov, HMM, Seasonality)
+│   └── logs/               # Application Logs
+├── docs/                   # Documentation
+├── frontend/               # React Application Source
+│   ├── src/                
+│   ├── public/
+│   └── package.json
+├── scripts/                # Utility scripts (Dev/Maintenance)
+├── src/                    # CORE LIBRARY (mie_lib)
+│   └── mie_lib/
+│       ├── analytics/      # Logic for Markov, HMM, GAF, Expected Moves
+│       ├── api/            # FastAPI Routes & App
+│       ├── cli/            # Python CLI Implementation
+│       ├── core/           # Shared Utilities (Logging, Config)
+│       └── data/           # Data Ingestion & processing
+├── Dockerfile.api          # Backend Image Definition
+├── Dockerfile.web          # Frontend Image Definition
+├── Dockerfile.cron         # Scheduler Image Definition
+└── docker-compose.yml      # Service Orchestration
+```
+
+---
+
+## 4. Data Pipeline Architecture
+
+The data pipeline describes how raw market data is transformed into actionable intelligence.
+
+### Stage 1: Ingestion (Raw)
+-   **Input**: `config/ticker_groups.yml`
+-   **Process**: Fetch OHLVC data from providers (Yahoo/Polygon).
+-   **Output**: `data/raw/{ticker}.parquet`
+-   **Invariant**: Raw data is **never** modified once saved.
+
+### Stage 2: Feature Engineering
+-   **Input**: `data/raw/*.parquet`
+-   **Process**: Calculate Returns, Volatility, Moving Averages (SMA/EMA).
+-   **Output**: `data/features/{ticker}.parquet`
+-   **Invariant**: Features are deterministic calculations on raw data.
+
+### Stage 3: Analytics (Models)
+Feature data flows into distinct analytics engines:
+-   **Markov**: `data/analytics/markov/` (Transition Matrices)
+-   **HMM**: `data/analytics/hmm/` (Regime Probability Series)
+-   **Seasonality**: `data/analytics/seasonality/` (Historical Trend Stats)
+-   **GAF/CNN**: `data/analytics/gaf/` (Visual Pattern Classifications)
+
+### Stage 4: API Serving
+-   **Input**: Analytics Artifacts (Parquet/JSON)
+-   **Process**: Read artifact -> Filter/Agg -> JSON Response
+-   **Output**: REST JSON for Frontend
+
+---
+
+## 5. Development Guidelines
+
+### 5.1 Python (`mie_lib`)
+-   All reusable logic lives in `src/mie_lib`.
+-   Do not put business logic in API routes; routes should only handle request/response IO and call `mie_lib` functions.
+-   Type hints are mandatory.
+
+### 5.2 Frontend
+-   Components should be small and functional.
+-   Use `apiService.ts` for all backend communication (no inline `fetch` calls).
+-   Follow the "Container/Presentational" pattern where possible.
+
+### 5.3 Reliability
+-   **Idempotency**: All pipeline scripts (e.g. `rebuild-everything`) must be safe to run multiple times.
+-   **Fallback**: If a data source fails, the system should degrade gracefully (e.g., show old data with a warning) rather than crash.
+
+---
+
+## 6. Future Roadmap
+
+-   **User Authentication**: Add Auth0/JWT support for multi-user access.
+-   **Real-time WebSocket**: Push live pricing updates to the frontend.
+-   **Advanced Alerts**: Email/Slack notifications for critical signals.
+-   **Backtesting Engine**: Formalize signal backtesting with equity curve simulation.
 
-
-RULES FOR DIRECTORIES
-
-/src
-All reusable logic lives here.
-
-/data
-No code here. Only files.
-Never modify raw data after save.
-
-/notebooks
-Exploration only.
-Stuff here never blocks production.
-
-/docs
-Architecture and explanations only.
-
-/app
-UI only — reads precomputed data.
-
-⸻
-
-NAMING RULES FOR FILES
-
-Module naming convention:
-lower_snake_case.py
-
-Examples:
-fetch_prices.py
-clean_prices.py
-build_features.py
-markov_model.py
-hmm_model.py
-seasonality_engine.py
-signal_scoring.py
-
-FILE PURPOSE REQUIREMENTS
-
-Each Python file must contain:
-	•	clear top comment: purpose
-	•	small documented functions
-	•	no global state
-	•	no notebook code inside
-
-⸻
-
-CONFIG FILES
-
-All settings in YAML, never hard-coded.
-
-config/
-    data_sources.yml
-    tickers.yml
-    features.yml
-    parameters.yml
-
-Examples:
-
-tickers.yml
-- SPY
-- QQQ
-- IWM
-- DIA
-
-parameters.yml
-markov_order: 3
-hmm_states: 2
-feature_windows: [20, 50, 200]
-
-LOGGING
-
-Write logs to:
-data/logs/
-
-Minimum logging events:
-	•	data pull
-	•	feature build
-	•	analytics run
-	•	error tracebacks
-
-⸻
-
-ENV FILES
-
-Environment variables in:
-.env
-
-Never commit:
-API keys
-Secrets
-Tokens
-
-WHAT IS NOT ALLOWED
-
-❌ flat directory full of scripts
-❌ logic hidden in notebooks
-❌ writing compute code inside Streamlit
-❌ mixing raw + processed files
-❌ hardcoding tickers or dates
-
-⸻
-
-NEXT STEPS
-
-After Part 2 (structure), move to:
-
-➡️ Part 3 — Data Pipeline TXT
-This defines how data flows through the system.
-
-
-ARCHITECT_BIBLE — PART 3 (TXT)
-DATA PIPELINE FLOW & RULES
-
-⸻
-
-PURPOSE
-Define how data moves through the system:
-download → clean → enrich → analytics → UI
-
-The pipeline must be:
-	•	deterministic
-	•	versioned
-	•	incremental (update only new data)
-	•	auditable (logs + checks)
-	•	reproducible
-
-⸻
-
-PIPELINE STAGES (MANDATORY)
-
-Stage 1 — RAW DATA INGEST
-input  : tickers.yml
-output : data/raw/{ticker}.parquet
-source : Yahoo Finance (later: Polygon/FMP/IEX)
-
-Rules:
-	•	Pull full history first time
-	•	Daily incremental update after
-	•	No modification to stored raw files
-	•	Store both Parquet + fallback CSV
-
-Validation:
-	•	Dates sorted
-	•	No duplicate rows
-	•	No missing required OHLC fields
-
-⸻
-
-Stage 2 — CLEAN DATA
-input  : data/raw/{ticker}.parquet
-output : data/clean/{ticker}.parquet
-
-Tasks:
-	•	Ensure continuous trading calendar (fill missing days)
-	•	Forward-fill only for non-price fields
-	•	Validate dtypes (floats, datetime)
-	•	Ensure timezone consistency
-	•	Remove “bad spikes” only if rules defined
-
-Validation:
-	•	Always > 5 years of data unless new ticker
-	•	monotonic date index
-	•	no NaNs in OHLC after cleaning step
-
-⸻
-
-Stage 3 — FEATURE ENGINEERING
-input  : data/clean/{ticker}.parquet
-output : data/features/{ticker}.parquet
-
-Included features:
-	•	daily returns
-	•	log returns
-	•	rolling volatility
-	•	moving averages & ratios
-	•	daily % change
-	•	day-of-week / calendar tags
-	•	future placeholders for volume profile, breadth feeds
-
-Rules:
-	•	Feature names follow Part 9 standards
-	•	No lookahead: only past values allowed
-	•	Output must preserve date index + ticker column
-
-Validation:
-	•	No NaN in final feature file (except first N rows due to windows)
-	•	Each feature documented in dictionary
-
-⸻
-
-Stage 4 — ANALYTICS MODELS
-input  : data/features/{ticker}.parquet
-output : data/analytics/{model}/{ticker}.parquet
-
-Models include:
-	•	Markov Chain states
-	•	Hidden Markov Model regimes
-	•	Seasonality tables
-	•	Trend indicators
-	•	Signal scores
-
-Rules:
-	•	Precompute offline
-	•	UI reads only these outputs
-	•	Store each model in its own folder
-	•	Include model parameters in metadata
-
-⸻
-
-Stage 5 — UI / DASHBOARD
-input  : data/analytics/*
-output : visualization only
-
-Streamlit or web UI should:
-	•	never recalculate big data on fly
-	•	always read pre-saved parquet
-	•	update visuals instantly
-
-If single calculation > 1 sec → move it back to pipeline.
-
-⸻
-
-PIPELINE EXECUTION MODES
-
-Mode A — Full Rebuild (manual trigger)
-rebuild --all
-
-Mode B — Update New Data (daily)
-update --latest
-
-Mode C — Rebuild Single Ticker
-rebuild --ticker SPY
-
-Mode D — Validate Data:
-validate --all
-
-All operations log to:
-data/logs/pipeline.log
-
-SCHEDULING & AUTOMATION
-
-Production requirement (future):
-	•	daily job at market close + morning refresh
-	•	retry if API fails
-	•	alert on missing data
-
-Local development:
-Manual CLI invocation
-
-⸻
-
-FAIL-SAFE RULES
-
-If any stage fails:
-	•	stop pipeline
-	•	do not delete previous dataset
-	•	log error
-	•	suggest fix
-
-No silent failures.
-
-⸻
-
-PERFORMANCE REQUIREMENTS
-
-Full rebuild < 30 seconds (long-term target)
-Daily incremental update < 5 seconds
-UI load < 2 seconds
-
-All processing must be vectorized pandas, no loops on history.
-
-⸻
-
-SUMMARY FLOW (ASCII)
-tickers.yml
-    ↓
-RAW DOWNLOAD        → data/raw/
-    ↓
-CLEANING            → data/clean/
-    ↓
-FEATURE BUILD       → data/features/
-    ↓
-ANALYTICS MODELS    → data/analytics/
-    ↓
-UI DASHBOARD        (read only)
-
-END OF PART 3
-
-ARCHITECT_BIBLE — PART 4 (TXT)
-FEATURE ENGINEERING STANDARDS
-
-⸻
-
-FEATURE LAYER PURPOSE
-Convert cleaned price data into machine-readable metrics for:
-	•	trend detection
-	•	volatility analysis
-	•	regime modeling (Markov/HMM)
-	•	seasonality
-	•	signal scoring
-
-Feature layer ≠ trading strategy.
-It builds inputs, not predictions.
-
-⸻
-
-INPUT
-data/clean/{ticker}.parquet
-
-OUTPUT
-data/features/{ticker}.parquet
-
-File index = date
-Columns include ticker
-
-⸻
-
-FEATURE GROUPS (MANDATORY)
-1.	Returns
-ret_1d           # adjusted close return
-log_ret_1d       # optional log return
-
-2.	Rolling Volatility
-rv_20d           # 20-day realized vol (std of returns)
-rv_60d
-
-3.	Moving Averages
-sma_20
-sma_50
-sma_200
-ema_20
-ema_50
-ema_200
-
-4.	MA Ratios (Trend strength)
-ma_ratio_20_50
-ma_ratio_50_200
-ma_ratio_20_200
-
-Definition:
-ratio = short_ma / long_ma
-
-5.	Momentum / Price distance
-dist_from_50dma   # close / sma_50 - 1
-dist_from_200dma
-
-6.	Calendar Features
-dow      # day of week (0=Mon)
-month
-
-7.	Future Expansion Placeholder Fields
-(Keep fields pre-defined for stability)
-volume_zscore
-vol_regime_tag
-breadth_dummy
-
-CALCULATION RULES
-
-✅ Vectorized pandas (no loops)
-✅ Past-only windows to avoid lookahead
-✅ NaN allowed only in initial warm-up period
-❌ Do not annualize returns
-❌ No forward returns in feature file
-
-Windows must match config, not hard-coded.
-
-⸻
-
-CONFIG-DRIVEN APPROACH
-
-config/features.yml
-
-Example:
-rolling_windows:
-  sma: [20, 50, 200]
-  ema: [20, 50, 200]
-  volatility: [20, 60]
-
-Pipeline reads config, not code constants.
-
-⸻
-
-VALIDATION REQUIREMENTS
-
-After feature build:
-	•	no NaNs except first N rows due to windows
-	•	correct dtypes (float32 preferred)
-	•	shape same as input
-	•	date index still sorted & unique
-
-If validation fails → stop pipeline
-
-⸻
-
-PERFORMANCE TARGET
-
-Feature build < 1 second per ticker
-Memory efficient: cast to float32 whenever possible
-
-⸻
-
-FEATURE VERSIONING
-
-If schema changes:
-data/features_v2/
-
-
-Never overwrite old version.
-
-⸻
-
-OUTPUT SAMPLE (conceptual)
-date, ticker, close, ret_1d, rv_20d, sma_50, ma_ratio_20_200, dow, month
-2020-01-02, SPY, 322.74, 0.0041, 0.0122, 305.1, 1.038, 3, 1
-2020-01-03, SPY, 321.73, -0.0031, 0.0118, 305.3, 1.037, 4, 1
-...
-
-DESIGN PHILOSOPHY
-	•	Features = clean signals
-	•	No trading logic here
-	•	Reusable by Markov, HMM, future models
-	•	Future indicators added without breaking old ones
-
-⸻
-
-END OF PART 4
-
-ARCHITECT_BIBLE — PART 5 (TXT)
-SEASONALITY ENGINE RULES
-
-Purpose:
-Quantify historical tendencies by calendar patterns (day-of-week, month, trading day-of-year, weekly). No point forecasts, only historical frequencies and averages.
-
-Inputs:
-data/features/{ticker}.parquet with ret_1d and calendar fields (dow, month). Use adjusted close returns.
-
-Outputs:
-data/analytics/seasonality_daily.parquet
-data/analytics/seasonality_monthly.parquet
-data/analytics/seasonality_weekly.parquet
-data/analytics/seasonality_dow.parquet
-
-Per seasonal key store:
-ret_mean
-ret_median
-p_up
-p_down
-vol_mean (e.g., std of ret_1d within group)
-n_samples
-window_years (e.g., 5y or 10y)
-
-Computation rules:
-	•	Backward-looking only (no lookahead)
-	•	Align by trading day where applicable
-	•	Provide both long-history and rolling 5y/10y variants
-	•	Minimum sample size = 10 per bin; otherwise flag low confidence
-	•	No annualization of daily metrics
-	•	No smoothing beyond rolling windows and percentiles
-
-Performance:
-Build < 2 seconds per instrument; parquet outputs < 1MB each.
-
-Validation:
-No NaN in final metrics; n_samples >= min threshold or flagged.
-
-UI expectations (logic only):
-	•	Heatmap or bar summaries built by the UI from these files
-	•	Show p_up and ret_mean; compare long vs rolling windows
-	•	Clear note: seasonality = historical tendency, not a forecast
-
-Forbidden:
-	•	Optimizing thresholds on future returns
-	•	Mixing intraday with daily tables
-	•	Overwriting raw returns or injecting lookahead
-
-Future extensions:
-Holiday effects, options expiry week, FOMC windows, earnings season drift.
-
-END OF PART 5. 
-
-
-ARCHITECT_BIBLE — PART 6 (TXT)
-MARKOV CHAIN SYSTEM
-
-Purpose:
-Use historical price states to estimate transition probabilities between market conditions (Green / Neutral / Red) and compute likelihood of future states.
-
-Markov Chain = probabilistic state machine.
-Memory rule: only depends on last K states (order K).
-
-Inputs:
-data/features/{ticker}.parquet
-
-Required input fields:
-ret_1d (daily % return)
-date (index)
-ticker
-
-Outputs:
-data/analytics/markov/{ticker}.parquet
-
-Outputs contents:
-	•	state labels per day
-	•	transition matrix (order K)
-	•	next-day probability estimate per state
-	•	metadata (K-order, thresholds, sample window)
-	•	forecast utilities (optional)
-
-State Definitions:
-3-state model:
-Green  = return > threshold
-Neutral = return between ±threshold
-Red = return < -threshold
-
-Threshold expressed in decimal (e.g., 0.001 = 10bps)
-
-Binary mode:
-Green / Red only (no Neutral)
-
-Config Parameters:
-markov:
-order: 1–4
-threshold_bps: default 10
-state_mode: “binary” or “tri”
-min_samples_per_state: 10
-
-State Encoding:
-Green   = “G”
-Neutral = “N”
-Red     = “R”
-
-Transition Matrix Format:
-Rows = previous K-state pattern
-Columns = next state probability
-
-Example row label:
-“G,G,R” = last 3 states were Green, Green, Red
-
-Stored values:
-mc_state_today
-mc_prob_up_next
-mc_prob_down_next
-mc_prob_neutral_next (only tri-state)
-mc_state_window (e.g., “G,G,R”)
-mc_transition_matrix (serialized)
-
-Computation Rules:
-	•	No future data
-	•	Count transitions by frequency
-	•	Laplace smoothing: +1 count to each state to avoid zero-probability
-	•	Require minimum sample count per row; if below threshold → mark low-confidence
-
-Update Cycle:
-Full rebuild first run
-Incremental update daily after market close
-
-Performance Rules:
-Full instrument build < 0.5 seconds
-Load time in app < 50ms
-
-Validation:
-	•	Transition rows sum to 1
-	•	No NaN values
-	•	Check state distribution (warn if >90% one state)
-	•	Track max order supported by sample length
-
-UI Expectations (not implemented here):
-	•	Heatmap of transition probabilities
-	•	Highlight probabilities for current pattern
-	•	Text summary of most likely next state
-	•	Show sample size per context pattern
-
-Forbidden:
-	•	No forward returns
-	•	No tuning threshold based on future outcomes
-	•	No dynamic optimization based on future regime wins
-
-Future Extensions Allowed:
-	•	Multi-asset transition cross-impact model
-	•	Intraday Markov chains (lower priority)
-	•	Regime-dependent transition matrices
-
-This module = discrete statistical engine, not ML.
-
-END OF PART 6
-
-
-ARCHITECT_BIBLE — PART 7 (Hidden Markov Model System)
-
-Goal:
-The Hidden Markov Model (HMM) engine identifies unobserved market regimes such as bull, bear, and neutral periods. It detects shifts in volatility and return dynamics that standard Markov chains cannot see. HMM is trained offline and produces daily regime probabilities and labels for use in dashboards and signals.
-
-General Concept:
-Observed market data (returns and volatility) is generated by hidden states (market regimes). Model estimates:
-	•	Probability of each regime for each day
-	•	Transition probabilities between regimes
-	•	Expected return and volatility in each regime
-	•	Most likely current regime
-	•	Regime change alerts
-
-Supported:
-	•	2-state and 3-state HMM (start with 2)
-	•	Gaussian emission model using daily return and rolling volatility as features
-	•	Window-based training (rolling X years)
-	•	Multi-ticker capability
-
-Inputs:
-Source: features parquet file
-Required columns:
 ret_1d
 rv_20d (20-day rolling volatility)
 

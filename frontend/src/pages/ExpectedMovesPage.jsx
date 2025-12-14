@@ -291,7 +291,7 @@ const ExpectedMovesPageContent = () => {
                         color: '#9e9e9e',
                         fontFamily: 'monospace'
                     }}>
-                        <div style={{ fontWeight: 'bold', color: '#d7e3f3', marginBottom: '5px' }}>Debug Details (yfinance EOD) - {selectedTicker}</div>
+                        <div style={{ fontWeight: 'bold', color: '#d7e3f3', marginBottom: '5px' }}>Debug Details (Polygon EOD) - {selectedTicker}</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
                             {['ODTE', 'WEEKLY', 'MONTHLY'].map(type => {
                                 const exp = tickers[selectedTicker]?.expirations?.[type];

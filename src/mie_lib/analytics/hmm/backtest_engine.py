@@ -4,7 +4,10 @@ import logging
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from mie_lib.analytics.hmm.hmm_engine import build_hmm_standardized_for_ticker, _load_features_for_hmm
-from mie_lib.utils.paths import HMM_DIR
+from mie_lib.utils.paths import HMM_DIR, RAW_DIR
+# --- NEW IMPORT ---
+from mie_lib.utils.io import atomic_write_parquet
+# --- END NEW IMPORT ---
 
 # Configure Logging
 logger = logging.getLogger(__name__)
@@ -32,11 +35,13 @@ class HMMBacktester:
             return 0.0
         return (returns.mean() * 252) / (returns.std() * np.sqrt(252))
 
-    def evaluate_strategy(self, states_df: pd.DataFrame, price_df: pd.DataFrame) -> Dict[str, float]:
+    def evaluate_strategy(self, states_df: pd.DataFrame, price_df: pd.DataFrame, n_states: int, window: Any) -> Dict[str, Any]:
         """
         Simulates:
         - Long if Bull
         - Cash if Bear/Neutral (0% return for simplicity, or Risk Free Rate)
+        
+        Also generates and saves the Signals Parquet.
         """
         # Merge on Date
         # Ensure dates are localized/delocalized consistently
@@ -90,6 +95,76 @@ class HMMBacktester:
                 "benchmark": float(b_val)
             })
             
+        # --- NEW: Signals Generation & Saving ---
+        # A signal is defined as a CHANGE in the 'signal' column (allocation).
+        # We want to capture the Date, the Type (Buy/Sell), and the Price.
+        
+        # 'signal' column is 1 (Long) or 0 (Cash).
+        # Shift back to align with the Decision Day (Close). 
+        # The 'signal' above was shifted(1) for returns. Let's look at the raw allocation decision.
+        # Allocation[t] corresponds to state at time t.
+        merged['allocation'] = (merged['hmm_state_name'] == 'Bull').astype(int)
+        merged['prev_alloc'] = merged['allocation'].shift(1)
+        
+        # Fill NaNs for first row
+        merged['prev_alloc'] = merged['prev_alloc'].fillna(merged['allocation'])
+        
+        # Identify changes
+        signal_changes = merged[merged['allocation'] != merged['prev_alloc']].copy()
+        
+        # Construct Signals DataFrame
+        signals_list = []
+        
+        if not merged.empty:
+             first_row = merged.iloc[0]
+             if first_row['allocation'] == 1:
+                 # Initial Buy
+                 signals_list.append({
+                     "date": first_row['date'],
+                     "signal_type": "BUY",
+                     "price": first_row['close'],
+                     "hmm_state": first_row['hmm_state_name'],
+                     "description": "Initial Entry"
+                 })
+
+        for idx, row in signal_changes.iterrows():
+            sig_type = "BUY" if row['allocation'] == 1 else "SELL"
+            signals_list.append({
+                "date": row['date'],
+                "signal_type": sig_type,
+                "price": row['close'],
+                "hmm_state": row['hmm_state_name'],
+                "description": f"Regime changed to {row['hmm_state_name']}"
+            })
+            
+        signals_df = pd.DataFrame(signals_list)
+        
+        # Save to Parquet
+        signals_dir = HMM_DIR / self.ticker / "signals"
+        signals_dir.mkdir(parents=True, exist_ok=True)
+        signals_path = signals_dir / f"signals_{n_states}_{window}.parquet"
+        
+        if not signals_df.empty:
+             atomic_write_parquet(signals_df, signals_path)
+             
+        # Determine Latest Signal for Summary
+        latest_signal = {}
+        if not signals_df.empty:
+            last = signals_df.iloc[-1]
+            latest_signal = {
+                "last_signal_date": last['date'].strftime('%Y-%m-%d'),
+                "last_signal_type": last['signal_type'],
+                "last_signal_price": float(last['price'])
+            }
+        else:
+             if not merged.empty:
+                 curr = merged.iloc[-1]
+                 latest_signal = {
+                     "last_signal_date": curr['date'].strftime('%Y-%m-%d'),
+                     "last_signal_type": "BUY" if curr['allocation'] == 1 else "SELL",
+                     "last_signal_price": float(curr['close'])
+                 }
+        
         return {
             "scalar": {
                 "strat_sharpe": strat_sharpe,
@@ -99,7 +174,8 @@ class HMMBacktester:
                 "strat_total_ret": strat_total_ret,
                 "bh_total_ret": bh_total_ret,
                 "outperformance_sharpe": strat_sharpe - bh_sharpe,
-                "dd_savings": strat_dd - bh_dd 
+                "dd_savings": strat_dd - bh_dd,
+                **latest_signal
             },
             "curves": curve_data
         }
@@ -109,6 +185,21 @@ class HMMBacktester:
         
         # Load raw price data once
         price_df = _load_features_for_hmm(self.ticker)
+        
+        # Merge actual 'close' price from RAW_DIR if available
+        # (Features often lack the 'close' column, having only returns)
+        raw_path = RAW_DIR / f"{self.ticker}.parquet"
+        if raw_path.exists():
+             try:
+                 df_raw = pd.read_parquet(raw_path)
+                 if "date" in df_raw.columns:
+                     df_raw["date"] = pd.to_datetime(df_raw["date"]).dt.tz_localize(None)
+                 if "close" in df_raw.columns:
+                     # Merge left to keep features alignment
+                     # Rename raw close if features has close? (unlikely)
+                     price_df = pd.merge(price_df, df_raw[["date", "close"]], on="date", how="left")
+             except Exception as e:
+                 logger.warning(f"Failed to load raw close price: {e}")
         
         results = []
         
@@ -134,7 +225,7 @@ class HMMBacktester:
                 states_df = pd.read_parquet(states_path)
                 
                 # Evaluate
-                metrics = self.evaluate_strategy(states_df, price_df)
+                metrics = self.evaluate_strategy(states_df, price_df, n_states, window)
                 
                 if not metrics:
                     logger.warning("No metrics calcualted (empty merge?)")

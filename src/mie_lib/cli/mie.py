@@ -90,7 +90,7 @@ LOG = get_logger("cli")
 # ---------- Default Markov grid configuration (authoritative) ----------
 DEFAULT_MARKOV_GRID_STATE_MODES = ["binary", "tri"]
 DEFAULT_MARKOV_GRID_THRESHOLDS = [i for i in range(0, 151, 5)]  # 0..150 by 5
-DEFAULT_MARKOV_GRID_WINDOWS = ["1Y", "2Y", "5Y", "10Y", "20Y", "MAX"]
+DEFAULT_MARKOV_GRID_WINDOWS = ["1Y", "2Y", "5Y", "10Y", "20Y", "50Y", "MAX"]
 DEFAULT_MARKOV_GRID_ORDERS = [1, 2, 3, 4]
 DEFAULT_MARKOV_GRID_TICKERS_FALLBACK = ["SPY", "QQQ", "DIA", "IWM"]
 

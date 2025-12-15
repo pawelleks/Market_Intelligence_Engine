@@ -134,8 +134,12 @@ def build_markov_snapshots(
             if stage_dir.exists():
                 shutil.rmtree(stage_dir, ignore_errors=True)
         duration = time.perf_counter() - start
-        file_count = _count_files(dest_dir)
-        windows_by_mode, windows_found = _collect_windows(dest_dir, expected_windows)
+        if dest_dir.exists():
+            file_count = _count_files(dest_dir)
+            windows_by_mode, windows_found = _collect_windows(dest_dir, expected_windows)
+        else:
+            file_count = 0
+            windows_by_mode, windows_found = {}, set()
         missing_windows = [w for w in windows_cfg if w not in windows_found]
         entry = {
             "ticker": ticker,

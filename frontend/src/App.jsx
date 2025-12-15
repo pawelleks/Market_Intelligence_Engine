@@ -26,6 +26,7 @@ import EMReliabilityPage from './pages/EMReliabilityPage';
 import GammaExposurePage from './pages/GammaExposurePage';
 import GAFAnalysisPage from './pages/GAFAnalysisPage';
 import HMMBacktestPage from './pages/HMMBacktestPage';
+import HmmSignalsPage from './pages/HmmSignalsPage';
 import DataPipelines from './pages/DataPipelines';
 import TsmomDashboardPage from './pages/TsmomDashboardPage';
 
@@ -391,6 +392,7 @@ function App() {
               <li style={{ marginBottom: '10px' }}><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/hmm-backtest" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Backtest</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/hmm-signals" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Signals</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/expected-moves" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Expected Moves</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/reliability" style={{ color: '#d7e3f3', textDecoration: 'none' }}>EM Reliability</Link></li>
@@ -494,6 +496,7 @@ function App() {
                 element={<GAFAnalysisPage />}
               />
               <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
+              <Route path="/hmm-signals" element={<HmmSignalsPage />} />
               <Route path="/analysis/tsmom" element={<TsmomDashboardPage />} />
               <Route path="/analysis/performance" element={<PerformancePage />} />
               <Route path="/system/pipelines" element={<DataPipelines />} />

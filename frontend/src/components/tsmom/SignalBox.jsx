@@ -1,65 +1,71 @@
 import React, { useState, useEffect } from 'react';
 
-const SignalBox = ({ data, date }) => {
-    // data: List of tickers with signal change on 'date'
+const SignalBox = ({ history }) => {
+    // history: List of all signal events { event_date, ticker, signal, tsmom_dir, ... }
 
-    if (!data || data.length === 0) {
+    if (!history || history.length === 0) {
         return (
-            <div style={{ padding: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049', marginBottom: '20px' }}>
-                <h3 style={{ margin: '0 0 10px 0', color: '#9ec4ff', fontSize: '1rem' }}>No Recent Signals</h3>
-                <p style={{ color: '#68778d', fontSize: '0.9rem' }}>No trend changes detected in the latest review.</p>
+            <div style={{ padding: '20px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049', marginBottom: '20px', textAlign: 'center' }}>
+                <h3 style={{ margin: 0, color: '#68778d', fontSize: '1rem' }}>No Signal History Available</h3>
             </div>
         );
     }
 
+    // 1. Group by Date
+    const grouped = history.reduce((acc, row) => {
+        const dateStr = row.event_date; // "YYYY-MM-DD"
+        if (!acc[dateStr]) acc[dateStr] = [];
+        acc[dateStr].push(row);
+        return acc;
+    }, {});
+
+    // 2. Sort Dates Descending
+    const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+
+    // 3. Take Top 4
+    const recentDates = sortedDates.slice(0, 4);
+
     return (
-        <div style={{ padding: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049', marginBottom: '20px' }}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#9ec4ff', fontSize: '1rem', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Latest Rebalance Signals ({data.length})</span>
-                <span style={{ fontSize: '0.9rem', color: '#68778d' }}>Review Date: {date}</span>
+        <div style={{ padding: '20px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #203049', marginBottom: '20px' }}>
+            <h3 style={{ margin: '0 0 20px 0', color: '#d7e3f3', fontSize: '1.2rem', borderBottom: '1px solid #203049', paddingBottom: '10px' }}>
+                Recent Signal History (Last 4 Months)
             </h3>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
-                {data.map((row) => {
-                    const isLong = row.tsmom_dir === 1;
-                    const color = isLong ? '#4caf50' : '#f44336';
-                    const perf = row.perf_since_signal || 0;
-                    const perfColor = perf >= 0 ? '#4caf50' : '#f44336';
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px' }}>
+                {recentDates.map((date) => {
+                    const signals = grouped[date];
+                    // Parse date for nice display (e.g., "November 2025")
+                    const dateObj = new Date(date);
+                    const monthName = dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
 
                     return (
-                        <div key={row.ticker} style={{
-                            padding: '12px',
-                            backgroundColor: '#1b263b',
-                            borderRadius: '6px',
-                            borderLeft: `4px solid ${color}`,
-                            minWidth: '200px',
-                            flex: '1 0 auto',
-                            maxWidth: '250px'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                                <div style={{ fontWeight: 'bold', color: '#d7e3f3', fontSize: '1.1rem' }}>{row.ticker}</div>
-                                <div style={{
-                                    color: color,
-                                    fontWeight: 'bold',
-                                    textTransform: 'uppercase',
-                                    fontSize: '0.9rem',
-                                    backgroundColor: `${color}22`,
-                                    padding: '2px 6px',
-                                    borderRadius: '4px'
-                                }}>
-                                    {isLong ? 'NEW LONG' : 'NEW SHORT'}
-                                </div>
+                        <div key={date} style={{ backgroundColor: '#1b263b', borderRadius: '8px', padding: '15px', border: '1px solid #304050' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                                <span style={{ fontWeight: 'bold', color: '#fff', fontSize: '1rem' }}>{monthName}</span>
+                                <span style={{ fontSize: '0.8rem', color: '#68778d' }}>{date}</span>
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-                                <div style={{ color: '#68778d', fontSize: '0.8rem' }}>Since Rebalance:</div>
-                                <div style={{ fontWeight: 'bold', color: perfColor }}>
-                                    {(perf * 100).toFixed(2)}%
-                                </div>
-                            </div>
-
-                            <div style={{ fontSize: '0.75rem', color: '#68778d', marginTop: '4px' }}>
-                                Entry: {row.last_signal_price ? row.last_signal_price.toFixed(2) : '-'}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {signals.map((sig, idx) => {
+                                    const isLong = sig.tsmom_dir === 1;
+                                    const color = isLong ? '#4caf50' : '#f44336';
+                                    return (
+                                        <div key={`${sig.ticker}-${idx}`} style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            backgroundColor: `${color}11`,
+                                            padding: '6px 10px',
+                                            borderRadius: '4px',
+                                            borderLeft: `3px solid ${color}`
+                                        }}>
+                                            <span style={{ fontWeight: 'bold', color: '#d7e3f3' }}>{sig.ticker}</span>
+                                            <span style={{ fontSize: '0.75rem', color: color, fontWeight: 'bold' }}>
+                                                {isLong ? 'BUY' : 'SELL'}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     );

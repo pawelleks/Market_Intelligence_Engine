@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import PerformancePage from './pages/PerformancePage';
 import './App.css';
 import HMMRegimeChart from './components/HMMRegimeChart';
 import HMMChartSettings from './components/HMMChartSettings';
@@ -395,6 +397,7 @@ function App() {
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/tsmom" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Time Series Momentum (TSMOM)</Link></li>
+              <li style={{ marginBottom: '10px' }}><Link to="/analysis/performance" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Market Performance</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/analysis/scanner/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Scanner</Link></li>
               <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
@@ -492,6 +495,7 @@ function App() {
               />
               <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
               <Route path="/analysis/tsmom" element={<TsmomDashboardPage />} />
+              <Route path="/analysis/performance" element={<PerformancePage />} />
               <Route path="/system/pipelines" element={<DataPipelines />} />
             </Routes>
           </main>

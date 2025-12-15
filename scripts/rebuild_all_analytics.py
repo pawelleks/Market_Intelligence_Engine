@@ -66,14 +66,9 @@ def load_all_tickers_from_config() -> List[str]:
         if read_tickers is not None:
             tickers = [t.strip().upper() for t in read_tickers() if str(t).strip()]
         else:
-            # Very light fallback: parse YAML top-level list or {tickers: [...]} structure
-            cfg_path = REPO_ROOT / "config" / "tickers.yml"
-            if cfg_path.exists() and yaml is not None:
-                data = yaml.safe_load(cfg_path.read_text())
-                if isinstance(data, list):
-                    tickers = [str(t).strip().upper() for t in data if str(t).strip()]
-                elif isinstance(data, dict) and isinstance(data.get("tickers"), list):
-                    tickers = [str(t).strip().upper() for t in data.get("tickers", []) if str(t).strip()]
+            # Fallback: empty list if read_tickers unavailable and no backup logic desired
+            logging.warning("read_tickers not available and fallback removed.")
+            tickers = []
     except Exception as e:
         logging.warning("Failed to load tickers from config: %s", e)
     # Deduplicate and sort

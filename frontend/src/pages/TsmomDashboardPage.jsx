@@ -30,16 +30,26 @@ const TsmomDashboardPage = () => {
         return true;
     });
 
+    const [signalHistory, setSignalHistory] = useState([]);
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/current`);
-            if (res.ok) {
-                const json = await res.json();
+            const [snapRes, sigRes] = await Promise.all([
+                fetch(`${API_BASE}/current`),
+                fetch(`${API_BASE}/signals`)
+            ]);
+
+            if (snapRes.ok) {
+                const json = await snapRes.json();
                 setSnapshotData(json);
             }
+            if (sigRes.ok) {
+                const json = await sigRes.json();
+                setSignalHistory(json);
+            }
         } catch (e) {
-            console.error("Failed to load snapshot", e);
+            console.error("Failed to load data", e);
         } finally {
             setLoading(false);
         }
@@ -118,7 +128,7 @@ const TsmomDashboardPage = () => {
                 <div style={{ color: '#d7e3f3' }}>Loading Data...</div>
             ) : (
                 <>
-                    <SignalBox data={latestSignals} date={latestSignalDate} />
+                    <SignalBox data={latestSignals} date={latestSignalDate} history={signalHistory} />
 
                     {/* Filter Controls Row */}
                     <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', alignItems: 'center' }}>

@@ -65,6 +65,8 @@ from mie_lib.api.routers.system import router as system_router
 app.include_router(system_router)
 from mie_lib.analytics.tsmom.api_endpoints import router as tsmom_router
 app.include_router(tsmom_router, prefix="/api/v1/tsmom", tags=["tsmom"])
+from mie_lib.analytics.performance.api import router as performance_router
+app.include_router(performance_router, prefix="/api/v1/performance", tags=["performance"])
 
 # Configure CORS
 origins = [

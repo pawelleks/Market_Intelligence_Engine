@@ -40,7 +40,36 @@ groups:
     - META
     - TSLA
   Semiconductors:
+    - ADI
+    - ALAB
+    - AMAT
+    - AMD
+    - ARM
+    - ASML
+    - AVGO
+    - COHR
+    - CRDO
+    - ENTG
+    - GFS
+    - INTC
+    - KLAC
+    - LRCX
+    - MCHP
+    - MPWR
+    - MRVL
+    - MTSI
+    - MU
     - NVDA
+    - NVMI
+    - NXPI
+    - ON
+    - QCOM
+    - QRVO
+    - RMBS
+    - SWKS
+    - TER
+    - TSM
+    - TXN
   Energy_Majors:
     - XOM
     - CVX

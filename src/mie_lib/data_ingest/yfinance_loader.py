@@ -2,7 +2,7 @@
 YFinance ingestion module.
 
 Provides functions to:
-- read tickers from config/tickers.yml
+- read tickers from config/ticker_list.yml
 - fetch full history for a ticker and write to data/raw/{TICKER}.parquet (+ CSV fallback)
 - incremental update that fetches only new rows and appends (dedupe + sort)
 - validation utilities

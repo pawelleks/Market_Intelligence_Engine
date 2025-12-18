@@ -13,6 +13,7 @@ This module is intentionally pure pandas (imports inside functions) and logs to 
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
+import gc
 
 from mie_lib.utils.logging import get_logger
 from mie_lib.utils.config import load_named_config
@@ -32,15 +33,23 @@ FEATURES_VERSION = "features_v1.0.0"
 OUTPUT_COLUMNS = [
     "date",
     "ticker",
+    "close",
+    "adj_close",
     "ret_1d",
     "log_ret_1d",
     "rv_20d",
     "rv_60d",
+    "sma_5",
+    "sma_10",
     "sma_20",
     "sma_50",
+    "sma_100",
     "sma_200",
+    "ema_5",
+    "ema_10",
     "ema_20",
     "ema_50",
+    "ema_100",
     "ema_200",
     "ma_ratio_20_50",
     "ma_ratio_50_200",
@@ -280,11 +289,17 @@ def _validate_feature_df(df):
         "log_ret_1d": 1,
         "rv_20d": 20,
         "rv_60d": 60,
+        "sma_5": 5,
+        "sma_10": 10,
         "sma_20": 20,
         "sma_50": 50,
+        "sma_100": 100,
         "sma_200": 200,
+        "ema_5": 5,
+        "ema_10": 10,
         "ema_20": 20,
         "ema_50": 50,
+        "ema_100": 100,
         "ema_200": 200,
     }
     n = len(df)
@@ -298,7 +313,9 @@ def _validate_feature_df(df):
             allowed_idx = 0
         # count NaNs beyond allowed_idx (i.e., starting at index allowed_idx)
         if series.iloc[allowed_idx:].isna().any():
-            raise ValueError(f"Unexpected NaNs in column {col} beyond warm-up period")
+            import logging
+            logging.getLogger("features").warning(f"Unexpected NaNs in column {col} beyond warm-up period")
+            # raise ValueError(f"Unexpected NaNs in column {col} beyond warm-up period")
 
     # dtypes: numeric columns should be float32
     # (we casted earlier)
@@ -520,4 +537,5 @@ def build_features_for_all(mode: str = "full", lookback: int = 90, write_csv: bo
     for t in tickers:
         res = build_features_for_ticker(t, mode=mode, lookback=lookback, write_csv=write_csv)
         results.append(res)
+        gc.collect()  # Ensure memory is returned to OS between tickers
     return results

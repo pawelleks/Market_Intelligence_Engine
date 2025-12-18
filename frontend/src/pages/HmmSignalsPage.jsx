@@ -56,6 +56,20 @@ const HmmSignalsPage = () => {
         fetchSummary();
     }, [ticker]);
 
+    // Auto-select best Sharpe config
+    useEffect(() => {
+        if (summaryData && summaryData.summary && summaryData.summary.length > 0) {
+            // Find config with highest Strategy Sharpe Ratio
+            const best = summaryData.summary.reduce((prev, current) => {
+                return (prev.strat_sharpe > current.strat_sharpe) ? prev : current;
+            }, summaryData.summary[0]);
+
+            if (best) {
+                fetchConfigDetails(best.n_states, best.train_window_years);
+            }
+        }
+    }, [summaryData]);
+
     // --- Fetch Signals & Chart for Config ---
     const fetchConfigDetails = async (n_states, window) => {
         const key = `${n_states}-${window}`;

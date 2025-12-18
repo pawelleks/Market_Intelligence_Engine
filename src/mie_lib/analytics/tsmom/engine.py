@@ -230,41 +230,6 @@ def run_tsmom_daily_update(asof_date: Optional[date] = None, lookback_days: int 
                 
             processed_count += 1
             
-            # 2. Signal Events
-            events_to_process = []
-            
-            if backfill:
-                # Process ALL rows with signal changes
-                # Filter calc_df where signal_changed is True
-                event_df = calc_df[calc_df["signal_changed"] == True]
-                for idx, row in event_df.iterrows():
-                    events_to_process.append((idx, row))
-            else:
-                # Detailed Daily Mode: only latest
-                if last_row["signal_changed"]:
-                    events_to_process.append((last_row.name, last_row))
-            
-            for evt_idx, evt_row in events_to_process:
-                # Handle date conversion for index
-                evt_date = evt_idx
-                if hasattr(evt_date, "date"):
-                    evt_date = evt_date.date()
-                    
-                sig_row = {
-                    "event_date": evt_date,
-                    "ticker": ticker,
-                    "signal": str(evt_row["signal_event"]),
-                    "close": float(evt_row["price"]),
-                    "ret_12m": float(evt_row["ret_12m"]),
-                    "tsmom_dir": int(evt_row["tsmom_dir"]),
-                    "lookback_days": lookback_days,
-                    "run_id": run_id,
-                    "created_at": created_at
-                }
-                new_signals_rows.append(sig_row)
-            
-            processed_count += 1
-            
         except Exception as e:
             LOG.error(f"Failed TSMOM calc for {ticker}: {e}")
             continue

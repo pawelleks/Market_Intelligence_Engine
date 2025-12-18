@@ -12,6 +12,15 @@ COPY . .
 # Set API URL for build time (if baked in) or rely on runtime proxy (nginx)
 # Since we are using Nginx, we can't easily bake in runtime env vars without a script.
 # However, usually for these SPA + API setups, we proxy /api to the backend in Nginx.
+
+# --- Pass Build Args ---
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+
+
+# Increase Node memory limit for build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
 RUN npm run build
 
 # Stage 2: Serve with Nginx

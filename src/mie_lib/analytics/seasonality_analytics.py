@@ -27,10 +27,12 @@ def get_seasonal_curves(ticker: str, lookbacks: List[int]) -> Dict[str, Any]:
     current_year = int(df['year'].max())
     
     # 1. Current Year Path
-    current_df = df[df['year'] == current_year].sort_values('tdoy')
+    # Use 'doy_trading' column from base file
+    current_df = df[df['year'] == current_year].sort_values('doy_trading')
     current_path = {
         "label": f"Current ({current_year})",
-        "data": current_df[['tdoy', 'r']].to_dict(orient='records')
+        # Rename to 'tdoy' for frontend compatibility
+        "data": current_df[['doy_trading', 'r']].rename(columns={'doy_trading': 'tdoy'}).to_dict(orient='records')
     }
     
     # 2. Historical Average Curves
@@ -43,8 +45,11 @@ def get_seasonal_curves(ticker: str, lookbacks: List[int]) -> Dict[str, Any]:
         if hist_df.empty:
             continue
             
-        # Group by Trading Day of Year (tdoy) and calculate MEAN daily return
-        avg_daily_ret = hist_df.groupby('tdoy')['r'].mean().reset_index()
+        # Group by Trading Day of Year using 'doy_trading'
+        avg_daily_ret = hist_df.groupby('doy_trading')['r'].mean().reset_index()
+        
+        # Rename to 'tdoy' for frontend
+        avg_daily_ret = avg_daily_ret.rename(columns={'doy_trading': 'tdoy'})
         
         curves.append({
             "label": f"{lookback}-Year Avg",

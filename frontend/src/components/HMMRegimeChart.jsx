@@ -28,7 +28,9 @@ const HMMRegimeChart = ({ data, priceData, windowYears, nStates, bullThreshold, 
         const priceDates = priceData.map(d => d.date);
         const priceColumn = priceData[0]?.adj_close !== undefined ? 'adj_close' :
             priceData[0]?.close !== undefined ? 'close' :
-                priceData[0]?.Adj_Close !== undefined ? 'Adj_Close' : null;
+                priceData[0]?.adj_close_x !== undefined ? 'adj_close_x' :
+                    priceData[0]?.close_x !== undefined ? 'close_x' :
+                        priceData[0]?.Adj_Close !== undefined ? 'Adj_Close' : null;
 
         if (priceColumn) {
             const prices = priceData.map(d => d[priceColumn]);

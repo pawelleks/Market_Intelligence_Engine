@@ -318,7 +318,7 @@ class GEXEngine:
             "next30": next30
         }
 
-    def calculate_gex_from_frame(self, ticker: str, df: pd.DataFrame, spot_price: float) -> Dict:
+    def calculate_gex_from_frame(self, ticker: str, df: pd.DataFrame, spot_price: float, as_of: Optional[date] = None) -> Dict:
         """
         Calculates GEX using a pre-loaded DataFrame (from Massive Flat File).
         
@@ -326,6 +326,7 @@ class GEXEngine:
             ticker: Underlying Symbol
             df: DataFrame with columns [strike, type, expiration, oi, gamma, iv]
             spot_price: Current spot price of underlying
+            as_of: Optional "Today" date for horizon calculations. Defaults to actual today.
             
         Returns:
              Dict structure with multi-horizon profiles.
@@ -335,8 +336,11 @@ class GEXEngine:
                 return {}
             
             # Determine Horizons
-            today = date.today()
+            today = as_of if as_of else date.today()
             horizons = self._get_horizon_targets(today)
+            
+            # Log horizons for debug
+            # logger.info(f"GEX Horizons for {ticker} (as of {today}): {horizons}")
             
             all_gex_data = []
             

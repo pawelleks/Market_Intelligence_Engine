@@ -43,7 +43,7 @@ const EMTradingViewChartImpl = ({ ticker, odteData, weeklyData, monthlyData }) =
     const candlestickSeriesRef = useRef(null);
     const volumeSeriesRef = useRef(null);
 
-    const [interval, setInterval] = useState('1d');
+    const [interval, setInterval] = useState('1h');
     const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);

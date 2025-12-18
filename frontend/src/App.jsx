@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { GoogleOAuthProvider } from '@react-oauth/google';
+import { AuthProvider, useAuth } from './context/AuthContext';
+// Icons removed (moved to Sidebar)
 import PerformancePage from './pages/PerformancePage';
 import './App.css';
 import HMMRegimeChart from './components/HMMRegimeChart';
@@ -28,7 +31,18 @@ import GAFAnalysisPage from './pages/GAFAnalysisPage';
 import HMMBacktestPage from './pages/HMMBacktestPage';
 import HmmSignalsPage from './pages/HmmSignalsPage';
 import DataPipelines from './pages/DataPipelines';
+import Sidebar from './components/Sidebar';
 import TsmomDashboardPage from './pages/TsmomDashboardPage';
+import EmaStackReport from './components/EmaStackReport';
+import AdxReport from './components/AdxReport';
+import PsarReport from './components/PsarReport';
+import IchimokuReport from './components/IchimokuReport';
+import TrendMatrix from './components/TrendMatrix';
+
+// Auth Pages
+import LoginPage from './pages/LoginPage';
+import AdminPage from './pages/AdminPage';
+import AdminDataDashboard from './pages/AdminDataDashboard';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -170,18 +184,12 @@ const useAnalyticalData = (settings) => {
 
 // --- Individual Page/Module Components ---
 
-const SidebarLink = ({ to, label }) => (
-  <Link to={to} style={{ color: '#d7e3f3', textDecoration: 'none' }}>
-    {label}
-  </Link>
-);
+// SidebarLink removed (refactored to Sidebar component)
 
-const DashboardHome = () => (
-  <div style={{ padding: '20px' }}>
-    <h2 style={{ fontSize: '1.8rem' }}>Welcome to the Market Intelligence Engine</h2>
-    <p>Use the navigation to access Markov, HMM, and Utility pages.</p>
-  </div>
-);
+import DashboardHome from './components/DashboardHome';
+
+// SidebarLink removed (refactored to Sidebar component)
+
 
 const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, freshnessStatus, loading, error }) => {
   // FIX 4: Dynamic summary text based on settings
@@ -358,15 +366,33 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStep
 };
 
 
+// --- Auth & Layout ---
 
+const ProtectedLayout = ({ children }) => {
+  const { user } = useAuth();
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+};
+
+const AdminLayout = ({ children }) => {
+  const { user } = useAuth();
+  if (!user || !user.is_admin) {
+    return <Navigate to="/" replace />;
+    // Or show Not Authorized page
+  }
+  return children;
+};
 
 // --- Main Application Shell ---
 
-function App() {
+function AppContent() {
+  const { user, logout } = useAuth();
   const [settings, setSettings] = useState({
     ticker: 'SPY',
-    nStates: 2, // Default to 2 States (Binary)
-    windowYears: 20, // Default to 20 Years for a good range
+    nStates: 3, // Default to 3 States (Bull/Neutral/Bear)
+    windowYears: 10, // Default to 10 Years
     thresholdBPS: 10, // Default to 10 bps
     bullThreshold: 50,
     bearThreshold: 50,
@@ -381,131 +407,134 @@ function App() {
   const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error } = useAnalyticalData(settings);
 
   return (
-    <Router>
-      <div className="App">
-        <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3', width: '100%' }}>
+    <div className="App">
+      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3', width: '100%' }}>
 
-          {/* Sidebar Navigation */}
-          <nav style={{ width: '200px', backgroundColor: '#0e1525', padding: '20px', borderRight: '1px solid #203049', flexShrink: 0, textAlign: 'left' }}>
-            <h3 style={{ color: '#9ec4ff' }}>MIE Sections</h3>
-            <ul style={{ listStyle: 'none', padding: 0, fontSize: '13px' }}>
-              <li style={{ marginBottom: '10px' }}><Link to="/" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Dashboard Home</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/hmm" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Regimes</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/hmm-backtest" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Backtest</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/hmm-signals" style={{ color: '#d7e3f3', textDecoration: 'none' }}>HMM Signals</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/markov" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Markov Analysis</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/expected-moves" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Expected Moves</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/reliability" style={{ color: '#d7e3f3', textDecoration: 'none' }}>EM Reliability</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/dcs" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend Score</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/downtrend" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Downtrend History</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/tsmom" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Time Series Momentum (TSMOM)</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/performance" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Market Performance</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/gex" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Gamma Exposure (GEX)</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/analysis/scanner/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Scanner</Link></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/theory/minervini" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Minervini Template</Link></li>
-              <li style={{ marginBottom: '10px' }}><SidebarLink to="/market/seasonality" label="Seasonality & Time" /></li>
-              <li style={{ marginBottom: '10px' }}><SidebarLink to="/analysis/neural/gaf" label="GAF Neural Net" /></li>
-              <li style={{ marginBottom: '10px' }}><Link to="/utility/price-viewer" style={{ color: '#d7e3f3', textDecoration: 'none' }}>Price & Returns Viewer</Link></li>
-              <li style={{ marginTop: '20px', marginBottom: '10px', borderTop: '1px solid #203049', paddingTop: '10px' }}>
-                <Link to="/system/pipelines" style={{ color: '#9ec4ff', textDecoration: 'none', fontWeight: 'bold' }}>Data Pipelines</Link>
-              </li>
-            </ul>
-          </nav>
+        {/* Sidebar Navigation (Refactored) */}
+        <Sidebar user={user} logout={logout} />
 
-          {/* Main Content Area */}
-          <main style={{ flexGrow: 1, overflowY: 'auto', padding: '0', width: '100%' }}>
-            <Routes>
-              <Route path="/" element={<DashboardHome />} />
-              <Route
-                path="/analysis/hmm"
-                element={<HMMRegimePage
-                  settings={settings}
-                  setSettings={setSettings}
-                  hmmData={hmmData}
-                  priceData={priceData} // FIX 6: Pass price data
-                  hmmStats={hmmStats}
-                  hmmMetrics={hmmMetrics}
-                  hmmDurations={hmmDurations} // FIX: Pass durations
-                  freshnessStatus={freshnessStatus} // NEW PROP
-                  loading={loading}
-                  error={error}
-                />}
-              />
-              {/* Future Nested Routes will go here */}
-              <Route
-                path="/analysis/markov"
-                element={<MarkovAnalysisPage
-                  settings={settings}
-                  setSettings={setSettings}
-                  markovData={markovData}
-                  markovMultiStepData={markovMultiStepData}
-                  latestMarkovState={latestMarkovState} // NEW PROP
-                  freshnessStatus={freshnessStatus} // NEW PROP
-                  loading={loading}
-                  error={error}
-                />}
-              />
-              <Route path="/analysis/expected-moves" element={<ExpectedMovesPage />} />
-              <Route path="/analysis/expected-moves-massive" element={<ExpectedMovesPageMassive />} />
-              <Route path="/analysis/reliability" element={<EMReliabilityPage />} />
-              <Route
-                path="/utility/price-viewer"
-                element={<PriceReturnsViewerPage
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  data={priceViewerData}
-                  loading={loading}
-                  error={error}
-                  freshnessStatus={freshnessStatus}
-                />}
-              />
-              <Route
-                path="/analysis/scanner/minervini"
-                element={<MinerviniScannerPage />}
-              />
-              <Route
-                path="/theory/minervini"
-                element={<MinerviniPage settings={settings} setSettings={setSettings} />}
-              />
-              <Route
-                path="/market/seasonality"
-                element={<SeasonalityPage
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                />}
-              />
-              <Route
-                path="/analysis/dcs"
-                element={<DCSDashboardPage
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  loading={loading}
-                  error={error}
-                />}
-              />
-              <Route
-                path="/analysis/downtrend"
-                element={<DowntrendPage />}
-              />
-              <Route
-                path="/analysis/gex"
-                element={<GammaExposurePage />}
-              />
-              <Route
-                path="/analysis/neural/gaf"
-                element={<GAFAnalysisPage />}
-              />
-              <Route path="/hmm-backtest" element={<HMMBacktestPage />} />
-              <Route path="/hmm-signals" element={<HmmSignalsPage />} />
-              <Route path="/analysis/tsmom" element={<TsmomDashboardPage />} />
-              <Route path="/analysis/performance" element={<PerformancePage />} />
-              <Route path="/system/pipelines" element={<DataPipelines />} />
-            </Routes>
-          </main>
+        {/* Main Content Area */}
+        <main style={{ flexGrow: 1, overflowY: 'auto', padding: '0', width: '100%' }}>
+          <Routes>
+            <Route path="/" element={<ProtectedLayout><DashboardHome /></ProtectedLayout>} />
+            <Route
+              path="/analysis/hmm"
+              element={<ProtectedLayout><HMMRegimePage
+                settings={settings}
+                setSettings={setSettings}
+                hmmData={hmmData}
+                priceData={priceData} // FIX 6: Pass price data
+                hmmStats={hmmStats}
+                hmmMetrics={hmmMetrics}
+                hmmDurations={hmmDurations} // FIX: Pass durations
+                freshnessStatus={freshnessStatus} // NEW PROP
+                loading={loading}
+                error={error}
+              /></ProtectedLayout>}
+            />
+            {/* Future Nested Routes will go here */}
+            <Route
+              path="/analysis/markov"
+              element={<ProtectedLayout><MarkovAnalysisPage
+                settings={settings}
+                setSettings={setSettings}
+                markovData={markovData}
+                markovMultiStepData={markovMultiStepData}
+                latestMarkovState={latestMarkovState} // NEW PROP
+                freshnessStatus={freshnessStatus} // NEW PROP
+                loading={loading}
+                error={error}
+              /></ProtectedLayout>}
+            />
+            <Route path="/analysis/expected-moves" element={<ProtectedLayout><ExpectedMovesPage /></ProtectedLayout>} />
+            <Route path="/analysis/expected-moves-massive" element={<ProtectedLayout><ExpectedMovesPageMassive /></ProtectedLayout>} />
+            <Route path="/analysis/reliability" element={<ProtectedLayout><EMReliabilityPage /></ProtectedLayout>} />
+            <Route
+              path="/utility/price-viewer"
+              element={<ProtectedLayout><PriceReturnsViewerPage
+                settings={settings}
+                onSettingsChange={setSettings}
+                data={priceViewerData}
+                loading={loading}
+                error={error}
+                freshnessStatus={freshnessStatus}
+              /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/scanner/minervini"
+              element={<ProtectedLayout><MinerviniScannerPage /></ProtectedLayout>}
+            />
+            <Route
+              path="/theory/minervini"
+              element={<ProtectedLayout><MinerviniPage settings={settings} setSettings={setSettings} /></ProtectedLayout>}
+            />
+            <Route
+              path="/market/seasonality"
+              element={<ProtectedLayout><SeasonalityPage
+                settings={settings}
+                onSettingsChange={setSettings}
+              /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/dcs"
+              element={<ProtectedLayout><DCSDashboardPage
+                settings={settings}
+                onSettingsChange={setSettings}
+                loading={loading}
+                error={error}
+              /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/downtrend"
+              element={<ProtectedLayout><DowntrendPage /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/gex"
+              element={<ProtectedLayout><GammaExposurePage /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/neural/gaf"
+              element={<ProtectedLayout><GAFAnalysisPage /></ProtectedLayout>}
+            />
+            <Route path="/hmm-backtest" element={<ProtectedLayout><HMMBacktestPage /></ProtectedLayout>} />
+            <Route path="/hmm-signals" element={<ProtectedLayout><HmmSignalsPage /></ProtectedLayout>} />
+            <Route path="/analysis/tsmom" element={<ProtectedLayout><TsmomDashboardPage /></ProtectedLayout>} />
+            <Route path="/analysis/performance" element={<ProtectedLayout><PerformancePage /></ProtectedLayout>} />
+            <Route path="/analysis/ema-stack/:ticker" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
+            <Route path="/analysis/ema-stack" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
+            <Route path="/analysis/adx/:ticker" element={<ProtectedLayout><AdxReport /></ProtectedLayout>} />
+            <Route path="/analysis/adx" element={<ProtectedLayout><AdxReport /></ProtectedLayout>} />
+            <Route path="/analysis/psar/:ticker" element={<ProtectedLayout><PsarReport /></ProtectedLayout>} />
+            <Route path="/analysis/psar" element={<ProtectedLayout><PsarReport /></ProtectedLayout>} />
+            {/* Investing */}
+            <Route path="/investing/trend-matrix" element={<ProtectedLayout><TrendMatrix /></ProtectedLayout>} />
+            <Route path="/investing/ichimoku/:ticker" element={<ProtectedLayout><IchimokuReport /></ProtectedLayout>} />
+            <Route path="/investing/ichimoku" element={<ProtectedLayout><IchimokuReport /></ProtectedLayout>} />
+            <Route path="/system/pipelines" element={<ProtectedLayout><DataPipelines /></ProtectedLayout>} />
 
-        </div>
+            {/* Auth Routes */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/admin" element={<AdminLayout><AdminPage /></AdminLayout>} />
+            <Route path="/admin/data" element={<AdminLayout><AdminDataDashboard /></AdminLayout>} />
+          </Routes>
+        </main>
       </div>
-    </Router>
+    </div>
+  );
+}
+
+function App() {
+  // Use a placeholder ID if env var is missing, but best to set it.
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "GOOGLE_CLIENT_ID_MISSING";
+
+  return (
+    <GoogleOAuthProvider clientId={clientId}>
+      <AuthProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }
 

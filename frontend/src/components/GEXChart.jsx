@@ -12,8 +12,16 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
     // Ensure Puts are negative for logic, but for display we might want them on left
     const putGex = data.map(d => d.put_gex);
 
-    let traces = [];
+    // Helper to format numbers with B for Billion
+    const formatGex = (val) => {
+        const abs = Math.abs(val);
+        if (abs >= 1e9) return (val / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return (val / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3) return (val / 1e3).toFixed(2) + 'K';
+        return val.toFixed(0);
+    };
 
+    let traces;
     if (viewMode === 'split') {
         traces = [
             {
@@ -23,7 +31,9 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
                 name: 'Calls',
                 orientation: 'h',
                 marker: { color: '#4caf50' }, // Green
-                hovertemplate: 'Strike: %{y}<br>Call GEX: $%{x:.2s}<extra></extra>'
+                text: callGex.map(v => formatGex(v)),
+                hoverinfo: 'y+text',
+                hovertemplate: 'Strike: %{y}<br>Call GEX: $%{text}<extra></extra>'
             },
             {
                 y: strikes,
@@ -32,7 +42,9 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
                 name: 'Puts',
                 orientation: 'h',
                 marker: { color: '#f44336' }, // Red
-                hovertemplate: 'Strike: %{y}<br>Put GEX: $%{x:.2s}<extra></extra>'
+                text: putGex.map(v => formatGex(v)),
+                hoverinfo: 'y+text',
+                hovertemplate: 'Strike: %{y}<br>Put GEX: $%{text}<extra></extra>'
             }
         ];
     } else {
@@ -50,7 +62,9 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
                 name: 'Net GEX',
                 orientation: 'h',
                 marker: { color: colors },
-                hovertemplate: 'Strike: %{y}<br>Net GEX: $%{x:.2s}<extra></extra>'
+                text: netGex.map(v => formatGex(v)),
+                hoverinfo: 'y+text',
+                hovertemplate: 'Strike: %{y}<br>Net GEX: $%{text}<extra></extra>'
             }
         ];
     }

@@ -52,7 +52,10 @@ const CandlestickChart = ({ data, settings }) => {
             rangeslider: { visible: false },
             type: 'date',
             domain: [0, 1],
-            gridcolor: '#203049'
+            gridcolor: '#203049',
+            rangebreaks: [
+                { bounds: ["sat", "mon"] } // Hide weekends
+            ]
         },
         yaxis: { title: 'Price (USD)', domain: [0.3, 1], gridcolor: '#203049' }, // Main Price Axis
         yaxis2: { title: 'Volume', domain: [0, 0.25], showgrid: false, gridcolor: '#203049' }, // Volume Axis

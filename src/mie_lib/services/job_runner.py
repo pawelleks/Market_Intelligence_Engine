@@ -37,13 +37,15 @@ class JobRunner:
         self.current_process: Optional[subprocess.Popen] = None
         self.lock = threading.Lock()
         
-    def _get_log_path(self, run_date: Optional[date] = None) -> Path:
+    def _get_log_path(self, run_date: Optional[date] = None, job_name: Optional[str] = None) -> Path:
         if run_date is None:
             run_date = date.today()
         # Orchestrator writes to pipeline_YYYY-MM-DD.log
         # But individual commands might write to stdout/stderr.
         # We should redirect their output to the same log file for consistency in this UI.
-        return self.log_dir / f"cron_{run_date}.log" # Changed to cron_ prefix to match script
+        if job_name == "daily-pipeline":
+            return self.log_dir / f"daily_update_{run_date}.log"
+        return self.log_dir / f"cron_{run_date}.log"
 
     def run_job(self, job_name: str) -> bool:
         """
@@ -68,7 +70,7 @@ class JobRunner:
             cmd = [sys.executable if arg == "python" else arg for arg in cmd]
             cmd = [arg.replace("today", today_str) for arg in cmd]
             
-            log_path = self._get_log_path()
+            log_path = self._get_log_path(job_name=job_name)
             
             try:
                 # Open log file for appending
@@ -109,9 +111,13 @@ class JobRunner:
         with self.lock:
             return self.current_process is not None and self.current_process.poll() is None
 
-    def get_logs(self, lines: int = 100) -> str:
+    def get_logs(self, lines: int = 100, job_name: str = "daily-pipeline") -> str:
         """Reads the last N lines from today's log file."""
-        log_path = self._get_log_path()
+        # Default to daily-pipeline log if specific one exists, else cron log
+        log_path = self._get_log_path(job_name=job_name)
+        if not log_path.exists():
+             # Fallback to cron log
+             log_path = self._get_log_path()
         if not log_path.exists():
             return "Log file not found."
             
@@ -125,4 +131,4 @@ class JobRunner:
 
 # Singleton instance
 from datetime import datetime
-job_runner = JobRunner()
+job_runner = JobRunner(log_dir="data/logs")

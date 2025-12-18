@@ -182,3 +182,74 @@ def fetch_atm_option_chain(
         })
         
     return pd.DataFrame(rows)
+
+
+def fetch_history(ticker: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    Fetch historical OHLCV data from Polygon Aggregates API.
+    Returns DataFrame with columns: [date, open, high, low, close, volume, ticker]
+    """
+    api_key = os.environ.get("POLYGON_API_KEY", "keXDhBdz5zuofjHkeiYMznzUiyDerXgu")
+    
+    # Handle indices: ^SPX -> I:SPX, ^VIX -> I:VIX
+    api_ticker = ticker
+    if ticker.startswith("^"):
+        api_ticker = "I:" + ticker.replace("^", "")
+        
+    # Defaults
+    if not end_date:
+        end_date = date.today().strftime("%Y-%m-%d")
+    if not start_date:
+        # Default to 50 years ago for "full" history
+        start_date = "1970-01-01"
+
+    url = f"https://api.polygon.io/v2/aggs/ticker/{api_ticker}/range/1/day/{start_date}/{end_date}?adjusted=true&sort=asc&limit=50000&apiKey={api_key}"
+    
+    logger.info(f"Fetching Polygon history for {ticker} (as {api_ticker})...")
+    
+    try:
+        resp = requests.get(url)
+        if resp.status_code != 200:
+            logger.error(f"Error fetching Polygon history for {ticker}: {resp.status_code} {resp.text}")
+            return pd.DataFrame()
+            
+        data = resp.json()
+        if data.get("status") != "OK" and data.get("status") != "DELAYED":
+             # 'DELAYED' is also fine for some accounts
+             if not (data.get("resultsCount", 0) > 0):
+                 logger.warning(f"Polygon returned status {data.get('status')} for {ticker}")
+                 return pd.DataFrame()
+
+        results = data.get("results", [])
+        if not results:
+            return pd.DataFrame()
+            
+        # Parse
+        df = pd.DataFrame(results)
+        # Polygon returns: v, vw, o, c, h, l, t, n
+        # Map to: volume, vwap, open, close, high, low, timestamp, transactions
+        
+        df = df.rename(columns={
+            "v": "volume",
+            "o": "open",
+            "c": "close",
+            "h": "high",
+            "l": "low",
+            "t": "timestamp"
+        })
+        
+        # Convert timestamp (ms) to date
+        df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df["ticker"] = ticker
+        
+        # Add adj_close = close (Polygon adjusted=true implies close is adjusted)
+        df["adj_close"] = df["close"]
+        
+        # Select columns
+        df = df[["date", "open", "high", "low", "close", "adj_close", "volume", "ticker"]]
+        
+        return df
+
+    except Exception as e:
+        logger.error(f"Exception fetching Polygon history for {ticker}: {e}")
+        return pd.DataFrame()

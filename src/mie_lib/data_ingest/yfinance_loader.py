@@ -13,9 +13,17 @@ from pathlib import Path
 import json
 from datetime import datetime, timedelta, timezone, date as _date
 from typing import List, Dict, Optional
+import pandas as pd
 
 from mie_lib.utils.logging import get_logger
 from mie_lib.utils.config import load_named_config
+
+# Import Polygon provider for primary fetch attempt
+try:
+    from mie_lib.data_ingest.providers.polygon import fetch_history as fetch_polygon_history
+    POLYGON_AVAILABLE = True
+except ImportError:
+    POLYGON_AVAILABLE = False
 
 LOG = get_logger("ingest")
 
@@ -194,9 +202,30 @@ def fetch_full_history(ticker: str) -> Dict[str, any]:
     """
     ensure_dirs()
     LOG.info("Fetching full history for %s", ticker)
-    df = _df_from_yfinance(ticker)
+    
+    source = "unknown"
+    
+    # 1. Try Polygon First (Primary)
+    df = pd.DataFrame() # init
+    if POLYGON_AVAILABLE:
+        try:
+            # Fetch "max" history (e.g. from 1970 or 2000)
+            df = fetch_polygon_history(ticker)
+            if not df.empty:
+                source = "polygon"
+                LOG.info(f"[ingest] Fetched {len(df)} rows from Polygon for {ticker}")
+        except Exception as e:
+            LOG.warning(f"Polygon fetch failed for {ticker}: {e}")
+            
+    # 2. Fallback to YFinance if Polygon failed or returned empty
     if df.empty:
-        LOG.warning("No data returned for %s", ticker)
+        LOG.info(f"[ingest] Polygon missing/empty for {ticker}, falling back to YFinance")
+        df = _df_from_yfinance(ticker)
+        if not df.empty:
+            source = "yfinance"
+        
+    if df.empty:
+        LOG.warning("No data returned for %s (tried Polygon & YFinance)", ticker)
         return {"ticker": ticker, "rows": 0}
 
     p_parquet, p_csv = _write_outputs(df, ticker)
@@ -209,10 +238,11 @@ def fetch_full_history(ticker: str) -> Dict[str, any]:
         "data_range": [str(df["date"].min().date()), str(df["date"].max().date())],
         "rows": int(len(df)),
         "columns_available": list(df.columns),
+        "source": source
     }
     save_registry(reg)
 
-    LOG.info("Wrote %d rows for %s to %s", len(df), ticker, p_parquet)
+    LOG.info("Wrote %d rows for %s to %s (Source: %s)", len(df), ticker, p_parquet, source)
     return {"ticker": ticker, "rows": len(df), "start_date": str(df["date"].min().date()), "end_date": str(df["date"].max().date()), "parquet": str(p_parquet), "csv": str(p_csv)}
 
 
@@ -282,9 +312,28 @@ def update_ticker_incremental(ticker: str) -> Dict[str, any]:
     existing["date"] = pd.to_datetime(existing["date"]).dt.tz_localize(None)
     last_date = existing["date"].max().date()
     start_fetch = last_date + timedelta(days=1)
-    start_str = start_fetch.isoformat()
+    start_str = start_fetch.isoformat() # YYYY-MM-DD
+    
+    source = "unknown"
 
-    new_df_raw = _df_from_yfinance(ticker, start=start_str)
+    # 1. Try Polygon Incremental
+    new_df_raw = pd.DataFrame()
+    if POLYGON_AVAILABLE:
+        try:
+            # Polygon expects end_date too, default to today
+            new_df_raw = fetch_polygon_history(ticker, start_date=start_str)
+            if not new_df_raw.empty:
+                source = "polygon"
+                LOG.info(f"[ingest] Fetched {len(new_df_raw)} new rows from Polygon for {ticker}")
+        except Exception as e:
+            LOG.warning(f"Polygon incremental fetch failed for {ticker}: {e}")
+
+    # 2. Fallback YFinance
+    if new_df_raw.empty:
+         new_df_raw = _df_from_yfinance(ticker, start=start_str)
+         if not new_df_raw.empty:
+             source = "yfinance"
+
     if new_df_raw.empty:
         LOG.info("No new rows for %s since %s", ticker, last_date)
         return {"ticker": ticker, "rows_added": 0, "last_date": str(last_date), "status": "no_new"}
@@ -333,11 +382,12 @@ def update_ticker_incremental(ticker: str) -> Dict[str, any]:
         "data_range": [str(combined["date"].min().date()), str(combined["date"].max().date())],
         "rows": int(len(combined)),
         "columns_available": list(combined.columns),
+        "source": source
     }
     save_registry(reg)
 
     rows_added = len(combined) - len(existing)
-    LOG.info("Appended %d rows for %s (now %d rows).", rows_added, ticker, len(combined))
+    LOG.info("Appended %d rows for %s (now %d rows). Source: %s", rows_added, ticker, len(combined), source)
     return {
         "ticker": ticker,
         "rows_added": int(rows_added),

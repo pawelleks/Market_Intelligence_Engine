@@ -62,8 +62,14 @@ log "build-markov-grid completed."
 # 5. Update HMM Data
 log "Running build-hmm-daily..."
 python -m mie_lib.cli.mie build-hmm-daily --tickers @config >> "${LOG_FILE}" 2>&1
+log "Running build-hmm-grid..."
+python -m mie_lib.cli.mie build-hmm-grid --tickers @config --windows 5,10,20,MAX --states 2,3 >> "${LOG_FILE}" 2>&1
 python -m mie_lib.cli.mie build-hmm-snapshots >> "${LOG_FILE}" 2>&1
 log "build-hmm-snapshots completed."
+
+log "Running backtest-hmm (Generating Strategy Analysis)..."
+python -m mie_lib.cli.mie backtest-hmm --tickers @config >> "${LOG_FILE}" 2>&1
+log "backtest-hmm completed."
 
 # 6. Update GEX Data
 log "Running build-gex-daily..."
@@ -81,7 +87,17 @@ log "Running update-seasonality..."
 python -m mie_lib.cli.mie update-seasonality >> "${LOG_FILE}" 2>&1
 log "update-seasonality completed."
 
-# 9. GAF Prediction
+# 9. New Analytics (SMA Stack, ADX, PSAR)
+log "Running update-sma-stack..."
+python -m mie_lib.cli.mie update-sma-stack >> "${LOG_FILE}" 2>&1
+log "Running update-adx..."
+python -m mie_lib.cli.mie update-adx >> "${LOG_FILE}" 2>&1
+log "Running update-psar..."
+python -m mie_lib.cli.mie update-psar >> "${LOG_FILE}" 2>&1
+log "Running update-ichimoku..."
+python -m mie_lib.cli.mie update-ichimoku >> "${LOG_FILE}" 2>&1
+
+# 10. GAF Prediction
 log "Running build-gaf-daily..."
 python -m mie_lib.cli.mie build-gaf-daily >> "${LOG_FILE}" 2>&1
 log "build-gaf-daily completed."

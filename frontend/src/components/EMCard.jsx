@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import DynamicExpectedMoveChart from './DynamicExpectedMoveChart';
 
 const EMCard = ({ ticker, data, asOf, liveData, lastUpdated, onClick, isSelected }) => {
     if (!data) return null;
@@ -86,7 +87,7 @@ const EMCard = ({ ticker, data, asOf, liveData, lastUpdated, onClick, isSelected
             </div>
 
             {/* 2. Content Grid (3 Columns) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: '20px', alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: '20px', alignItems: 'center' }}>
 
                 {/* LEFT: EOD Data */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -116,117 +117,18 @@ const EMCard = ({ ticker, data, asOf, liveData, lastUpdated, onClick, isSelected
                     ))}
                 </div>
 
-                {/* CENTER: Visualization (Centered Deviation Bar) */}
-                <div style={{ height: '300px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {/* 
-                       Logic:
-                       - Vertical Bar representing the range.
-                       - Center Tick = Previous Close.
-                       - Triangle Pointer = Current Price.
-                       - Fill Color Logic:
-                         - Green: Price > Center (within range)
-                         - Orange: Price < Center (within range)
-                         - Red: Price outside range
-                     */}
-                    {(() => {
-                        // Use ODTE EOD range as the base reference
-                        const rangeLow = odte?.lower_range;
-                        const rangeHigh = odte?.upper_range;
-                        const centerPrice = spot; // Previous Close
-                        const currentPrice = liveData?.spot_price || spot; // Use live if available, else older spot
-
-                        if (!rangeLow || !rangeHigh || !centerPrice) return <div style={{ color: '#666' }}>No Range Data</div>;
-
-                        // Create Scale
-                        // We map Price -> Y coordinate (0 at top, 100 at bottom)
-                        // Let's add padding (overflow) to the view
-                        const span = rangeHigh - rangeLow;
-                        const padding = span * 0.2; // 20% padding above/below
-                        const viewMax = rangeHigh + padding;
-                        const viewMin = rangeLow - padding;
-                        const viewSpan = viewMax - viewMin;
-
-                        const scaleY = (p) => {
-                            // Inverted Y (Higher price = Lower Y value)
-                            return 100 - ((p - viewMin) / viewSpan) * 100;
-                        };
-
-                        const yHigh = scaleY(rangeHigh);
-                        const yLow = scaleY(rangeLow);
-                        const yCenter = scaleY(centerPrice);
-                        const yCurrent = scaleY(currentPrice);
-
-                        // Determine Fill Color
-                        let fillColor = '#4caf50'; // Default Green (Up)
-                        let isWarning = false;
-
-                        if (currentPrice < centerPrice) {
-                            fillColor = '#ff9800'; // Orange (Down)
-                        }
-
-                        if (currentPrice > rangeHigh || currentPrice < rangeLow) {
-                            fillColor = '#f44336'; // Red (Breakout)
-                            isWarning = true;
-                        }
-
-                        // Determine Fill Height & Position
-                        // Rect starts at Math.min(yCenter, yCurrent) and height is abs(yCenter - yCurrent)
-                        const fillY = Math.min(yCenter, yCurrent);
-                        const fillHeight = Math.abs(yCenter - yCurrent);
-
-                        return (
-                            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
-
-                                {/* 1. Main Range Bar (Vertical Line) */}
-                                <line
-                                    x1="50" y1={yHigh}
-                                    x2="50" y2={yLow}
-                                    stroke="#334455"
-                                    strokeWidth="6"
-                                    strokeLinecap="round"
-                                />
-
-                                {/* 2. Active Fill (Dynamic) */}
-                                <rect
-                                    x="47"
-                                    y={fillY}
-                                    width="6"
-                                    height={fillHeight}
-                                    fill={fillColor}
-                                    opacity="0.8"
-                                />
-
-                                {/* 3. Center Reference (Previous Close) - Horizontal Tick */}
-                                <line
-                                    x1="40" y1={yCenter}
-                                    x2="60" y2={yCenter}
-                                    stroke="#fff"
-                                    strokeWidth="1"
-                                    strokeDasharray="2 1"
-                                    opacity="0.6"
-                                />
-                                <text x="35" y={yCenter + 1} fill="#888" fontSize="4" textAnchor="end" alignmentBaseline="middle">Prev Close</text>
-
-                                {/* 4. Range Boundaries (Dots) */}
-                                {/* Upper (Red Dot) */}
-                                <circle cx="50" cy={yHigh} r="2" fill="#f44336" />
-
-                                {/* Lower (Green Dot) */}
-                                <circle cx="50" cy={yLow} r="2" fill="#4caf50" />
-
-                                {/* 5. Current Price Pointer (Triangle) */}
-                                {/* Shifted to the right of the bar */}
-                                <g transform={`translate(0, ${yCurrent})`}>
-                                    {/* Triangle pointing LEFT towards the bar */}
-                                    <polygon points="60,0 65,-3 65,3" fill="#fff" />
-                                    <text x="68" y="1.5" fill="#fff" fontSize="5" fontWeight="bold" alignmentBaseline="middle">
-                                        {fmt(currentPrice)}
-                                    </text>
-                                </g>
-
-                            </svg>
-                        );
-                    })()}
+                {/* CENTER: Visualization (Dynamic Chart) */}
+                <div style={{ height: '300px', flexGrow: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
+                    <DynamicExpectedMoveChart
+                        ticker={ticker}
+                        prevClose={spot} // spot from EOD is previous close
+                        // FALLBACK LOGIC: If 0DTE is missing/empty, use Weekly for the chart
+                        emHigh={odte?.upper_range || weekly?.upper_range}
+                        emLow={odte?.lower_range || weekly?.lower_range}
+                        label={odte?.upper_range ? "0DTE" : (weekly?.upper_range ? "WEEKLY" : "N/A")}
+                        currentPrice={liveData?.spot_price || spot}
+                        lastUpdated={lastUpdated}
+                    />
                 </div>
 
                 {/* RIGHT: Live Data */}

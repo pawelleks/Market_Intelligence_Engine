@@ -43,8 +43,21 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
                 if (datetime.now() - ts).total_seconds() < (max_age_hours * 3600):
                      logger.info(f"Serving GEX for {ticker} from disk")
                      # Update memory cache
-                     _GEX_CACHE[ticker] = {"timestamp": datetime.now(), "data": disk_data}
-                     return disk_data
+                     import math
+                     def sanitize_floats(obj):
+                         if isinstance(obj, float):
+                             if math.isnan(obj) or math.isinf(obj):
+                                 return None
+                             return obj
+                         if isinstance(obj, dict):
+                             return {k: sanitize_floats(v) for k, v in obj.items()}
+                         if isinstance(obj, list):
+                             return [sanitize_floats(x) for x in obj]
+                         return obj
+
+                     sanitized_data = sanitize_floats(disk_data)
+                     _GEX_CACHE[ticker] = {"timestamp": datetime.now(), "data": sanitized_data}
+                     return sanitized_data
             except:
                 pass
             
@@ -67,12 +80,13 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
              raise HTTPException(status_code=404, detail=f"Could not calculate GEX for {ticker}.")
             
         # Update Cache
+        sanitized_data = sanitize_floats(data)
         _GEX_CACHE[ticker] = {
             "timestamp": datetime.now(),
-            "data": data
+            "data": sanitized_data
         }
         
-        return data
+        return sanitized_data
     except Exception as e:
          logger.error(f"GEX Error: {e}")
          raise HTTPException(status_code=500, detail=str(e))

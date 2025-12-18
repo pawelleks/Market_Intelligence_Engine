@@ -5,10 +5,10 @@ groups:
     - IWM
     - DIA
   Indexes:
-    - .SPX
-    - .DJI
-    - .IXIC
-    - .RUT
+    - ^SPX
+    - ^DJI
+    - ^IXIC
+    - ^RUT
   Sector_ETFs:
     - XLC # Communication Services
     - XLY # Consumer Discretionary
@@ -62,7 +62,7 @@ groups:
     - NVDA
     - NVMI
     - NXPI
-    - ON
+    - "ON"
     - QCOM
     - QRVO
     - RMBS
@@ -74,6 +74,22 @@ groups:
     - XOM
     - CVX
     - COP
+    - APA
+    - BKR
+    - BP
+    - DVN
+    - FANG
+    - HAL
+    - HES
+    - MPC
+    - OKE
+    - OXY
+    - PSX
+    - SHEL
+    - SLB
+    - VLO
+    - WMB
+    - XOM
   Financials_and_Payments:
     - BRK.B
     - JPM

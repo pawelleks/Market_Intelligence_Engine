@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY run_api.py .
 COPY api_server.py .
+COPY make_admin.py .
 # Copy config (will be overridden by volume in docker-compose, but good for build)
 COPY config/ ./config/
 

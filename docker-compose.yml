@@ -16,8 +16,11 @@ services:
       - ./cli:/app/cli                 # Management CLI
       - ./src:/app/src                 # Live Code Reload (Optional)
       - ./api_server.py:/app/api_server.py # Mount entrypoint for updates
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app/src
+      - MOCK_AUTH_USER=bypass@local.dev # Bypasses Google Auth for local dev
     restart: unless-stopped
     networks:
       - mie-net
@@ -27,9 +30,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      args:
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
     container_name: mie-web
     ports:
-      - "5173:80"
+      - "80:80"
     # volumes:
       # - ./frontend/src:/app/src        # Live Code Reload
       # - ./frontend/public:/app/public
@@ -54,6 +59,8 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./cli:/app/cli                 # Mount CLI for updates
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app/src
     restart: unless-stopped

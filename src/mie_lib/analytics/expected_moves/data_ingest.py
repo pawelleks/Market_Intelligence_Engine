@@ -50,7 +50,7 @@ def fetch_vix1d_close(as_of: date) -> Optional[float]:
     LOG.error(f"Could not fetch VIX1D or VIX for {as_of}")
     return None
 
-def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
+def get_target_expirations(as_of: date, ticker: Optional[str] = None) -> Tuple[date, date, date]:
     """
     Determines the target expiration dates based on the spec.
     
@@ -111,28 +111,69 @@ def get_target_expirations(as_of: date) -> Tuple[date, date, date]:
             weekly_date = odte_date
             break
             
-    # 3. Monthly: Last Trading Day of Month (EOM)
+    # 3. Monthly Logic
+    # Indices/ETFs (SPY, QQQ, IWM, DIA, ^VIX) often use EOM (End of Month) expirations.
+    # Equities (LLY, AAPL, etc.) usually only have standard Monthly (3rd Friday).
+    # We default to EOM for the "Big 4" + VIX, and 3rd Friday for everything else.
+    
+    # Heuristic for generic "Index with EOMs"
+    # This list can be expanded or moved to config if needed.
+    eom_tickers = {"SPY", "QQQ", "IWM", "DIA", "RSP", "^VIX", "^VIX1D"}
+    use_eom = False
+    
+    if ticker:
+        t_upper = ticker.upper()
+        if t_upper in eom_tickers or t_upper.startswith("^"):
+            use_eom = True
+    else:
+        # Default to EOM if no ticker specified (backward compat)
+        use_eom = True
+
     def get_last_trading_day_of_month(year, month):
-        # Start at the last day of the month
-        # Get number of days in month
         import calendar
         last_day = calendar.monthrange(year, month)[1]
         d = date(year, month, last_day)
-        
-        # Move backward until we find a trading day
         while not is_trading_day(d):
             d -= timedelta(days=1)
         return d
 
-    monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month)
-    
-    # If monthly date is passed (relative to ODTE), move to next month
-    # We compare to ODTE because that's our anchor "Live" date
-    if monthly_date < odte_date:
-        if odte_date.month == 12:
-            monthly_date = get_last_trading_day_of_month(odte_date.year + 1, 1)
-        else:
-            monthly_date = get_last_trading_day_of_month(odte_date.year, odte_date.month + 1)
+    def get_third_friday_of_month(year, month):
+        # 3rd Friday
+        # 1. Find the 1st day of month
+        d = date(year, month, 1)
+        # 2. Find first Friday
+        # weekday(): Mon=0, Fri=4
+        days_to_fri = (4 - d.weekday() + 7) % 7
+        first_friday = d + timedelta(days=days_to_fri)
+        # 3. Add 2 weeks
+        third_friday = first_friday + timedelta(weeks=2)
+        
+        # Check if trading day? (Usually yes, unless Holiday)
+        # If holiday, it typically moves to PREV day (Thursday)
+        # mie_lib.utils.trading_calendar should handle this check?
+        # Let's just check is_trading_day, if not move back 1.
+        while not is_trading_day(third_friday):
+            third_friday -= timedelta(days=1)
+        
+        return third_friday
+
+    if use_eom:
+        monthly_date = get_last_trading_day_of_month(as_of.year, as_of.month)
+        # Check if passed (relative to ODTE)
+        if monthly_date < odte_date:
+            if odte_date.month == 12:
+                monthly_date = get_last_trading_day_of_month(odte_date.year + 1, 1)
+            else:
+                monthly_date = get_last_trading_day_of_month(odte_date.year, odte_date.month + 1)
+    else:
+        # Standard Equity (3rd Friday)
+        monthly_date = get_third_friday_of_month(as_of.year, as_of.month)
+        # If passed (relative to ODTE), move to next month
+        if monthly_date < odte_date:
+             if odte_date.month == 12:
+                 monthly_date = get_third_friday_of_month(odte_date.year + 1, 1)
+             else:
+                 monthly_date = get_third_friday_of_month(odte_date.year, odte_date.month + 1)
 
     return odte_date, weekly_date, monthly_date
 

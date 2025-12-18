@@ -93,20 +93,20 @@ const GammaExposurePage = () => {
             let put = 0;
 
             if (horizon === 'eow') {
-                call = p.eow_call_gex || 0;
-                put = p.eow_put_gex || 0;
+                call = p.eow_call_gex || p.weekly_call_gex || 0;
+                put = p.eow_put_gex || p.weekly_put_gex || 0;
             } else if (horizon === 'eom') {
-                call = p.eom_call_gex || 0;
-                put = p.eom_put_gex || 0;
+                call = p.eom_call_gex || p.monthly_call_gex || 0;
+                put = p.eom_put_gex || p.monthly_put_gex || 0;
             } else if (horizon === 'eoq') {
-                call = p.eoq_call_gex || 0;
-                put = p.eoq_put_gex || 0;
+                call = p.eoq_call_gex || p.quarterly_call_gex || 0;
+                put = p.eoq_put_gex || p.quarterly_put_gex || 0;
             } else if (horizon === 'next5') {
-                call = p.next5_call_gex || 0;
-                put = p.next5_put_gex || 0;
+                call = p.next5_call_gex || p.weekly_call_gex || 0;
+                put = p.next5_put_gex || p.weekly_put_gex || 0;
             } else if (horizon === 'next30') {
-                call = p.next30_call_gex || 0;
-                put = p.next30_put_gex || 0;
+                call = p.next30_call_gex || p.monthly_call_gex || 0;
+                put = p.next30_put_gex || p.monthly_put_gex || 0;
             }
 
             return {
@@ -138,12 +138,12 @@ const GammaExposurePage = () => {
     // Calculate Dynamic Title with Date
     const getValidTill = () => {
         if (!data?.group_dates) return null;
-        if (horizon === 'eow') return data.group_dates.eow;
-        if (horizon === 'eom') return data.group_dates.eom;
-        if (horizon === 'eoq') return data.group_dates.eoq;
-        if (horizon === 'next5') return data.group_dates.next5;
-        if (horizon === 'next30') return data.group_dates.next30;
-        return null;
+        if (horizon === 'eow') return data.group_dates.eow || data.group_dates.Weekly;
+        if (horizon === 'eom') return data.group_dates.eom || data.group_dates.Monthly;
+        if (horizon === 'eoq') return data.group_dates.eoq || data.group_dates.Quarterly;
+        if (horizon === 'next5') return data.group_dates.next5 || data.group_dates.Next5;
+        if (horizon === 'next30') return data.group_dates.next30 || data.group_dates.Next30;
+        return null; // Fallback
     };
     const validTill = getValidTill();
 

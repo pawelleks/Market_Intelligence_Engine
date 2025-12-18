@@ -8,6 +8,8 @@ import pandas as pd
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import re
+import yfinance as yf
 
 from mie_lib.analytics.expected_moves.core import (
     calculate_straddle_em,
@@ -16,12 +18,12 @@ from mie_lib.analytics.expected_moves.core import (
 )
 from mie_lib.analytics.expected_moves.data_ingest import (
     fetch_vix1d_close,
-)
-from mie_lib.analytics.expected_moves.data_ingest_polygon import (
     get_target_expirations,
-    fetch_option_chain,
     fetch_underlying_close,
 )
+from mie_lib.data_ingest.providers.massive_api import fetch_option_chain_snapshot
+# from mie_lib.data_ingest.providers.massive_api import fetch_historical_option_chain # REMOVED to enforce Flat File usage
+# from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader # Removed
 from mie_lib.utils.paths import (
     options_expected_moves_path,
     options_latest_json_path,
@@ -45,21 +47,79 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
         
     LOG.info(f"Starting Expected Moves build for {as_of} tickers={tickers}")
     
-    # 0. Global Setup: Determine Target Dates for Output vs Input
-    # Expected Move Standard:
-    # - Output Date: Today (or Next Session) -> 'as_of'
-    # - Input Data: Previous Close (EOD) -> 'spot_date'
-    
+    # 0. Global Setup: Determine Target Dates
     from mie_lib.utils.trading_calendar import get_previous_trading_day
+    LOG.info(f"Context: AsOf={as_of}")
     
-    # Calculate Expirations first to know the context (0DTE rollover)
-    odte_date, weekly_date, monthly_date = get_target_expirations(as_of)
+    LOG.info(f"Starting Daily Expected Moves Build for {len(tickers)} tickers. Date: {as_of}")
     
-    # The reference "Spot Date" is the previous trading day relative to the 0DTE session.
-    spot_date = get_previous_trading_day(odte_date)
+    # Note: We calculate expirations PER TICKER inside the loop now
+    # to handle different monthly conventions (Equity vs Index)
     
-    LOG.info(f"Context: AsOf={as_of} -> ODTE={odte_date} -> SpotDate (Data Source)={spot_date}")
-
+    # FIX: Spot Date should be the PREVIOUS trading day relative to calculation date (as_of)
+    # We want the EOD Close from the last completed session.
+    spot_date = get_previous_trading_day(as_of)
+    
+    LOG.info(f"Target Spot Date (Prev Close): {spot_date}")
+    
+    # Handle Index mapping: Strip ^ for options data matching
+    # e.g. ^SPX -> SPX in flat file
+    # But we need to keep original tickers for loop? No, loop iterates `tickers`.
+    # `run_daily_em_build` receives `tickers`.
+    # We should perform the strip inside the Loader or map it here?
+    # Loader does caching. Better to strip in Loader filter criteria.
+    # Done in Loader update below.
+    
+    # We need a spot_date for VIX fetch. 
+    # In this Flat File workflow, 'as_of' represents the Calculation Date.
+    # So we use spot_date (T-1) for both spot data and options data (if flat file).
+    
+    # 0.5 Load Massive Options Data (Optimized)
+    # Hybrid Strategy:
+    # 1. Historical (Backfill): Use Bulk Flat Files (MassiveOptionsLoader) to get Greeks/IV/Prices.
+    # 2. Live (Today): Use REST API Snapshot (MassiveAPIClient).
+    
+    df_all = pd.DataFrame()
+    is_historical = as_of < date.today()
+    vix1d_val = None # Initialize to prevent UnboundLocalError
+    
+    # Explicitly skip flat file for Today (not ready yet)
+    if as_of >= date.today():
+         LOG.info("Skipping Flat File for Today (Not generated yet). Using API Mode.")
+         is_historical = False
+    
+    if is_historical:
+        LOG.info("Historical Mode: Utilizing MassiveOptionsLoader for Bulk Data...")
+        try:
+            from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader
+            loader = MassiveOptionsLoader()
+            
+            # Download file for the TARGET DATE (as_of)
+            as_of_str = as_of.strftime("%Y-%m-%d")
+            
+            # Download if missing (self-healing)
+            LOG.info(f"Ensuring local Flat File availability for {as_of}...")
+            loader.download_day_snapshot(as_of_str)
+            
+            # Load Full Dataset (tickers=None) to ensure we have everything in memory
+            LOG.info(f"Loading daily aggregates for {as_of_str}...")
+            df_all = loader.load_day_aggregates(as_of_str, tickers=None)
+            
+            if not df_all.empty:
+                 LOG.info(f"DEBUG: Download Success. DataFrame Shape: {df_all.shape}")
+                 LOG.info(f"Loaded {len(df_all)} option rows from flat file.")
+                 LOG.info(f"DEBUG: Loaded Data Columns: {df_all.columns.tolist()}")
+                 LOG.info(f"DEBUG: First 5 Tickers in File: {df_all['ticker'].head(5).tolist() if 'ticker' in df_all.columns else (df_all['underlying_ticker'].head(5).tolist() if 'underlying_ticker' in df_all.columns else 'TickerColMissing')}")
+                 if 'option_ticker' in df_all.columns:
+                     LOG.info(f"DEBUG: Sample Option Tickers: {df_all['option_ticker'].head().tolist()}")
+            else:
+                 LOG.warning(f"Flat file load returned empty for {as_of_str}.")
+                 
+        except Exception as e:
+            LOG.error(f"Failed to load bulk flat file: {e}")
+    else:
+        LOG.info("Live Mode: Utilizing Massive REST API Snapshot...")
+        
     # 1. Fetch Global VIX1D (using Spot Date / EOD)
     vix1d_val = fetch_vix1d_close(spot_date)
     confidence_score = 0
@@ -67,7 +127,6 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
         confidence_score = calculate_confidence_score(vix1d_val)
         LOG.info(f"VIX1D ({spot_date}): {vix1d_val}, Confidence Score: {confidence_score}")
     else:
-        # Fallback to as_of if spot_date failed? (Rare)
         LOG.warning(f"VIX1D not available for {spot_date}, trying {as_of}...")
         vix1d_val = fetch_vix1d_close(as_of)
         
@@ -76,23 +135,36 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
              LOG.info(f"VIX1D ({as_of}): {vix1d_val}, Confidence Score: {confidence_score}")
         else:
              LOG.warning("VIX1D not available, defaulting confidence to 0")
-        
+             
+    
     latest_results = {
         "as_of": as_of.isoformat(),
-        "source": "Polygon",
+        "source": "MassiveFlatFile",
         "vix1d": vix1d_val,
         "confidence_score": confidence_score,
         "tickers": {}
     }
     
+    # Initialize spot_map_cache for _process_ticker
+    spot_map_cache = {}
+
     for ticker in tickers:
         try:
-            _process_ticker(ticker, as_of, spot_date, odte_date, weekly_date, monthly_date, vix1d_val, confidence_score, latest_results)
+            _process_ticker(
+                ticker, 
+                as_of, 
+                spot_date, 
+                vix1d_val, 
+                confidence_score, 
+                latest_results,
+                spot_map=spot_map_cache,
+                df_all=df_all
+            )
         except Exception as e:
             LOG.error(f"Failed to process {ticker}: {e}")
             latest_results["tickers"][ticker] = {"error": str(e)}
             
-    # 4. Save Latest JSON - Merge with existing to prevent creating partial files
+    # 4. Save Latest JSON
     json_path = options_latest_json_path()
     json_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -101,24 +173,12 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
         try:
             with open(json_path, "r") as f:
                 existing_data = json.load(f)
-                # If "as_of" matches, we merge tickers. If not, we might want to overwrite or keep?
-                # Usually we want to keep all tickers that are valid.
-                # But let's assume we are building for the same day.
                 if existing_data.get("as_of") == as_of.isoformat():
-                    # Merge tickers
                     existing_tickers = existing_data.get("tickers", {})
-                    # Update with new results
                     existing_tickers.update(latest_results["tickers"])
                     existing_data["tickers"] = existing_tickers
-                    # Update metadata if needed (e.g. VIX1D might change if re-run, but we use new run)
                     existing_data["vix1d"] = vix1d_val
                     final_results = existing_data
-                else:
-                    # New date, overwrite? Or keep old tickers until refreshed?
-                    # For now, if date changes, we probably start fresh or keep old ones as stale?
-                    # Let's overwrite if date changes to clean up old data, BUT 
-                    # if we run sequentially for different tickers, day should match.
-                    pass
         except Exception as e:
             LOG.warning(f"Failed to read existing latest.json for merging: {e}")
             
@@ -132,18 +192,35 @@ def _process_ticker(
     ticker: str, 
     as_of: date,
     spot_date: date,
-    odte_date: date,
-    weekly_date: date,
-    monthly_date: date,
     vix1d_val: Optional[float], 
     confidence_score: int,
-    latest_results: Dict[str, Any]
+    latest_results: Dict[str, Any],
+    spot_map: Dict[str, float] = {},
+    df_all: pd.DataFrame = pd.DataFrame()
 ):
+    # Determine dates for this ticker
+    odte_date, weekly_date, monthly_date = get_target_expirations(as_of, ticker=ticker)
+
     # Log determined dates
     LOG.info(f"{ticker} | ODTE: {odte_date} | Weekly: {weekly_date} | Monthly: {monthly_date}")
     
-    # 2. Fetch Underlying Price (from Spot Date)
-    spot_price = fetch_underlying_close(ticker, spot_date)
+    # 2. Fetch Underlying Price
+    # Optimized: Check bulk map first
+    spot_price = spot_map.get(ticker)
+    
+    # Handle Indicies in map (e.g. SPX comes as I:SPX or just SPX?)
+    # Polygon Grouped Bars usually return 'SPY' for stocks.
+    # For Indices, it might vary.
+    if spot_price is None:
+             # ^SPX -> I:SPX? -> SPX?
+             # Let's try to find it.
+             # Note: Grouped bars for 'stocks' might NOT include Indices?
+             pass
+    
+    # Fallback to individual fetch if missing in map
+    if spot_price is None:
+        # LOG.info(f"Spot not in bulk map for {ticker}, fetching individually...")
+        spot_price = fetch_underlying_close(ticker, spot_date)
     
     if spot_price is None:
          # Fallback to as_of
@@ -154,23 +231,63 @@ def _process_ticker(
     if spot_price is None:
         raise ValueError(f"Could not fetch spot price for {ticker}")
         
-    LOG.info(f"{ticker} | Spot Reference Date: {spot_date} | Price: {spot_price}")
+    # 3. (Removed bulk fetch) - We now fetch per expiration inside the loop to avoid API limits.
+    # options_df = ...
 
-    ticker_results = {
-        "spot_price": spot_price,
-        "expirations": {}
+    # 4. Calculate Expected Moves for each expiration
+    expiry_map = {
+        "ODTE": odte_date,
+        "WEEKLY": weekly_date,
+        "MONTHLY": monthly_date,
     }
     
-    # Process each expiry type
-    for expiry_type, expiry_date in [("ODTE", odte_date), ("WEEKLY", weekly_date), ("MONTHLY", monthly_date)]:
+    ticker_results = {
+        "spot_price": spot_price,
+        "vix1d": vix1d_val,
+        "timestamp": datetime.now().isoformat(),
+        "source": "MassiveAPI",
+        "expirations": {},
+        "day_iv_em": None, "day_straddle_em": None,
+        "week_iv_em": None, "week_straddle_em": None,
+        "month_iv_em": None, "month_straddle_em": None
+    }
+    
+    for expiry_type, expiry_date in expiry_map.items():
+        if not expiry_date:
+            continue
+            
         days_to_expiry = (expiry_date - as_of).days
+            
+        # Fetch strictly for this expiration
+        exp_str = expiry_date.strftime("%Y-%m-%d")
         
-        # Fetch Chain (Using Spot Date/EOD Data for input)
-        chain = fetch_option_chain(ticker, expiry_date, spot_date, spot_price=spot_price)
+        if as_of >= date.today():
+            # Live/Today: Use Snapshot for best data (Greeks + IV)
+            chain = fetch_option_chain_snapshot(ticker, spot_price, expiration_date=exp_str)
+        else:
+            # Historical: Use Bulk Flat File dataframe (if available)
+            if not df_all.empty:
+                 chain = _filter_chain(df_all, ticker, expiry_date)
+                 LOG.info(f"DEBUG: _filter_chain returned {len(chain)} rows for {ticker} {expiry_type}")
+            else:
+                 # Fallback if flat file failed? No, user wants STRICT Flat File usage.
+                 # "Discard the current fetch_historical_data... logic entirely."
+                 chain = pd.DataFrame() # No fallback to API to avoid "No Chain" spam
+                 LOG.warning(f"No flat file data available for {ticker} {exp_str} (Historical Mode)")
         
         if chain.empty:
             LOG.warning(f"No chain found for {ticker} {expiry_type} ({expiry_date})")
             continue
+            
+        # Enrich with YFinance Data if OI is missing (Price-only file)
+        chain = enrich_with_yf_data(chain, ticker, expiry_date)
+            
+        # _filter_chain is no longer needed as we fetched specific data
+        # But we verify it's not empty again just in case
+            
+        LOG.info(f"Found chain for {ticker} {expiry_type} ({expiry_date}): {len(chain)} rows")
+        LOG.info(f"DEBUG: Sample Chain Rows:\n{chain[['strike', 'option_type', 'prev_close_mid']].head(5)}")
+
             
         # Find ATM Straddle
         # Assuming chain has 'strike', 'call_price', 'put_price' or similar from provider
@@ -183,7 +300,18 @@ def _process_ticker(
         
         # Helper to get mid price and symbol for a strike and type
         def get_mid(strike, otype):
-            row = chain[(chain["strike"] == strike) & (chain["option_type"] == otype)]
+            import numpy as np # Ensure numpy is available
+            # Use isclose for float comparison
+            # Filter first by otype (string comparison is fast/safe)
+            subset = chain[chain["option_type"] == otype]
+            if subset.empty:
+                return None, None
+            
+            # Find close strike
+            # We assume 'strike' column is float.
+            # We find rows where abs(strike - target) < epsilon
+            row = subset[np.isclose(subset["strike"], strike, atol=0.01)]
+            
             if not row.empty:
                 return row["prev_close_mid"].iloc[0], row.get("contractSymbol", pd.Series([None])).iloc[0]
             return None, None
@@ -199,6 +327,8 @@ def _process_ticker(
         put_mid, put_sym = get_mid(atm_strike, "P")
         
         if call_mid is None or put_mid is None:
+            available_strikes = sorted(list(chain["strike"].unique()))
+            LOG.info(f"DEBUG: Target Strike {atm_strike}. Available Strikes: {available_strikes}")
             LOG.warning(f"Missing ATM call/put for {ticker} {expiry_type} strike {atm_strike}")
             continue
             
@@ -353,3 +483,168 @@ def _append_to_history(
              pending_df.to_parquet(pending_path, index=False)
     else:
         pending_df.to_parquet(pending_path, index=False)
+
+def _filter_chain(df_all: pd.DataFrame, ticker: str, expiry_date: date) -> pd.DataFrame:
+    """
+    Filters the massive dataframe for specific ticker and expiry.
+    Returns format expected by _process_ticker.
+    """
+    # Filter by Ticker and calculate exp_str first
+    exp_str = expiry_date.strftime("%Y-%m-%d")
+    LOG.info(f"DEBUG: Filtering chain for {ticker} Exp={exp_str}. Input DF: {len(df_all)} rows.")
+    
+    if df_all.empty:
+        return pd.DataFrame()
+        
+    # Filter by Ticker
+    df = pd.DataFrame()
+    # 1. Try Primary: 'underlying_ticker' OR 'ticker' column
+    # The massive file might name it 'ticker' instead of 'underlying_ticker'
+    col_name = None
+    if 'underlying_ticker' in df_all.columns:
+        col_name = 'underlying_ticker'
+    elif 'ticker' in df_all.columns:
+        col_name = 'ticker'
+        
+    if col_name:
+        # Handle Indices: ^SPX might be listed as SPX or SPXW
+        target = ticker.lstrip('^')
+        # Check both with and without ^ prefix just in case CSV varies
+        df = df_all[df_all[col_name].isin([target, ticker])]
+        
+    # 2. Fallback: Search in 'option_ticker' (OSI)
+    #    e.g. O:SPY251219C... or just SPY...
+    if df.empty and 'option_ticker' in df_all.columns:
+         # Clean ticker again
+         target = ticker.lstrip('^')
+         # Regex: O:?TARGET\d
+         pattern = f"^(O:)?{re.escape(target)}\\d"
+         df = df_all[df_all['option_ticker'].str.contains(pattern, regex=True, na=False)]
+         if not df.empty:
+             LOG.info(f"DEBUG: Found {len(df)} rows via Regex Fallback for {ticker}")
+
+    if df.empty:
+        # LOG.warn(f"DEBUG: No rows for ticker {ticker} in daily file.")
+        return pd.DataFrame()
+        
+    # Filter by Expiration
+    # Client 'expiration' is YYYY-MM-DD string
+    if 'expiration' in df.columns:
+        df_exp = df[df['expiration'] == exp_str]
+        
+        if df_exp.empty:
+             # Log available expirations to debug mismatch
+             unique_exps = df['expiration'].unique()
+             # Show first 5 and check if target is in there
+             LOG.warning(f"DEBUG: Filter Failure for {ticker} {exp_str}. Matched Ticker Rows: {len(df)}. Available Expirations (First 10): {unique_exps[:10]}")
+             return pd.DataFrame()
+             
+        df = df_exp
+    
+    if df.empty:
+        return pd.DataFrame()
+        
+    # Valid Columns mapping
+    # MassiveOptionsLoader provides: 'close', 'type' (call/put), 'strike', 'iv', 'gamma', 'delta', 'oi', 'option_ticker'
+    # Engine expects: 'prev_close_mid', 'option_type' (C/P), 'contractSymbol'
+    
+    # Check if we need to rename columns (Loader output vs API output)
+    if 'close' in df.columns and 'prev_close_mid' not in df.columns:
+        df = df.rename(columns={'close': 'prev_close_mid'})
+        
+    if 'type' in df.columns and 'option_type' not in df.columns:
+        # Loader 'type' is 'call'/'put'. Engine needs 'C'/'P'.
+        # Robust mapping: strip, lower
+        df['option_type'] = df['type'].astype(str).str.strip().str.lower().apply(lambda x: 'C' if x == 'call' else ('P' if x == 'put' else None))
+        
+    if 'option_ticker' in df.columns and 'contractSymbol' not in df.columns:
+        df = df.rename(columns={'option_ticker': 'contractSymbol'})
+        
+    # Ensure all expected columns exist (fill NaN if missing, e.g. iv/gamma)
+    expected_cols = ['strike', 'option_type', 'prev_close_mid', 'iv', 'contractSymbol', 'gamma', 'delta', 'oi']
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = None # or clean NaN
+            
+    return df
+
+def enrich_with_yf_data(df: pd.DataFrame, ticker: str, expiry_date: date) -> pd.DataFrame:
+    """
+    Enriches the Options DataFrame with Open Interest and IV from YFinance.
+    Used when flat files lack these columns (Price-only / OHLC files).
+    """
+    if expiry_date < date.today():
+        # YFinance only supports current/future option chains
+        return df
+
+    # Check if we actually need enrichment
+    # If OI is present and mostly non-null, skip
+    if 'oi' in df.columns and df['oi'].notna().sum() > 10:
+        return df
+
+    LOG.info(f"Enriching {ticker} {expiry_date} with YFinance Data (OI/IV)...")
+
+    try:
+        # YFinance Ticker
+        # Handle Indices: ^SPX -> ^SPX is correct for YF usually?
+        # User tested with SPY. 
+        # Use existing ticker.
+        yf_ticker = yf.Ticker(ticker)
+        
+        exp_str = expiry_date.strftime("%Y-%m-%d")
+        
+        try:
+             chain_data = yf_ticker.option_chain(exp_str)
+        except Exception:
+             # Expired or not found
+             LOG.warning(f"YFinance option chain not found for {ticker} {exp_str}")
+             return df
+             
+        calls = chain_data.calls
+        puts = chain_data.puts
+        
+        # Normalize YF Data
+        # YF Columns: contractSymbol, strike, openInterest, impliedVolatility
+        cols_needed = ['contractSymbol', 'strike', 'openInterest', 'impliedVolatility']
+        
+        # Prepare YF dataframe for merge
+        yf_calls = calls[cols_needed].copy() if not calls.empty else pd.DataFrame(columns=cols_needed)
+        yf_puts = puts[cols_needed].copy() if not puts.empty else pd.DataFrame(columns=cols_needed)
+        
+        yf_calls['option_type'] = 'C'
+        yf_puts['option_type'] = 'P'
+        
+        yf_df = pd.concat([yf_calls, yf_puts])
+        
+        if yf_df.empty:
+            return df
+            
+        # Rename for merge
+        yf_df = yf_df.rename(columns={
+            'openInterest': 'oi_yf',
+            'impliedVolatility': 'iv_yf'
+        })
+        
+        # We merge on Strike + OptionType
+        # Ensure types match
+        df['strike'] = df['strike'].astype(float)
+        yf_df['strike'] = yf_df['strike'].astype(float)
+        
+        # Merge
+        # Left join to preserve original rows (Prices)
+        # We match on strike and option_type
+        # Note: rounding strikes might be needed if floats differ slightly
+        merged = pd.merge(df, yf_df[['strike', 'option_type', 'oi_yf', 'iv_yf']], on=['strike', 'option_type'], how='left')
+        
+        # Fill missing 'oi' with 'oi_yf'
+        merged['oi'] = merged['oi'].fillna(merged['oi_yf'])
+        merged['iv'] = merged['iv'].fillna(merged['iv_yf'])
+        
+        # Drop temp columns
+        merged = merged.drop(columns=['oi_yf', 'iv_yf'])
+        
+        return merged
+
+    except Exception as e:
+        LOG.warning(f"YFinance enrichment failed for {ticker} {expiry_date}: {e}")
+        return df

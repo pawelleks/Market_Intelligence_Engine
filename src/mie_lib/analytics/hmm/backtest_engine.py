@@ -186,17 +186,22 @@ class HMMBacktester:
         # Load raw price data once
         price_df = _load_features_for_hmm(self.ticker)
         
-        # Merge actual 'close' price from RAW_DIR if available
+        if "close" in price_df.columns:
+            # Normalize column names just in case
+            price_df = price_df.rename(columns=lambda x: x.lower())
+        
+        # Merge actual 'close' price from RAW_DIR if available AND missing
         # (Features often lack the 'close' column, having only returns)
         raw_path = RAW_DIR / f"{self.ticker}.parquet"
-        if raw_path.exists():
+        if raw_path.exists() and "close" not in price_df.columns:
              try:
                  df_raw = pd.read_parquet(raw_path)
+                 df_raw = df_raw.rename(columns=lambda x: x.lower())
+                 
                  if "date" in df_raw.columns:
                      df_raw["date"] = pd.to_datetime(df_raw["date"]).dt.tz_localize(None)
                  if "close" in df_raw.columns:
                      # Merge left to keep features alignment
-                     # Rename raw close if features has close? (unlikely)
                      price_df = pd.merge(price_df, df_raw[["date", "close"]], on="date", how="left")
              except Exception as e:
                  logger.warning(f"Failed to load raw close price: {e}")
@@ -247,6 +252,10 @@ class HMMBacktester:
                 
         self.results = pd.DataFrame(results)
         self.save_results()
+        
+        if self.results.empty:
+            return pd.DataFrame() # Return empty DF instead of crashing
+            
         return self.results.sort_values('strat_sharpe', ascending=False)
 
     def save_results(self):

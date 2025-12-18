@@ -39,10 +39,68 @@ const LogViewer = ({ logs }) => {
     );
 };
 
+const SystemProgressBar = () => {
+    const [status, setStatus] = useState(null);
+
+    useEffect(() => {
+        const fetchStatus = async () => {
+            try {
+                const res = await axios.get('/api/v1/system/status');
+                if (res.data && res.data.status === 'running') {
+                    setStatus(res.data);
+                } else {
+                    setStatus(null);
+                }
+            } catch (err) {
+                // Ignore errors (endpoint might not exist yet or job dead)
+            }
+        };
+
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 3000);
+        return () => clearInterval(interval);
+    }, []);
+
+    if (!status) return null;
+
+    return (
+        <div className="w-full max-w-4xl mx-auto mb-6 bg-[#1f2833] border border-gray-600 rounded-lg p-4 shadow-xl animate-pulse-border">
+            <div className="flex justify-between items-end mb-2">
+                <div>
+                    <h3 className="text-[#66fcf1] font-bold text-lg uppercase tracking-wide">
+                        {status.job_id || "System Job"}
+                    </h3>
+                    <p className="text-gray-400 text-xs">
+                        {status.step_name} (Step {status.current_step}/{status.total_steps})
+                    </p>
+                </div>
+                <span className="text-[#66fcf1] font-mono font-bold text-xl">
+                    {status.progress_percent}%
+                </span>
+            </div>
+
+            {/* Progress Bar Track */}
+            <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                <div
+                    className="bg-gradient-to-r from-[#45a29e] to-[#66fcf1] h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_#66fcf1]"
+                    style={{ width: `${status.progress_percent}%` }}
+                ></div>
+            </div>
+
+            <div className="mt-2 text-right">
+                <span className="text-gray-500 text-[10px] font-mono">
+                    Last Updated: {new Date(status.last_updated).toLocaleTimeString()}
+                </span>
+            </div>
+        </div>
+    );
+};
+
 const DataPipelines = () => {
     const [status, setStatus] = useState({ running: false, logs: '', available_jobs: [] });
+    // ... (rest of existing state)
     const [loadingJob, setLoadingJob] = useState(null);
-    const [selectedJob, setSelectedJob] = useState(""); // Track selected dropdown option
+    const [selectedJob, setSelectedJob] = useState("");
     const [error, setError] = useState(null);
 
     // Poll status every 2 seconds
@@ -89,17 +147,18 @@ const DataPipelines = () => {
             "build-minervini": "Analytics: Minervini",
             "build-gaf-daily": "Analytics: GAF Prediction (AI)",
             "build-tsmom-daily": "Analytics: TSMOM (Momentum)",
-            "rebuild-reliability": "🎯 Update Reliability (Exp. Moves + Snapshots)"
+            "rebuild-reliability": "🎯 Update Reliability (Exp. Moves + Snapshots)",
+            "update-everything": "⚡ Update Everything (Smart Incremental)"
         };
         return map[job] || job;
     };
 
-    // Filter relevant jobs to show in toolbar
+    // Filter relevant jobs
     const jobs = (status.available_jobs || []).filter(j => !['test-job'].includes(j));
 
     return (
         <div className="h-screen w-full flex flex-col bg-[#0b0c10] text-gray-200 font-sans overflow-hidden">
-            {/* Top Bar - Fixed Height */}
+            {/* Top Bar */}
             <div className="bg-[#1f2833] border-b border-[#1f2833] px-8 py-4 flex justify-between items-center shadow-lg z-10 shrink-0">
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold text-[#66fcf1] tracking-wide">
@@ -112,10 +171,13 @@ const DataPipelines = () => {
                 {error && <span className="text-red-400 text-sm font-semibold">{error}</span>}
             </div>
 
-            {/* Main Content Area - Flex Grow */}
+            {/* Main Content Area */}
             <div className="flex-1 flex flex-col min-h-0 p-6 gap-6 relative">
 
-                {/* 1. Job Controls Toolbar - Fixed Height */}
+                {/* --- PROGRESS BAR --- */}
+                <SystemProgressBar />
+
+                {/* Job Controls Toolbar */}
                 <div className="shrink-0 flex flex-col items-center gap-4 mx-auto w-full max-w-lg">
 
                     <div className="flex w-full gap-4">
@@ -151,8 +213,8 @@ const DataPipelines = () => {
                     </div>
                 </div>
 
-                {/* 2. Log Viewer Container - Centered */}
-                <div className="flex justify-center w-full">
+                {/* Log Viewer Container */}
+                <div className="flex justify-center w-full flex-1 min-h-0">
                     <LogViewer logs={status.logs} running={status.running} />
                 </div>
 

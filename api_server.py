@@ -24,7 +24,7 @@ import yfinance as yf
 # Price Viewer Imports
 from mie_lib.core.state_classification import classify_tri_state
 from mie_lib.analytics.minervini import run_minervini_template
-from mie_lib.utils.ticker_service import get_tickers_for_analysis
+from mie_lib.utils.ticker_service import get_tickers_for_analysis, get_available_tickers
 from mie_lib.analytics.seasonality_analytics import get_seasonal_curves, get_calendar_heatmap, get_day_drilldown
 from mie_lib.analytics.downtrend_engine import compute_downtrend_score_latest, compute_downtrend_score_historical, compute_downtrend_signals_historical
 from mie_lib.data_ingest.data_aligner import fetch_and_align_dcs_assets
@@ -67,14 +67,41 @@ from mie_lib.analytics.tsmom.api_endpoints import router as tsmom_router
 app.include_router(tsmom_router, prefix="/api/v1/tsmom", tags=["tsmom"])
 from mie_lib.analytics.performance.api import router as performance_router
 app.include_router(performance_router, prefix="/api/v1/performance", tags=["performance"])
+from mie_lib.analytics.sma_stack_api import router as sma_router
+app.include_router(sma_router)
+from mie_lib.analytics.adx_api import router as adx_router
+app.include_router(adx_router)
+from mie_lib.analytics.psar_api import router as psar_router
+app.include_router(psar_router)
+from mie_lib.analytics.ichimoku_api import router as ichimoku_router
+app.include_router(ichimoku_router)
+from mie_lib.analytics.trend_summary_api import router as trend_sum_router
+app.include_router(trend_sum_router, prefix="/api/v1/analytics/trend", tags=["trend"])
+# --- AUTH ROUTER ---
+from mie_lib.api.routers.auth import router as auth_router
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+# --- ADMIN ROUTER ---
+from mie_lib.api.routers.admin import router as admin_router
+app.include_router(admin_router, prefix="/api/v1")
+from mie_lib.api.routers.admin_data import router as admin_data_router
+app.include_router(admin_data_router, prefix="/api/v1")
 
 # Configure CORS
 origins = [
+
     # Allow the default React development port (Vite, CRA) to access the API
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    # We can add more origins here as needed (e.g., Vercel, specific staging URLs)
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
+
+# Add environment-specified origins
+import os
+env_origins = os.getenv("ALLOWED_ORIGINS", "")
+if env_origins:
+    origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -200,6 +227,12 @@ def get_data_freshness_status(ticker: str) -> JSONResponse:
             status_code=500, 
             detail=f"Error checking freshness: {e}"
         )
+
+@app.get("/api/v1/tickers")
+def get_all_tickers() -> JSONResponse:
+    """Returns the master list of all configured tickers."""
+    tickers = get_available_tickers()
+    return JSONResponse(content={"tickers": tickers})
 
 @app.get("/api/v1/tickers/{analysis_key}")
 def get_available_tickers_for_analysis(analysis_key: str) -> JSONResponse:
@@ -910,10 +943,15 @@ async def get_expected_moves_massive():
                         pass
                 
                 if spot is None:
+                    print(f"DEBUG: {ticker} Spot is None")
                     continue
 
                 # 2. Determine Expirations matches
                 target_dates = {}
+                # ... (omitted for brevity in replacement, but I must keep context or use smaller chunk)
+                # Actually I can't skip lines in replacement content.
+                # I will focus on spot check and options check separately.
+
                 if ticker in latest_json_dates:
                      t_exps = latest_json_dates[ticker].get("expirations", {})
                      for k in ["ODTE", "WEEKLY", "MONTHLY"]:
@@ -921,14 +959,19 @@ async def get_expected_moves_massive():
                              try:
                                  target_dates[k] = datetime.strptime(t_exps[k]["expiry_date"], "%Y-%m-%d").date()
                              except: pass
-                else:
-                    # Fallback to calc if missing in JSON
+
+                # Fallback if JSON missing OR empty targets
+                if not target_dates:
                      odte, weekly, monthly = get_target_expirations(as_of)
                      target_dates = {"ODTE": odte, "WEEKLY": weekly, "MONTHLY": monthly}
+                     print(f"DEBUG: {ticker} using fallback targets: {target_dates}")
 
                 avail_expirations = yf_ticker.options
                 if not avail_expirations:
+                    print(f"DEBUG: {ticker} No Expirations Found")
                     continue
+                
+                print(f"DEBUG: {ticker} Spot={spot}, Expirations={len(avail_expirations)}")
                 
                 t_data = {
                     "spot_price": spot,
@@ -1008,9 +1051,10 @@ async def get_expected_moves_massive():
                     results["tickers"][ticker] = t_data
 
             except Exception as e:
-                # print(f"Error processing {ticker} in massive: {e}")
+                print(f"Error processing {ticker} in massive: {e}")
                 continue
                 
+        print(f"DEBUG: Massive Results Tickers: {list(results['tickers'].keys())}")
         return JSONResponse(content=results)
 
     except Exception as e:

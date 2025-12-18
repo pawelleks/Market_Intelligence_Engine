@@ -45,8 +45,8 @@ scope:
   - JNJ
   Seasonality_Analysis: # Specific scope for Seasonality
     - Index_ETFs
-    - MSFT
-    - AAPL
+    - Indexes
+    - Sector_ETFs
   Expected_Moves_Reliability: # Scope for EM Reliability Dashboard
     - SPY
     - QQQ

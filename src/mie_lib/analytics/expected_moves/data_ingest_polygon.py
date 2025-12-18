@@ -8,7 +8,7 @@ import time
 import logging
 import pandas as pd
 from datetime import date, timedelta
-from typing import Optional, Tuple, Any, List
+from typing import Optional, Tuple, Any, List, Dict
 
 # Re-export expiration logic (unchanged)
 from mie_lib.analytics.expected_moves.data_ingest import get_target_expirations
@@ -88,6 +88,38 @@ def fetch_underlying_close(ticker: str, as_of: date, provider: Any = None) -> Op
         
     return None
 
+def fetch_grouped_daily_bars(as_of: date) -> Dict[str, float]:
+    """
+    Fetches the daily Open/Close for ALL tickers in the US Market for a given date.
+    Uses Polygon's Grouped Daily Bars endpoint (1 API call).
+    Returns a dictionary mapping {ticker: close_price}.
+    """
+    api_key = _get_api_key()
+    # /v2/aggs/grouped/locale/us/market/stocks/{date}
+    url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{as_of}?adjusted=true&apiKey={api_key}"
+    
+    spot_map = {}
+    try:
+        LOG.info(f"Fetching bulk spot prices for {as_of} via Polygon Grouped Daily...")
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            for r in results:
+                # Ticker 'T', Close 'c'
+                t = r.get("T")
+                c = r.get("c")
+                if t and c is not None:
+                    spot_map[t] = float(c)
+            LOG.info(f"Fetched {len(spot_map)} spot prices.")
+        else:
+            LOG.error(f"Polygon Grouped Daily error: {resp.status_code} {resp.text}")
+            
+    except Exception as e:
+        LOG.error(f"Error fetching bulk spot prices: {e}")
+        
+    return spot_map
+
 def fetch_option_chain(
     ticker: str, 
     expiry: date, 
@@ -96,9 +128,8 @@ def fetch_option_chain(
     spot_price: Optional[float] = None
 ) -> pd.DataFrame:
     """
-    Fetches the option chain for a specific ticker and expiration date using Polygon Reference + Previous Close.
-    Uses 'spot_price' to filter strikes (fetching only relevant ATM contracts).
-    Returns a DataFrame with columns: ['strike', 'option_type', 'prev_close_mid', 'iv', 'contractSymbol']
+    Fetches the option chain for a specific ticker and expiration date using Polygon Snapshot API.
+    This fetches ALL contracts for the expiry in 1 request, which is much more efficient (prevents 429s).
     """
     api_key = _get_api_key()
     
@@ -107,104 +138,89 @@ def fetch_option_chain(
     if ticker.startswith("^"):
         api_ticker = "I:" + ticker.replace("^", "")
     
-    if spot_price is None:
-        LOG.warning(f"No spot price provided for {ticker}, cannot filter contracts efficiently. Returning empty.")
-        return pd.DataFrame()
-
-    # 1. List Contracts from Reference API (Filtered)
-    # Filter 10% around spot
-    min_strike = spot_price * 0.90
-    max_strike = spot_price * 1.10
+    # URL for Snapshot options chain
+    # https://api.polygon.io/v3/snapshot/options/{underlyingAsset}?expiration_date={ymd}
+    url = f"https://api.polygon.io/v3/snapshot/options/{api_ticker}?expiration_date={expiry.isoformat()}&apiKey={api_key}&limit=250"
     
-    contracts_url = (
-        f"https://api.polygon.io/v3/reference/options/contracts?"
-        f"underlying_ticker={api_ticker}&"
-        f"expiration_date={expiry.isoformat()}&"
-        f"strike_price.gte={min_strike}&"
-        f"strike_price.lte={max_strike}&"
-        f"limit=100&" # Should strictly cover ATM
-        f"apiKey={api_key}"
-    )
+    logger = logging.getLogger(__name__)
+    logger.info(f"Fetching snapshot chain for {ticker} exp {expiry}...")
     
-    contract_results = []
+    all_results = []
     
     try:
-        LOG.info(f"Listing contracts for {ticker} exp {expiry} around {spot_price}...")
-        while contracts_url:
-            resp = requests.get(contracts_url)
+        while url:
+            resp = requests.get(url)
             if resp.status_code != 200:
-                LOG.error(f"Contracts list error: {resp.status_code} {resp.text}")
+                logger.error(f"Snapshot error {ticker}: {resp.status_code} {resp.text}")
                 break
-            
+                
             data = resp.json()
             results = data.get("results", [])
-            contract_results.extend(results)
+            all_results.extend(results)
             
-            contracts_url = data.get("next_url")
-            if contracts_url:
-                contracts_url = f"{contracts_url}&apiKey={api_key}"
-                time.sleep(0.05)
-                
-            # Safety break if too many
-            if len(contract_results) > 200:
-                break
+            # Handle Pagination
+            url = data.get("next_url")
+            if url:
+                url = f"{url}&apiKey={api_key}"
+                time.sleep(0.05) # Brief pause for safety
                 
     except Exception as e:
-        LOG.error(f"Error listing contracts: {e}")
+        logger.error(f"Error fetching snapshot: {e}")
         return pd.DataFrame()
         
-    if not contract_results:
-        LOG.warning("No contracts found in strike range.")
+    if not all_results:
+        logger.warning(f"No contracts found for {ticker} exp {expiry} via snapshot.")
         return pd.DataFrame()
         
-    LOG.info(f"Found {len(contract_results)} contracts. Fetching previous close for each...")
-    
-    # 2. Fetch Previous Close for each contract
-    processed_rows = []
-    
-    for c in contract_results:
-        contract_ticker = c.get("ticker")
-        strike = c.get("strike_price")
-        c_type = c.get("contract_type")
+    # Process Results
+    rows = []
+    for r in all_results:
+        details = r.get("details", {})
+        day = r.get("day", {})
+        greeks = r.get("greeks", {})
         
-        if not contract_ticker: continue
+        contract_ticker = details.get("ticker")
+        strike = details.get("strike_price")
+        c_type = details.get("contract_type") # 'call' or 'put'
         
-        # Get Prev Close
-        # /v2/aggs/ticker/{ticker}/prev
-        prev_url = f"https://api.polygon.io/v2/aggs/ticker/{contract_ticker}/prev?adjusted=true&apiKey={api_key}"
+        # We need a price (Mid or Close).
+        # Snapshot 'day' has OHLCV for the session. 'close' is the EOD close.
+        # This is exactly what we want for "Previous Close" style calc if running pre-market.
+        price = day.get("close")
         
-        try:
-            # We must be careful with rate limits (5 calls/min usually for free, unlimited for paid)
-            # User likely has paid since they have options/Polygon key? 
-            # But earlier 403 on VIX implies weird plan status.
-            # Assuming sufficient rate limit or will sleep.
-            time.sleep(0.02) # minimal throttle
+        # Fallback to last_quote if day close is missing (illiquid?)
+        # But 'day.close' is best for EOD markings.
+        if price is None:
+             # Try 'prev_day' if field exists? No, snapshot structure is specific.
+             # If day data is missing, it didn't trade today.
+             # We could fallback to 'previous_close' from details if available? No.
+             # Just skip illiquid untraded contracts?
+             # Actually, if we are recalculating Expected Moves based on "yesterday", we want yesterday's close.
+             # If we run at 8am, "day" refers to PREV session (Polygon snapshots roll over?). 
+             # Wait, Snapshot is "Real-time" usually. 
+             # At 8AM, market is closed. "Day" OHLC usually resets at 9:30 or holds prev day?
+             # Polygon docs: "Snapshot returns the most recent data."
+             # If before open, it likely holds prev day.
+             # Let's use 'close'. If None, skip.
+             continue
+             
+        if not strike or not c_type:
+            continue
             
-            p_resp = requests.get(prev_url)
-            if p_resp.status_code == 200:
-                p_data = p_resp.json()
-                p_res = p_data.get("results", [])
-                if p_res:
-                    # Previous Close 'c'
-                    price = p_res[0].get("c")
-                    
-                    if price is not None:
-                         otype = 'C' if c_type == 'call' else ('P' if c_type == 'put' else None)
-                         
-                         processed_rows.append({
-                            "strike": float(strike),
-                            "option_type": otype,
-                            "prev_close_mid": float(price), # Using Prev Close
-                            "iv": None, # Cannot get IV from /prev easily
-                            "contractSymbol": contract_ticker
-                         })
-            else:
-                # 404 or 403
-                # LOG.debug(f"Failed prev for {contract_ticker}: {p_resp.status_code}")
-                pass
-                
-        except Exception:
-            pass
-            
-    df = pd.DataFrame(processed_rows)
+        # Spot filter (efficiency) - filter broadly around spot if provided
+        if spot_price:
+            if abs(strike - spot_price) / spot_price > 0.30: # 30% wide net
+                continue
+
+        otype = 'C' if c_type == 'call' else ('P' if c_type == 'put' else None)
+        
+        rows.append({
+            "strike": float(strike),
+            "option_type": otype,
+            "prev_close_mid": float(price),
+            "iv": greeks.get("implied_volatility"), # Bonus: Snapshot gives IV!
+            "contractSymbol": contract_ticker
+        })
+        
+    df = pd.DataFrame(rows)
     return df

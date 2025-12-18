@@ -31,6 +31,33 @@ def is_trading_day(dt: date) -> bool:
     # Check against the date objects in the index
     return dt in trading_days.date
 
+def is_verified_trading_day(dt: date) -> bool:
+    """
+    Strictly checks if a date is a trading day using YFinance data verification.
+    Required to avoid 'No Chain Found' errors on holidays/weekends during backfill.
+    """
+    # Check 1: Weekend
+    if dt.weekday() >= 5: # Saturday=5, Sunday=6
+        return False
+        
+    # Check 2: Holiday/Market Open Verification via YFinance (SPY proxy)
+    # Special Case: If dt is Today, we assume it's valid if it's a weekday.
+    # YFinance might return empty for Today if market just opened or data is delayed.
+    if dt == date.today():
+         return True
+         
+    import yfinance as yf
+    try:
+        # Download 1 day of data. 
+        # Note: For 'Today', this might be empty if market hasn't opened/settled?
+        # But for backfilling (primary use case), it's accurate.
+        data = yf.download("SPY", start=dt, end=dt + timedelta(days=1), progress=False)
+        return not data.empty
+    except Exception:
+        # If network fails, default to conservative False (skip) or fallback?
+        # User instruction implies strict check.
+        return False
+
 def get_next_trading_day(dt: date) -> date:
     """Finds the next market trading day."""
     dt += timedelta(days=1)

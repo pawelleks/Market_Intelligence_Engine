@@ -14,8 +14,24 @@ from mie_lib.utils.io import atomic_write_parquet, atomic_write_json
 import sys
 from contextlib import contextmanager
 import os
+import signal
+from contextlib import contextmanager
 
+from mie_lib.utils.logging import get_logger
 LOG = get_logger("hmm")
+
+class TimeoutException(Exception): pass
+
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
 
 ANALYTICS_DIR = HMM_DIR
 
@@ -70,7 +86,13 @@ def _fit_hmm_gaussian(X, n_states: int, random_seed: int):
         n_iter=200,
         min_covar=1e-6,
     )
-    model.fit(X)
+    try:
+        # Prevent indefinite hangs with a 60s timeout
+        with time_limit(60): 
+            model.fit(X)
+    except TimeoutException:
+        raise ValueError(f"HMM Fit Timed Out after 60s (n_states={n_states})")
+        
     return model
 
 

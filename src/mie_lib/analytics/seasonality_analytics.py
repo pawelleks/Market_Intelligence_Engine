@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Define base path relative to project root
 SEASONALITY_BASE_DIR = Path("data/seasonality/base")
@@ -149,3 +149,66 @@ def get_day_drilldown(ticker: str, month: int, day: int, lookback_years: int) ->
         "stats": stats,
         "records": records.to_dict(orient='records')
     }
+
+def get_seasonality_forecast(ticker: str, start_date: datetime.date, days: int = 5, lookback_years: int = 20) -> List[Dict[str, Any]]:
+    """
+    Generates seasonality statistics for the next N days starting from start_date.
+    Returns: List of dicts with date, win_rate, mean_return, etc.
+    """
+    try:
+        df = _load_base_data(ticker)
+    except FileNotFoundError:
+        return []
+
+    current_year = int(df['year'].max())
+    start_history_year = current_year - lookback_years
+    
+    forecast = []
+    
+    # Iterate next N days
+    for i in range(days):
+        target_date = start_date + timedelta(days=i)
+        
+        # Skip weekends for forecast "slots", but we query month/day stats so it covers calendar seasonality
+        # Actually, for seasonality, often we want "next 5 trading days". 
+        # But simplistic approach: just next 5 calendar days? 
+        # User asked for "next 5 days". In finance usually means trading days.
+        # But to be safe and simple, let's just do next 5 calendar days and if the specific date falls on weekend 
+        # the historical stats might still be valid (e.g. "historically, Jan 15th").
+        # However, markets are closed. 
+        # Let's iterate until we find 5 valid trading days? Or just 5 calendar days.
+        # Given the "JSON for LLM" context, let's do 5 calendar days for now, filtering empty stats if needed.
+        # Better: Filter logical trading days from now?
+        # Let's stick to 5 calendar days ahead (market open or not).
+        
+        month = target_date.month
+        day = target_date.day
+        
+        # Filter stats for this MM-DD in history
+        # (df['year'] < current_year) excludes partial current year data to avoid bias? 
+        # Or usually we want strict history. Yes.
+        day_stats_df = df[
+            (df['month'] == month) & 
+            (df['day'] == day) & 
+            (df['year'] >= start_history_year) &
+            (df['year'] < current_year)
+        ].copy()
+
+        if day_stats_df.empty:
+            # Maybe it's a weekend usually? Or just no data.
+            continue
+            
+        day_stats_df['r_pct'] = day_stats_df['r'] * 100
+        
+        win_rate = (day_stats_df['r_pct'] > 0).mean() * 100
+        mean_return = day_stats_df['r_pct'].mean()
+        
+        forecast.append({
+            "date": target_date.strftime("%Y-%m-%d"),
+            "month_day": target_date.strftime("%m-%d"),
+            "win_rate": round(win_rate, 1),
+            "avg_return": round(mean_return, 2),
+            "count": len(day_stats_df)
+        })
+
+    return forecast

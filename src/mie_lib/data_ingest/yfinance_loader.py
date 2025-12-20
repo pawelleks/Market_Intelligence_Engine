@@ -21,7 +21,8 @@ from mie_lib.utils.config import load_named_config
 # Import Polygon provider for primary fetch attempt
 try:
     from mie_lib.data_ingest.providers.polygon import fetch_history as fetch_polygon_history
-    POLYGON_AVAILABLE = True
+    # Force False to prevent using Polygon for Stocks (OHLCV) - User request
+    POLYGON_AVAILABLE = False 
 except ImportError:
     POLYGON_AVAILABLE = False
 
@@ -312,6 +313,11 @@ def update_ticker_incremental(ticker: str) -> Dict[str, any]:
     existing["date"] = pd.to_datetime(existing["date"]).dt.tz_localize(None)
     last_date = existing["date"].max().date()
     start_fetch = last_date + timedelta(days=1)
+    
+    # optimization: if start_fetch is tomorrow (meaning we have today), skip
+    if start_fetch > datetime.now().date():
+         return {"ticker": ticker, "rows_added": 0, "last_date": str(last_date), "status": "no_new"}
+         
     start_str = start_fetch.isoformat() # YYYY-MM-DD
     
     source = "unknown"

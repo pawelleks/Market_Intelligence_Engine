@@ -117,10 +117,22 @@ const IchimokuReport = () => {
     }
 
     // Chart Data Prep
-    const dates = data.series.map(d => d.date);
-    const spanA = data.series.map(d => d.senkou_span_a);
-    const spanB = data.series.map(d => d.senkou_span_b);
-    // ... plotting data
+    // Filter last 24 months
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - 24);
+    const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+    const filteredSeries = data.series.filter(d => d.date >= cutoffStr);
+
+    const dates = filteredSeries.map(d => d.date);
+    const spanA = filteredSeries.map(d => d.senkou_span_a);
+    const spanB = filteredSeries.map(d => d.senkou_span_b);
+
+    // Default Zoom Range (Last 10 Months)
+    const zoomStartDate = new Date();
+    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
 
     return (
         <div style={{ padding: '20px', color: '#e0e0e0', backgroundColor: '#0b1220', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -133,7 +145,10 @@ const IchimokuReport = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <h1 style={{ margin: 0, fontSize: '20px', color: '#94a3b8' }}>Ichimoku Cloud</h1>
-                            <h2 style={{ margin: '5px 0 0 0', fontSize: '28px', color: '#fff', fontWeight: 'bold' }}>{ticker}</h2>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                                <h2 style={{ margin: '5px 0 0 0', fontSize: '28px', color: '#fff', fontWeight: 'bold' }}>{ticker}</h2>
+                                {data.series && data.series.length > 0 && <span style={{ fontSize: '11px', color: '#64748b' }}>Data as of: {data.series[data.series.length - 1].date}</span>}
+                            </div>
                         </div>
 
                         {/* Selector */}
@@ -242,25 +257,31 @@ const IchimokuReport = () => {
                             },
                             // Price
                             {
-                                x: dates, open: data.series.map(d => d.open), high: data.series.map(d => d.high), low: data.series.map(d => d.low), close: data.series.map(d => d.close),
+                                x: dates, open: filteredSeries.map(d => d.open), high: filteredSeries.map(d => d.high), low: filteredSeries.map(d => d.low), close: filteredSeries.map(d => d.close),
                                 type: 'candlestick', name: 'Price', increasing: { line: { color: '#00e676' }, fillcolor: '#00e676' }, decreasing: { line: { color: '#ef5350' }, fillcolor: '#ef5350' }
                             },
                             // Lines
                             {
-                                x: dates, y: data.series.map(d => d.tenkan_sen), type: 'scatter', mode: 'lines', name: 'Tenkan', line: { color: '#29b6f6', width: 1.5 }
+                                x: dates, y: filteredSeries.map(d => d.tenkan_sen), type: 'scatter', mode: 'lines', name: 'Tenkan', line: { color: '#29b6f6', width: 1.5 }
                             },
                             {
-                                x: dates, y: data.series.map(d => d.kijun_sen), type: 'scatter', mode: 'lines', name: 'Kijun', line: { color: '#ef5350', width: 1.5 }
+                                x: dates, y: filteredSeries.map(d => d.kijun_sen), type: 'scatter', mode: 'lines', name: 'Kijun', line: { color: '#ef5350', width: 1.5 }
                             },
                             {
-                                x: dates, y: data.series.map(d => d.chikou_plotted), type: 'scatter', mode: 'lines', name: 'Chikou', line: { color: '#ab47bc', width: 2, dash: 'dot' }
+                                x: dates, y: filteredSeries.map(d => d.chikou_plotted), type: 'scatter', mode: 'lines', name: 'Chikou', line: { color: '#ab47bc', width: 2, dash: 'dot' }
                             }
                         ]}
                         layout={{
                             paper_bgcolor: 'rgba(0,0,0,0)',
                             plot_bgcolor: 'rgba(0,0,0,0)',
-                            font: { color: '#94a3b8', family: 'Inter' },
-                            xaxis: { gridcolor: '#1e293b', rangeslider: { visible: false }, type: 'date', tickfont: { size: 11 } },
+                            font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+                            xaxis: {
+                                gridcolor: '#1e293b',
+                                type: 'date',
+                                tickfont: { size: 11 },
+                                range: [zoomStartStr, todayStr],
+                                rangeslider: { visible: true, thickness: 0.1, bgcolor: '#0f172a' }
+                            },
                             yaxis: { gridcolor: '#1e293b', tickfont: { size: 11 } },
                             margin: { t: 40, r: 20, l: 40, b: 30 },
                             showlegend: true,

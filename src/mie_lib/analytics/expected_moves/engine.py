@@ -169,23 +169,48 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
     json_path.parent.mkdir(parents=True, exist_ok=True)
     
     final_results = latest_results
+    should_save = True
+
     if json_path.exists():
         try:
             with open(json_path, "r") as f:
                 existing_data = json.load(f)
-                if existing_data.get("as_of") == as_of.isoformat():
-                    existing_tickers = existing_data.get("tickers", {})
-                    existing_tickers.update(latest_results["tickers"])
-                    existing_data["tickers"] = existing_tickers
-                    existing_data["vix1d"] = vix1d_val
-                    final_results = existing_data
+                existing_date_str = existing_data.get("as_of")
+                
+                # Check date precedence to prevent overwriting with older data during backfills
+                if existing_date_str:
+                    existing_date = date.fromisoformat(existing_date_str)
+                    if as_of < existing_date:
+                        LOG.info(f"Skipping latest.json update: Processing date {as_of} is older than existing {existing_date}")
+                        should_save = False
+                    elif as_of == existing_date:
+                        # Merge Tickers
+                        existing_tickers = existing_data.get("tickers", {})
+                        existing_tickers.update(latest_results["tickers"])
+                        existing_data["tickers"] = existing_tickers
+                        
+                        # Preserve VIX if available/newer
+                        if vix1d_val:
+                            existing_data["vix1d"] = vix1d_val
+                            
+                        final_results = existing_data
+                        should_save = True
+                    else:
+                        # Processing is NEWER than existing
+                        # Overwrite completely (default behavior)
+                        should_save = True
+                else:
+                    should_save = True
+                    
         except Exception as e:
             LOG.warning(f"Failed to read existing latest.json for merging: {e}")
+            should_save = True
             
-    with open(json_path, "w") as f:
-        json.dump(final_results, f, indent=2)
-        
-    LOG.info(f"Saved latest results to {json_path}")
+    if should_save:
+        with open(json_path, "w") as f:
+            json.dump(final_results, f, indent=2)
+        LOG.info(f"Saved latest results to {json_path}")
+
     return final_results
 
 def _process_ticker(
@@ -313,7 +338,27 @@ def _process_ticker(
             row = subset[np.isclose(subset["strike"], strike, atol=0.01)]
             
             if not row.empty:
-                return row["prev_close_mid"].iloc[0], row.get("contractSymbol", pd.Series([None])).iloc[0]
+                val = row["prev_close_mid"].iloc[0]
+                contract_sym = row.get("contractSymbol", pd.Series([None])).iloc[0]
+                
+                # Fallback: If price is missing, calculate via Black-Scholes if IV exists
+                if val is None or pd.isna(val):
+                    # Check for IV
+                    iv_val = row["iv"].iloc[0]
+                    if iv_val and iv_val > 0:
+                        from mie_lib.analytics.gex.gex_engine import BlackScholes
+                        # Use a standard Risk Free Rate (could be config, but hardcoded 4.5% is fine for estimation)
+                        r = 0.045
+                        T = max(days_to_expiry, 0.001) / 365.0
+                        
+                        if otype == "C":
+                            val = BlackScholes.call_price(spot_price, strike, T, r, iv_val)
+                        else:
+                            val = BlackScholes.put_price(spot_price, strike, T, r, iv_val)
+                            
+                        # LOG.info(f"DEBUG: Calculated BS Price for {contract_sym} s={strike} v={val:.2f} (IV={iv_val:.3f})")
+                
+                return val, contract_sym
             return None, None
             
         # Find ATM strike (closest to spot)
@@ -637,6 +682,9 @@ def enrich_with_yf_data(df: pd.DataFrame, ticker: str, expiry_date: date) -> pd.
         merged = pd.merge(df, yf_df[['strike', 'option_type', 'oi_yf', 'iv_yf']], on=['strike', 'option_type'], how='left')
         
         # Fill missing 'oi' with 'oi_yf'
+        # Ensure numeric types to avoid FutureWarning about downcasting
+        merged['oi'] = pd.to_numeric(merged['oi'], errors='coerce')
+        merged['iv'] = pd.to_numeric(merged['iv'], errors='coerce')
         merged['oi'] = merged['oi'].fillna(merged['oi_yf'])
         merged['iv'] = merged['iv'].fillna(merged['iv_yf'])
         

@@ -1,14 +1,16 @@
 groups:
+  Indexes:
+    - ^SPX
+    - ^GSPC
+    - ^NDX
+    - ^DJI
+    - ^IXIC
+    - ^RUT
   Index_ETFs:
     - SPY
     - QQQ
     - IWM
     - DIA
-  Indexes:
-    - ^SPX
-    - ^DJI
-    - ^IXIC
-    - ^RUT
   Sector_ETFs:
     - XLC # Communication Services
     - XLY # Consumer Discretionary
@@ -39,6 +41,7 @@ groups:
     - GOOGL
     - META
     - TSLA
+    - NFLX
   Semiconductors:
     - ADI
     - ALAB
@@ -89,9 +92,8 @@ groups:
     - SLB
     - VLO
     - WMB
-    - XOM
   Financials_and_Payments:
-    - BRK.B
+    - BRK-B
     - JPM
     - V
     - MA
@@ -112,6 +114,8 @@ groups:
     - KO
     - PEP
     - MCD
+    - HD
+    - UBER
   Industrials_and_Manufacturing:
     - GE
     - CAT
@@ -141,10 +145,14 @@ groups:
     - CEG
   Communication_Services_Media:
     - DIS
-    - NFLX
     - VZ
     - T
-  Other_Large_Cap:
-    - HD
-    - UBER
-    - WMB
+  Market_Internals:
+    - ^VIX
+    - ^VIX1D
+    - ^VIX3M
+    - ^VIX6M
+    - ^VIX1Y
+    - RSP
+    - HYG
+    - LQD

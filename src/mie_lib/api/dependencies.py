@@ -30,9 +30,9 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
             print(f"Mock user {mock_user_email} not found. Creating temporary mock admin.")
             mock_user = User(
                 email=mock_user_email,
-                name="Mock Admin",
-                picture="",
-                is_admin=True,  # Ensure admin access
+                full_name="Mock Admin",
+                google_sub="mock_bypass_sub",
+                is_admin=True,
                 is_approved=True
             )
             # CAUTION: This user might not be persisted if transaction logic isn't handled here,
@@ -51,7 +51,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
             # BUT, for "bypass", we usually want it to just work.
             
             # Helper for completely detached mock user:
-            return User(id=9999, email=mock_user_email, name="Mock System", picture="", is_admin=True, is_approved=True)
+            return User(id=9999, email=mock_user_email, full_name="Mock System", google_sub="mock_bypass_sub", is_admin=True, is_approved=True)
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

@@ -33,7 +33,7 @@ RUN chmod +x cli/orchestrator.sh
 # Create crontab
 # 17:00 EST = 22:00 UTC (Standard)
 # 0 22 * * *
-RUN echo "0 22 * * * /app/cli/orchestrator.sh >> /proc/1/fd/1 2>&1" > crontab
+RUN echo "0 22 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab
 
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1

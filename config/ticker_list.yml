@@ -134,7 +134,9 @@ tickers:
  - T
  # --- DCS ASSETS ---
  - ^VIX
+ - ^VIX1D
  - ^VIX3M
+ - ^VIX6M
  - RSP
  - HYG
  - LQD

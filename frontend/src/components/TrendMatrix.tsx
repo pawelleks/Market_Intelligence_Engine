@@ -216,15 +216,27 @@ const TrendMatrix = () => {
         borderBottom: '1px solid #334155'
     };
 
+    // Calculate Last Updated Date
+    const lastDate = trendData.length > 0
+        ? trendData.reduce((latest, row) => (row.date > latest ? row.date : latest), "")
+        : "";
+
     return (
         <div style={{ padding: '20px', width: '100%', maxWidth: '1600px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
 
             {/* Page Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '1.5rem', color: '#e2e8f0', margin: 0, display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
-                    <Activity size={24} color="#4caf50" />
-                    Trend Command Center
-                </h2>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '15px' }}>
+                    <h2 style={{ fontSize: '1.5rem', color: '#e2e8f0', margin: 0, display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold' }}>
+                        <Activity size={24} color="#4caf50" />
+                        Trend Command Center
+                    </h2>
+                    {lastDate && (
+                        <span style={{ color: '#64748b', fontSize: '0.9rem', fontWeight: '500' }}>
+                            As of: <span style={{ color: '#94a3b8' }}>{lastDate}</span>
+                        </span>
+                    )}
+                </div>
 
                 <div style={{ position: 'relative' }}>
                     <Search size={14} color="#64748b" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
@@ -316,15 +328,8 @@ const TrendMatrix = () => {
                             return (
                                 <tr key={row.ticker} style={{ borderBottom: '1px solid #1e293b', height: '40px' }} className="hover-row">
                                     {/* Ticker */}
-                                    <td style={{ padding: '0 12px' }}>
-                                        <Link to={`/investing/ichimoku/${d.ticker}`} style={{
-                                            color: '#60a5fa',
-                                            fontWeight: '600',
-                                            textDecoration: 'none',
-                                            display: 'block'
-                                        }}>
-                                            {d.ticker}
-                                        </Link>
+                                    <td style={{ padding: '0 12px', color: '#e2e8f0', fontWeight: '600' }}>
+                                        {d.ticker}
                                     </td>
 
                                     {/* Score Pill */}
@@ -357,32 +362,38 @@ const TrendMatrix = () => {
 
                                     {/* ADX Text */}
                                     <td style={{ padding: '0 12px', textAlign: 'center', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                        {d.is_adx_strong_trend ?
-                                            <span style={{ color: '#4caf50' }}>STRONG UP</span> :
-                                            <span style={{ color: '#64748b' }}>NEUTRAL/BEAR</span>
-                                        }
+                                        <Link to={`/analysis/adx/${d.ticker}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                                            {d.is_adx_strong_trend ?
+                                                <span style={{ color: '#4caf50' }}>STRONG UP</span> :
+                                                <span style={{ color: '#64748b' }}>NEUTRAL/BEAR</span>
+                                            }
+                                        </Link>
                                     </td>
 
                                     {/* PSAR */}
                                     <td style={{ padding: '0 12px', textAlign: 'center' }}>
-                                        {d.is_psar_bullish ?
-                                            <Circle size={14} fill="#4caf50" color="#4caf50" style={{ display: 'inline-block' }} /> :
-                                            <Circle size={14} fill="#ef5350" color="#ef5350" style={{ display: 'inline-block' }} />
-                                        }
+                                        <Link to={`/analysis/psar/${d.ticker}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                                            {d.is_psar_bullish ?
+                                                <Circle size={14} fill="#4caf50" color="#4caf50" style={{ display: 'inline-block' }} /> :
+                                                <Circle size={14} fill="#ef5350" color="#ef5350" style={{ display: 'inline-block' }} />
+                                            }
+                                        </Link>
                                     </td>
 
                                     {/* Ichimoku Icon */}
                                     <td style={{ padding: '0 12px', textAlign: 'center' }}>
-                                        {(() => {
-                                            // Green: Above Cloud + Green Cloud
-                                            // Orange: Above Cloud + Red Cloud
-                                            // Red: Below Cloud
-                                            let color = '#ef5350';
-                                            if (d.is_above_cloud) {
-                                                color = d.is_cloud_green ? '#4ade80' : '#facc15';
-                                            }
-                                            return <Cloud size={18} color={color} fill={color} fillOpacity={0.2} />;
-                                        })()}
+                                        <Link to={`/investing/ichimoku/${d.ticker}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                                            {(() => {
+                                                // Green: Above Cloud + Green Cloud
+                                                // Orange: Above Cloud + Red Cloud
+                                                // Red: Below Cloud
+                                                let color = '#ef5350';
+                                                if (d.is_above_cloud) {
+                                                    color = d.is_cloud_green ? '#4ade80' : '#facc15';
+                                                }
+                                                return <Cloud size={18} color={color} fill={color} fillOpacity={0.2} />;
+                                            })()}
+                                        </Link>
                                     </td>
 
                                     {/* Cloud Age */}
@@ -392,10 +403,12 @@ const TrendMatrix = () => {
 
                                     {/* EMA Stack */}
                                     <td style={{ padding: '0 12px', textAlign: 'center' }}>
-                                        {d.is_ema_stacked_up ?
-                                            <Circle size={14} fill="#4caf50" color="#4caf50" style={{ display: 'inline-block' }} /> :
-                                            <Circle size={14} fill="#ef5350" color="#ef5350" style={{ display: 'inline-block' }} />
-                                        }
+                                        <Link to={`/analysis/ema-stack/${d.ticker}`} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                                            {d.is_ema_stacked_up ?
+                                                <Circle size={14} fill="#4caf50" color="#4caf50" style={{ display: 'inline-block' }} /> :
+                                                <Circle size={14} fill="#ef5350" color="#ef5350" style={{ display: 'inline-block' }} />
+                                            }
+                                        </Link>
                                     </td>
 
                                     {/* EMA Age */}

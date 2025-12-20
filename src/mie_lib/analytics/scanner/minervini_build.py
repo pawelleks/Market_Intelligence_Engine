@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from mie_lib.analytics.minervini import run_minervini_template
-from mie_lib.data_ingest.yfinance_loader import fetch_full_history
 
 
 logger = logging.getLogger(__name__)
@@ -28,18 +27,10 @@ def build_minervini_snapshot(tickers: List[str], target_date: date):
     
     for ticker in tickers:
         try:
-            # 1. Fetch History (Need at least 2 years for 200 SMA and 52w highs)
-            # fetch_full_history returns metadata dict, writes to file
-            meta = fetch_full_history(ticker)
-            
-            if meta.get("rows", 0) == 0:
-                logger.warning(f"Skipping {ticker}: No historical data found.")
-                continue
-                
-            # Load the data we just fetched/guaranteed
+            # 1. Use Existing History (update-raw runs before this)
             raw_path = Path(f"data/raw/{ticker}.parquet")
             if not raw_path.exists():
-                logger.warning(f"Skipping {ticker}: Parquet file missing after fetch.")
+                logger.warning(f"Skipping {ticker}: Parquet file missing (run update-raw first).")
                 continue
                 
             df = pd.read_parquet(raw_path)

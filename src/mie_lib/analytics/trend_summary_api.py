@@ -14,9 +14,9 @@ LOG = get_logger("trend_summary_api")
 
 class TrendSummaryRow(BaseModel):
     ticker: str
+    date: Optional[str] = None
     is_ema_stacked_up: bool
     is_adx_strong_trend: bool
-    is_psar_bullish: bool
     is_psar_bullish: bool
     is_above_cloud: bool
     is_cloud_green: Optional[bool] = False
@@ -75,10 +75,10 @@ def get_trend_summary():
 
         df_base = pd.DataFrame({"ticker": list(all_tickers)})
         
-        # Merge SMA
+        # Merge SMA (Primary source for Date usually)
         if not df_sma.empty:
             # Keep only relevant columns
-            sma_cols = ["ticker", "is_ema_stacked_up", "ema_age"]
+            sma_cols = ["ticker", "is_ema_stacked_up", "ema_age", "date"]
             # Check availability
             sma_cols = [c for c in sma_cols if c in df_sma.columns]
             df_base = df_base.merge(df_sma[sma_cols], on="ticker", how="left")
@@ -128,9 +128,16 @@ def get_trend_summary():
         df_base["is_adx_strong_trend"] = df_base["is_adx_strong"] & df_base["is_adx_uptrend"]
         df_base["dow_theory_status"] = "PENDING"
         
+        # Format Date
+        if "date" in df_base.columns:
+            df_base["date"] = pd.to_datetime(df_base["date"]).dt.strftime("%Y-%m-%d").fillna("")
+        else:
+            df_base["date"] = None
+
         # Select Output
         out_cols = [
             "ticker", 
+            "date",
             "is_ema_stacked_up", 
             "is_adx_strong_trend", 
             "is_psar_bullish", 

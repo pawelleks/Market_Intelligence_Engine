@@ -37,7 +37,12 @@ def _prepare_run_dir(tmp_root: Path) -> Path:
 
 
 def _count_files(root: Path) -> int:
-    return sum(1 for p in root.rglob("*") if p.is_file())
+    try:
+        if not root.exists():
+            return 0
+        return sum(1 for p in root.rglob("*") if p.is_file())
+    except Exception:
+        return 0
 
 
 def _collect_windows(ticker_dir: Path, expected: set[str]) -> tuple[dict[str, list[str]], set[str]]:

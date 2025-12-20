@@ -91,7 +91,20 @@ The pipeline processes tickers defined in **`config/tickers.yml`**.
 *   **Storage**: Seasonality facts database in `data/analytics/seasonality/facts/...`
 *   **Why**: Powers the "Seasonality" dashboard.
 
-#### 9. `build-gaf-daily` (Computer Vision Prediction)
+#### 9. Trend & Volatility Analytics
+*   **What it does**: Computes and persists special analytics for the "Trading" dashboards.
+    *   **SMA Stack**: Assessing alignment of short/long term moving averages.
+    *   **ADX/DMI**: Trend strength analysis.
+    *   **PSAR**: Parabolic SAR momentum.
+    *   **Ichimoku**: Cloud trend analysis.
+    *   **Volatility Term Structure**: Analysis of VIX/VIX3M ratio and Contango/Backwardation regimes.
+*   **Source**: `data/features/{TICKER}.parquet` + VIX Data.
+*   **Storage**: 
+    *   Trend reports in `data/analytics/{ANALYTIC_NAME}/latest.json` or similar.
+    *   Volatility report in `data/analytics/volatility_term_structure.json`.
+*   **Why**: Powers the "Trading" section dashboards.
+
+#### 10. `build-gaf-daily` (Computer Vision Prediction)
 *   **What it does**: Generates a Gramian Angular Field (image of price action) and uses a CNN model to predict the next day's movement.
 *   **Source**: `data/raw/{TICKER}.parquet`.
 *   **Storage**: Prediction JSON.

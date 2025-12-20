@@ -113,4 +113,9 @@ scope:
     - TSLA
     - GOOGL
     - META
+  Markov_Grid: # Default high-value tickers for Markov Grid analysis
+    - SPY
+    - QQQ
+    - DIA
+    - IWM
  

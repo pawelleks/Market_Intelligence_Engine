@@ -28,6 +28,12 @@ log() {
 log "Starting Daily MIE Pipeline for ${TODAY}"
 log "Logs will be written to ${LOG_FILE}"
 
+# 1.5. Initialize Audit Log (Reset for new run)
+RUN_TYPE=${1:-"MANUAL"} # Default to MANUAL if not provided
+log "Initializing Audit Log (Type: ${RUN_TYPE})..."
+python -m mie_lib.cli.mie start-pipeline-job --name "Daily Pipeline ${TODAY}" --type "${RUN_TYPE}" >> "${LOG_FILE}" 2>&1
+log "Audit Log Initialized."
+
 # 2. Ingestion Phase ("Fetch")
 log "=== Phase 1: Ingestion ==="
 
@@ -35,9 +41,15 @@ log "Running update-raw (Fetching historical prices)..."
 python -m mie_lib.cli.mie update-raw >> "${LOG_FILE}" 2>&1
 log "update-raw completed successfully."
 
-log "Running fetch-options-snapshot (Fetching daily GEX data)..."
-python -m mie_lib.cli.mie fetch-options-snapshot
-log "fetch-options-snapshot completed successfully."
+log "Step 2: Daily Options Snapshot (Download & Extract)"
+log "---------------------------------------------------"
+log "Running fetch-massive-snapshot (Download Full File)..."
+python -m mie_lib.cli.mie fetch-massive-snapshot >> "${LOG_FILE}" 2>&1
+log "Download completed."
+
+log "Running extract-massive-snapshot (Extract Configured Tickers)..."
+python -m mie_lib.cli.mie extract-massive-snapshot --tickers @config >> "${LOG_FILE}" 2>&1
+log "Extraction completed."
 
 # 3. Feature Engineering Phase
 log "=== Phase 2: Feature Engineering ==="
@@ -62,8 +74,8 @@ log "build-markov-grid completed."
 # 5. Update HMM Data
 log "Running build-hmm-daily..."
 python -m mie_lib.cli.mie build-hmm-daily --tickers @config >> "${LOG_FILE}" 2>&1
-log "Running build-hmm-grid..."
-python -m mie_lib.cli.mie build-hmm-grid --tickers @config --windows 5,10,20,MAX --states 2,3 >> "${LOG_FILE}" 2>&1
+# log "Running build-hmm-grid..."
+# python -m mie_lib.cli.mie build-hmm-grid --tickers @config --windows 5,10,20,MAX --states 2,3 >> "${LOG_FILE}" 2>&1
 python -m mie_lib.cli.mie build-hmm-snapshots >> "${LOG_FILE}" 2>&1
 log "build-hmm-snapshots completed."
 
@@ -73,13 +85,13 @@ log "backtest-hmm completed."
 
 # 6. Update GEX Data
 log "Running build-gex-daily..."
-python -m mie_lib.cli.mie build-gex-daily --date "${TODAY}" --tickers @config >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-gex-daily --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-gex-daily completed."
 
 # 7. Update Expected Moves
 log "Running update-expected-moves..."
-python -m mie_lib.cli.mie update-expected-moves --lookback 5 --include-weekly-reference >> "${LOG_FILE}" 2>&1
-python -m mie_lib.cli.mie build-expected-moves-snapshots >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie update-expected-moves --ticker @config --lookback 5 --include-weekly-reference >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-expected-moves-snapshots --tickers @config >> "${LOG_FILE}" 2>&1
 log "update-expected-moves completed."
 
 # 8. Update Seasonality Data
@@ -96,11 +108,30 @@ log "Running update-psar..."
 python -m mie_lib.cli.mie update-psar >> "${LOG_FILE}" 2>&1
 log "Running update-ichimoku..."
 python -m mie_lib.cli.mie update-ichimoku >> "${LOG_FILE}" 2>&1
+log "Running build-volatility-struct..."
+python -m mie_lib.cli.mie build-volatility-struct >> "${LOG_FILE}" 2>&1
 
-# 10. GAF Prediction
+# 10. Time Series Momentum (TSMOM)
+log "Running build-tsmom-daily..."
+python -m mie_lib.cli.mie build-tsmom-daily --tickers @config >> "${LOG_FILE}" 2>&1
+log "build-tsmom-daily completed."
+
+# 11. GAF Prediction
 log "Running build-gaf-daily..."
 python -m mie_lib.cli.mie build-gaf-daily >> "${LOG_FILE}" 2>&1
 log "build-gaf-daily completed."
+
+# 12. AI Context Generation
+log "Running generate-ai-context..."
+python -m mie_lib.cli.mie generate-ai-context --ticker SPY >> "${LOG_FILE}" 2>&1
+log "generate-ai-context completed."
+
+# 13. Finalize Status
+log "Finalizing Audit Status..."
+python -m mie_lib.cli.mie update-stage --stage "Publish Analytics Data" --status "COMPLETED"
+log "Finalizing Pipeline Job..."
+python -m mie_lib.cli.mie finish-pipeline-job --status "COMPLETED"
+log "Audit finalized."
 
 log "======================================================="
 log "       🚀 DAILY UPDATE COMPLETED SUCCESSFULLY 🚀       "

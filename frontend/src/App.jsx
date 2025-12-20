@@ -38,6 +38,7 @@ import AdxReport from './components/AdxReport';
 import PsarReport from './components/PsarReport';
 import IchimokuReport from './components/IchimokuReport';
 import TrendMatrix from './components/TrendMatrix';
+import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -491,6 +492,10 @@ function AppContent() {
             <Route
               path="/analysis/gex"
               element={<ProtectedLayout><GammaExposurePage /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/volatility-term-structure"
+              element={<ProtectedLayout><VolatilityTermStructurePage /></ProtectedLayout>}
             />
             <Route
               path="/analysis/neural/gaf"

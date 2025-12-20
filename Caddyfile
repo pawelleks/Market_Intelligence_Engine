@@ -1,0 +1,14 @@
+{
+    email admin@example.com
+}
+
+localhost {
+    tls internal
+    reverse_proxy /api/* mie-api:8000
+    reverse_proxy * mie-web:80
+}
+
+159.203.66.39.nip.io {
+    reverse_proxy /api/* mie-api:8000
+    reverse_proxy * mie-web:80
+}

@@ -69,7 +69,9 @@ const GAFAnalysisPage = () => {
 
     return (
         <div style={{ padding: '20px', color: '#c9d1d9', fontFamily: 'Inter, sans-serif' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>GAF Neural Net Analysis</h1>
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px' }}>
+                GAF Neural Net Analysis {data && data.ticker ? `- ${data.ticker}` : ''}
+            </h1>
 
             {/* Single Column Vertical Layout */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

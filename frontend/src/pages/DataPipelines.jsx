@@ -148,6 +148,7 @@ const DataPipelines = () => {
             "build-gaf-daily": "Analytics: GAF Prediction (AI)",
             "build-tsmom-daily": "Analytics: TSMOM (Momentum)",
             "rebuild-reliability": "🎯 Update Reliability (Exp. Moves + Snapshots)",
+            "build-volatility-struct": "Analytics: Volatility Term Structure",
             "update-everything": "⚡ Update Everything (Smart Incremental)"
         };
         return map[job] || job;

@@ -23,6 +23,8 @@ class MassiveOptionsLoader:
     def __init__(self, data_dir: str = "data/raw/massive/options"):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.full_dir = self.data_dir / "full"
+        self.full_dir.mkdir(parents=True, exist_ok=True)
 
     def load_day_aggregates(self, date_str: str, tickers: Optional[List[str]] = None) -> pd.DataFrame:
         """
@@ -82,7 +84,8 @@ class MassiveOptionsLoader:
 
             # Filter by Underlying Ticker (Secondary Check or Primary if logic above changed)
             if tickers and 'underlying_ticker' in df.columns:
-                target_tickers = [t.upper() for t in tickers]
+                # CRITICAL: Strip ^ from target tickers because extracted file has normalized tickers (e.g. SPX not ^SPX)
+                target_tickers = [t.upper().lstrip('^') for t in tickers]
                 df = df[df['underlying_ticker'].isin(target_tickers)].copy()
                 
             if df.empty:
@@ -168,7 +171,8 @@ class MassiveOptionsLoader:
             True if successful or file exists, False on failure.
         """
         filename = f"options_{date_str}.csv"
-        filepath = self.data_dir / filename
+        # Download to 'full/' subdirectory
+        filepath = self.full_dir / filename
         
         if filepath.exists() and not force:
             logger.info(f"File {filename} already exists. Skipping download.")
@@ -188,7 +192,7 @@ class MassiveOptionsLoader:
             # S3 Key Format: us_options_opra/day_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz
             # Note: The bucket is 'flatfiles', so the key inside it does NOT start with 'flatfiles/'
             object_key = f"us_options_opra/day_aggs_v1/{year}/{month}/{date_str}.csv.gz"
-            local_gz_path = self.data_dir / f"{filename}.gz"
+            local_gz_path = self.full_dir / f"{filename}.gz"
             
             logger.info(f"Downloading {object_key} to {local_gz_path}...")
             
@@ -219,4 +223,75 @@ class MassiveOptionsLoader:
             
         except Exception as e:
             logger.error(f"Failed to download snapshot for {date_str}: {e}")
+            return False
+
+    def extract_and_save_snapshot(self, date_str: str, tickers: List[str]) -> bool:
+        """
+        Reads the FULL snapshot from 'full/' dir, filters for tickers, 
+        and saves the smaller extract to the main data_dir.
+        """
+        full_path = self.full_dir / f"options_{date_str}.csv"
+        target_path = self.data_dir / f"options_{date_str}.csv"
+        
+        if not full_path.exists():
+            logger.error(f"Full snapshot not found at {full_path}. Cannot extract.")
+            return False
+            
+        try:
+            logger.info(f"Extracting data for {len(tickers)} tickers from {full_path}...")
+            
+            # Use chunks to handle large files efficiently if needed, 
+            # but for 3-5GB pd.read_csv usually works if machine has 16GB RAM.
+            # Given user feedback, file might be manageable.
+            
+            # Using similar logic to load_day_aggregates but strictly for extraction
+            # We reuse load_day_aggregates logic by "mocking" the file location? 
+            # OR just implement filtering here.
+            
+            # Optimized read: Use iterator if memory is concern, but let's try direct load first as per previous success.
+            # Actually, let's just use read_csv with iterator if we want to be safe.
+            
+            # We need to filter by 'option_ticker' or 'underlying'.
+            # The Full file has 'ticker' column usually (Massive).
+            
+            chunks = pd.read_csv(full_path, chunksize=500000)
+            
+            cleaned_tickers = [t.upper().lstrip('^') for t in tickers]
+            # Regex for O:TICKER... or TICKER...
+            # Note: Massive files often use 'ticker' column for the option ticker string.
+             
+            # Pattern to match ANY of the tickers
+            # ^(O:)?(SPY|QQQ)\d
+            pattern = r'^(?:O:)?(' + '|'.join(map(re.escape, cleaned_tickers)) + r')\d'
+            
+            header_written = False
+            total_rows = 0
+            
+            with open(target_path, 'w') as f_out:
+                for chunk in chunks:
+                    if 'ticker' in chunk.columns and 'option_ticker' not in chunk.columns:
+                        chunk = chunk.rename(columns={'ticker': 'option_ticker'})
+                        
+                    # Filter
+                    filtered = chunk[chunk['option_ticker'].str.match(pattern, na=False)]
+                    
+                    if not filtered.empty:
+                        # Extract underlying for compatibility/verification
+                        # (Optional, but good for downstream consumption)
+                        filtered['underlying_ticker'] = filtered['option_ticker'].str.replace(r'^O:', '', regex=True).str.extract(r'^([A-Z\^]+)')[0]
+                        
+                        # Only keep rows that match our specific list 
+                        # (The regex is broad, this is precise)
+                        filtered = filtered[filtered['underlying_ticker'].isin(cleaned_tickers)]
+                        
+                        if not filtered.empty:
+                            filtered.to_csv(f_out, header=not header_written, index=False)
+                            header_written = True
+                            total_rows += len(filtered)
+                            
+            logger.info(f"Extraction complete. Saved {total_rows} rows to {target_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Extraction failed: {e}")
             return False

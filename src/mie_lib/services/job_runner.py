@@ -29,6 +29,7 @@ class JobRunner:
         "build-gaf-daily": ["python", "-m", "mie_lib.cli.mie", "build-gaf-daily"],
         "build-tsmom-daily": ["python", "-m", "mie_lib.cli.mie", "build-tsmom-daily", "--tickers", "@config"],
         "rebuild-reliability": ["python", "-m", "mie_lib.cli.mie", "rebuild-reliability"],
+        "build-volatility-struct": ["python", "-m", "mie_lib.cli.mie", "build-volatility-struct"],
     }
 
     def __init__(self, log_dir: str = "logs"): # Changed default to 'logs' to match script

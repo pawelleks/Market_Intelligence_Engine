@@ -17,7 +17,9 @@ from mie_lib.analytics.hmm.hmm_engine import HMMConfig # Used for HMM configurat
 
 # Data Freshness Imports
 from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
+from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
 from mie_lib.utils.paths import features_parquet_path, options_latest_json_path, options_expected_moves_path
+from mie_lib.services.audit_logger import AUDIT_FILE_PATH # Import path
 import json
 import yfinance as yf
 
@@ -77,6 +79,8 @@ from mie_lib.analytics.ichimoku_api import router as ichimoku_router
 app.include_router(ichimoku_router)
 from mie_lib.analytics.trend_summary_api import router as trend_sum_router
 app.include_router(trend_sum_router, prefix="/api/v1/analytics/trend", tags=["trend"])
+from mie_lib.analytics.volatility_term_structure_api import router as vts_router
+app.include_router(vts_router)
 # --- AUTH ROUTER ---
 from mie_lib.api.routers.auth import router as auth_router
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
@@ -1190,3 +1194,22 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
     except Exception as e:
         print(f"Error fetching candles for {ticker}: {e}")
         return JSONResponse(content={"error": f"YFinance Error: {str(e)}"}, status_code=500)
+
+@app.get("/api/v1/system/audit/latest")
+def get_latest_audit_log() -> JSONResponse:
+    """Retrieves the latest pipeline audit log."""
+    if not AUDIT_FILE_PATH.exists():
+        return JSONResponse(content={
+            "status": "IDLE",
+            "job_name": "No Audit Log Found",
+            "start_time": None,
+            "end_time": None,
+            "stages": {}
+        })
+    
+    try:
+        with open(AUDIT_FILE_PATH, "r") as f:
+            data = json.load(f)
+        return JSONResponse(content=data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read audit log: {e}")

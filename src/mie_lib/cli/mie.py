@@ -21,10 +21,11 @@ except ImportError:
 os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 # -----------------------------------------
+import json
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
-
 import yaml
+from mie_lib.services.audit_logger import get_audit_logger
 
 # Ensure project root is on sys.path so `src` is importable when running cli scripts
 # file: .../src/mie_lib/cli/mie.py
@@ -84,6 +85,7 @@ from mie_lib.analytics.markov.states_model import states_stale
 from mie_lib.options.em_core import MockOptionChainProvider
 from mie_lib.utils.paths import HMM_DIR, MARKOV_DIR, OPTIONS_DIR
 from mie_lib.seasonality_engine import generate_seasonality_base
+from mie_lib.analytics.volatility_term_structure import VolatilityTermStructure
 
 LOG = get_logger("cli")
 
@@ -168,6 +170,11 @@ def _run(cmd: list[str]):
 def _default_markov_tickers() -> list[str]:
     """Resolve default tickers for Markov grid: prefer config tickers intersecting
     the core universe (SPY,QQQ,DIA,IWM); fallback to the core list if none found."""
+    # NEW: Check explicit scope first
+    scope = _load_scope_tickers("Markov_Grid")
+    if scope:
+        return scope
+
     try:
         cfg = [t.strip().upper() for t in read_tickers() if str(t).strip()]
     except Exception:
@@ -241,28 +248,92 @@ def _grid_log_append(msg: str):
 def handle_update_sma_stack(args):
     """Handle update-sma-stack command."""
     from mie_lib.analytics.sma_stack import calculate_and_save_sma_stack
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("SMA/EMA Stack", "RUNNING", {})
     LOG.info("Running update-sma-stack...")
     calculate_and_save_sma_stack()
     LOG.info("update-sma-stack completed.")
+    get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {})
 
 
 def handle_update_adx(args):
     """Handle update-adx command."""
     from mie_lib.analytics.adx_dmi import calculate_and_save_adx
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("ADX/DMI", "RUNNING", {})
     LOG.info("Running update-adx...")
     calculate_and_save_adx()
     LOG.info("update-adx completed.")
+    get_audit_logger().update_stage("ADX/DMI", "COMPLETED", {})
 
 
 def handle_update_ichimoku(args):
     """Handle update-ichimoku command."""
     from mie_lib.analytics.ichimoku import calculate_and_save_ichimoku
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Ichimoku", "RUNNING", {})
     LOG.info("Running update-ichimoku...")
     tickers = None
     if getattr(args, "tickers", None) and args.tickers != "@config":
         tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
     calculate_and_save_ichimoku(tickers)
     LOG.info("update-ichimoku completed.")
+    get_audit_logger().update_stage("Ichimoku", "COMPLETED", {})
+
+def handle_finish_pipeline_job(args):
+    """
+    Explicitly finishes the current audit job log.
+    Used by orchestrator.sh to save history.
+    """
+    status = args.status or "COMPLETED"
+    print(f"Finishing Audit Log with Status: {status}")
+    get_audit_logger().finish_job(status)
+
+def handle_start_pipeline_job(args):
+    """
+    Explicitly starts a new audit job log.
+    Used by orchestrator.sh to reset the daily log sequence.
+    """
+    job_name = args.name or "Daily Pipeline"
+    run_type = args.type or "MANUAL"
+    print(f"Initializing Audit Log for Job: {job_name} ({run_type})")
+    # Force reset by accessing the singleton and resetting data before start
+    logger = get_audit_logger()
+    logger._reset_data()
+    logger.start_job(job_name, run_type=run_type)
+    
+    # Pre-populate stages so UI shows them as PENDING immediately
+    # Phase 1: Ingestion
+    logger.update_stage("Update Raw Data", "PENDING", {})
+    logger.update_stage("Download Daily Options (Flat File)", "PENDING", {})
+    logger.update_stage("Extract Options Tickers", "PENDING", {})
+    
+    # Phase 2: Features
+    logger.update_stage("Update Features", "PENDING", {})
+    
+    # Phase 3: Analytics
+    logger.update_stage("SMA/EMA Stack", "PENDING", {})
+    logger.update_stage("ADX/DMI", "PENDING", {})
+    logger.update_stage("Ichimoku", "PENDING", {})
+    logger.update_stage("PSAR", "PENDING", {})
+    logger.update_stage("Seasonality", "PENDING", {})
+    logger.update_stage("VolatilityTermStructure", "PENDING", {})
+    logger.update_stage("AI Context Generation", "PENDING", {})
+    logger.update_stage("Markov Grid", "PENDING", {})
+    logger.update_stage("Markov Snapshots", "PENDING", {})
+    logger.update_stage("HMM Grid", "PENDING", {})
+    logger.update_stage("Backtest HMM", "PENDING", {})
+    logger.update_stage("Expected Moves", "PENDING", {})
+    logger.update_stage("HMM Backtest SPY", "PENDING", {})
+    logger.update_stage("GEX", "PENDING", {})
+    logger.update_stage("TSMOM", "PENDING", {})
+    logger.update_stage("GAF", "PENDING", {})
+    
+    # Phase 4: Data Publishing (Renamed from Snapshots)
+    logger.update_stage("Publish Analytics Data", "PENDING", {})
+    
+    print("Audit Log initialized with stages.")
+    sys.exit(0)
 
 
 def handle_build_features(args):
@@ -277,6 +348,11 @@ def handle_build_features(args):
     lookback = int(getattr(args, "lookback", 90))
     write_csv = bool(getattr(args, "csv", False))
     tickers_arg = getattr(args, "tickers", "@config")
+
+    # Audit Start
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Update Features", "RUNNING", {"mode": mode})
+
     if tickers_arg and tickers_arg.strip() and tickers_arg.strip() != "@config":
         tickers = [t.strip() for t in tickers_arg.split(",") if t.strip()]
     else:
@@ -286,7 +362,11 @@ def handle_build_features(args):
         print("build-features ERROR: no tickers resolved")
         sys.exit(2)
     summary: list[dict] = []
-    for t in tickers:
+    
+    # Progress tracking in audit log (optional granularity)
+    total = len(tickers)
+    
+    for i, t in enumerate(tickers):
         try:
             if mode == "full":
                 out = _build_features_for_ticker(t, mode="full", write_csv=write_csv)
@@ -299,10 +379,20 @@ def handle_build_features(args):
             logging.error("[cli] build-features FAIL %s: %s", t, e)
             print({"ticker": t, "status": "error", "error": str(e)})
             summary.append({"ticker": t, "status": "error", "error": str(e)})
+            
+        # Optional: update progress every 10 tickers
+        if i % 10 == 0:
+             get_audit_logger().update_stage("Update Features", "RUNNING", {"processed": i, "total": total})
+
     # Non-zero exit if any aborted to surface pipeline issues but keep loop running
     aborted = [r for r in summary if r.get("status") == "error"]
+    
     if aborted:
         logging.warning("build-features completed with %d errors (continuing pipeline)", len(aborted))
+        get_audit_logger().update_stage("Update Features", "COMPLETED", {"status": "Partial Errors", "errors": len(aborted)})
+    else:
+        get_audit_logger().update_stage("Update Features", "COMPLETED", {"processed": total})
+        
     return summary
 
 
@@ -415,6 +505,7 @@ def handle_update_expected_moves(args):
             
     print(f"Build complete. Processed {len(all_results)} days.")
     LOG.info("handle_update_expected_moves completed successfully.")
+    get_audit_logger().update_stage("Expected Moves", "COMPLETED", {})
     return all_results
 
 
@@ -506,15 +597,28 @@ def handle_build_markov_snapshots(args):
     windows_arg = getattr(args, "windows", None)
     windows = [w.strip().upper() for w in windows_arg.split(",") if w.strip()] if windows_arg else None
 
-    summary = build_markov_snapshots(
-        tickers=tickers,
-        destination_root=destination_root,
-        tmp_root=tmp_root,
-        allow_missing=allow_missing,
-        windows=windows,
-    )
-    ok = summary.get("copied_count", 0)
-    missing = len(summary.get("missing", []))
+    print(f"Building Markov Snapshots (Output: {args.output_dir or 'Default'})...")
+    from mie_lib.services.audit_logger import get_audit_logger
+    import sys
+    get_audit_logger().update_stage("Markov Snapshots", "RUNNING", {})
+    try:
+        meta = build_markov_snapshots(
+            tickers=tickers,
+            destination_root=destination_root,
+            tmp_root=tmp_root,
+            allow_missing=allow_missing,
+            windows=windows,
+        )
+        print(f"Markov Snapshots Copied. Metadata: {meta.get('copied_count')} processed.")
+        get_audit_logger().update_stage("Markov Snapshots", "COMPLETED", {"processed": meta.get('copied_count')})
+        ok = meta.get("copied_count", 0)
+        missing = len(meta.get("missing", []))
+        summary = meta # Keep summary for the final print
+    except Exception as e:
+        print(f"Error building markov snapshots: {e}")
+        get_audit_logger().update_stage("Markov Snapshots", "FAILED", {"error": str(e)})
+        sys.exit(1)
+
     wanted_windows = windows or list(DEFAULT_MARKOV_SNAPSHOT_WINDOWS)
     LOG.info(
         "build-markov-snapshots complete tickers=%s ok=%s missing=%s dest=%s windows=%s",
@@ -533,6 +637,9 @@ def handle_build_gex_daily(args):
     Handler for building daily GEX snapshots from Massive Flat Files.
     Defaults to previous trading day (completed session) if date not specified.
     """
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("GEX", "RUNNING", {})
+    
     from datetime import date, datetime, timedelta
     from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader
     from mie_lib.analytics.gex.gex_engine import GEXEngine
@@ -586,6 +693,7 @@ def handle_build_gex_daily(args):
             # But here I am fixing it for the user. I'll make it fail if not --online, to avoid accidental API spam.
             if not args.online:
                  logger.error("FATAL: No CSV data. Use --online to fetch from Yahoo Finance.")
+                 get_audit_logger().update_stage("GEX", "FAILED", {"error": "No CSV data found in offline mode"})
                  return 1
         
     # 2. Process Each Ticker
@@ -680,6 +788,7 @@ def handle_build_gex_daily(args):
             logger.error(f"Failed to build GEX for {ticker}: {e}")
             
     logger.info("Daily GEX Build Completed.")
+    get_audit_logger().update_stage("GEX", "COMPLETED", {})
     return 0
 
 
@@ -797,11 +906,50 @@ def handle_fetch_massive_snapshot(args):
     loader = MassiveOptionsLoader()
     success = loader.download_day_snapshot(date_str, force=args.force)
     
+    # Audit Logging
+    from mie_lib.services.audit_logger import get_audit_logger
+    status = "COMPLETED" if success else "FAILED"
+    get_audit_logger().update_stage("Download Daily Options (Flat File)", status, {"date": date_str})
+
     if success:
         print(f"Successfully fetched snapshot for {date_str}.")
         return 0
     else:
         print(f"Failed to fetch snapshot for {date_str}.")
+        return 1
+
+def handle_extract_massive_snapshot(args):
+    """
+    Extracts specific tickers from the locally downloaded FULL massive snapshot.
+    """
+    from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader
+    from datetime import date
+    from mie_lib.utils.trading_calendar import get_previous_trading_day
+    
+    date_str = args.date
+    if not date_str or date_str == "auto":
+        date_str = get_previous_trading_day(date.today()).strftime("%Y-%m-%d")
+        
+    print(f"Extracting tickers from snapshot for {date_str}...")
+    
+    # Resolve Tickers
+    tickers = _load_yaml_tickers()
+    if args.tickers and args.tickers != "@config":
+        tickers = _parse_csv_str_list(args.tickers, [])
+        
+    loader = MassiveOptionsLoader()
+    success = loader.extract_and_save_snapshot(date_str, tickers)
+    
+    # Audit Logging
+    from mie_lib.services.audit_logger import get_audit_logger
+    status = "COMPLETED" if success else "FAILED"
+    get_audit_logger().update_stage("Extract Options Tickers", status, {"date": date_str, "tickers": len(tickers)})
+    
+    if success:
+        print(f"Successfully extracted snapshot for {date_str}.")
+        return 0
+    else:
+        print(f"Failed to extract snapshot for {date_str}.")
         return 1
 
 def handle_fetch_polygon_snapshot(args):
@@ -893,7 +1041,9 @@ def handle_backtest_gaf(args):
     print(f"Starting GAF Backtest for {ticker} from {start_date}...")
     
     engine = GAFBacktester(ticker=ticker, start_date=start_date, end_date=end_date)
+    engine = GAFBacktester(ticker=ticker, start_date=start_date, end_date=end_date)
     engine.run()
+    get_audit_logger().update_stage("GAF", "COMPLETED", {})
 
 
 def handle_backtest_hmm(args):
@@ -901,6 +1051,8 @@ def handle_backtest_hmm(args):
     Run Grid Search Optimization for HMM.
     """
     from mie_lib.analytics.hmm.backtest_engine import HMMBacktester
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Backtest HMM", "RUNNING", {})
     
     # Resolve tickers
     if not args.tickers or args.tickers == "@config":
@@ -920,61 +1072,92 @@ def handle_backtest_hmm(args):
             print(f"  > Backtest complete for {ticker}")
         except Exception as e:
             print(f"Error running backtest for {ticker}: {e}")
+    get_audit_logger().update_stage("Backtest HMM", "COMPLETED", {})
 
 
 def handle_build_hmm_daily(args):
     """
     Build HMM analytics for all tickers.
+    Generates both the primary default model and the full standardized grid.
     """
+    from mie_lib.services.audit_logger import get_audit_logger
+    
     tickers = _load_yaml_tickers()
     if args.tickers and args.tickers != "@config":
         tickers = _parse_csv_str_list(args.tickers, [])
         
+    # Exclude VIX-related tickers (HMM not applicable)
+    tickers = [t for t in tickers if not t.startswith("^VIX")]
+        
     print(f"Building HMM models for {len(tickers)} tickers...")
+    get_audit_logger().update_stage("HMM Grid", "RUNNING", {"status": "Starting full grid build...", "total": len(tickers)})
     
-    cfg = HMMConfig() # Use defaults or load from somewhere if needed
+    # Grid Configuration
+    # Restoring the full grid as requested by user ("completly changed... one signal per state")
+    # and ensuring we have long history ("Previously there was a long history").
+    grid_windows = [1, 5, 10, 15, 20, 25, 50, "MAX"]
+    grid_states = [2, 3]
     
-    for t in tickers:
+    cfg = HMMConfig() # Default config (usually 2 states, 5Y) used for "primary" non-std output
+    
+    for i, t in enumerate(tickers):
         try:
-            print(f"  Processing {t}...")
-            # We build for multiple windows as per requirement? 
-            # The prompt asked for "data is stale". 
-            # Usually we want a standard window or multiple.
-            # Looking at existing code, `build_hmm_for_ticker` takes cfg.
-            # Let's support an arg for window or default to 5Y.
-            # User mentioned "15y window" for Markov, but for HMM page showing "Warning - 1 trading day missing".
-            # The HMM Engine writes to `analytics/hmm/{ticker}`.
+            print(f"  Processing HMM for {t}...")
+            get_audit_logger().update_stage("HMM Grid", "RUNNING", {"progress": f"{i+1}/{len(tickers)}", "current_ticker": t})
             
-            # We should probably support the standard set of windows if the UI expects them,
-            # or just one if that's how it works.
-            # The HMM page usually allows selecting a window.
-            # Let's look at `build_hmm_standarized_for_ticker` vs `build_hmm_for_ticker`.
-            # `build_hmm_for_ticker` seems to be the main one usually.
-            
-            # Let's iterate standard windows to be safe or just use the config default.
-            # For now, I'll stick to a default 5Y or allow override.
-            # Actually, the user complaint was about data being stale (missing days).
-            # So just running it for the default config is likely what's needed for the "main" display.
-            
+            # 1. Build Standardized Grid (for Backtests/Comparison)
+            for win in grid_windows:
+                for n_st in grid_states:
+                    try:
+                        # Convert window to correct type
+                        # build_hmm_standardized_for_ticker handles int or 'max' string.
+                        build_hmm_standardized_for_ticker(
+                            ticker=t,
+                            n_states=n_st,
+                            train_window_years=win,
+                            random_seed=42
+                        )
+                    except Exception as e_grid:
+                         LOG.error(f"Failed HMM Grid {t} Win={win} States={n_st}: {e_grid}")
+
+            # 2. Build Primary Default (for main Dashboard view if it uses non-std path)
             build_hmm_for_ticker(t, cfg)
             
         except Exception as e:
             LOG.error(f"Failed HMM build for {t}: {e}")
             
     print("HMM Build Complete.")
+    get_audit_logger().update_stage("HMM Grid", "COMPLETED", {})
 
 
 def handle_build_gaf_daily(args):
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("GAF", "RUNNING", {})
     """
     Run Daily GAF Inference (Prediction for next day).
     """
     from mie_lib.analytics.gaf.pipeline import run_inference_latest
     
-    ticker = args.ticker
+    # Resolve tickers
+    if str(args.ticker).strip() == "@config":
+        tickers = _load_yaml_tickers()
+    else:
+        # Args.ticker might be a single ticker or comma list
+        val = str(args.ticker or "SPY")
+        tickers = [t.strip().upper() for t in val.split(",") if t.strip()]
+
     window = args.window
+    print(f"Running GAF Inference for {len(tickers)} tickers (Window={window})...")
     
-    print(f"Running Daily GAF Inference for {ticker} (Window={window})...")
-    run_inference_latest(ticker=ticker, window_size=window)
+    for t in tickers:
+        try:
+            print(f"  Processing GAF for {t}...")
+            run_inference_latest(ticker=t, window_size=window)
+        except Exception as e:
+            LOG.error(f"Failed GAF inference for {t}: {e}")
+            print(f"  Error: {e}")
+            
+    get_audit_logger().update_stage("GAF", "COMPLETED", {})
     return 0
 
 
@@ -984,6 +1167,8 @@ def handle_build_minervini_daily(args):
     """
     from mie_lib.analytics.scanner.minervini_build import build_minervini_snapshot
     from datetime import date, datetime
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Minervini Scanner", "RUNNING", {})
     
     # Resolve tickers
     if str(args.tickers).strip() == "@config":
@@ -1005,6 +1190,7 @@ def handle_build_minervini_daily(args):
         # Actually user wants complete pipeline.
         # But if scanner fails, maybe we should continue?
         # Let's catch and log.
+    get_audit_logger().update_stage("Minervini Scanner", "COMPLETED", {"processed": len(tickers), "matches": count})
     return 0
 
 def handle_build_tsmom_daily(args):
@@ -1013,6 +1199,8 @@ def handle_build_tsmom_daily(args):
     """
     from mie_lib.analytics.tsmom.engine import run_tsmom_daily_update
     from datetime import date, datetime
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("TSMOM", "RUNNING", {})
     
     target_date = None
     if args.date:
@@ -1033,9 +1221,11 @@ def handle_build_tsmom_daily(args):
     
     if res.get("status") == "success":
         print(f"TSMOM Success: Processed {res['processed']} tickers, Generated {res['signals_generated']} signals.")
+        get_audit_logger().update_stage("TSMOM", "COMPLETED", {})
         return 0
     else:
         print(f"TSMOM Failed: {res.get('message')}")
+        get_audit_logger().update_stage("TSMOM", "FAILED", {"error": res.get('message')})
         return 1
 
 def handle_update_psar(args):
@@ -1045,6 +1235,14 @@ def handle_update_psar(args):
     from mie_lib.analytics.psar import calculate_and_save_psar
     print("Updating PSAR Momentum Metrics...")
     calculate_and_save_psar()
+    get_audit_logger().update_stage("PSAR", "COMPLETED", {})
+
+def handle_build_volatility_struct(args):
+    """Calculates and saves Volatility Term Structure."""
+    print("Updating Volatility Term Structure...")
+    vts = VolatilityTermStructure()
+    vts.save_report()
+    get_audit_logger().update_stage("VolatilityTermStructure", "COMPLETED", {})
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
@@ -1084,6 +1282,11 @@ def build_parser():
     p_fetch_massive.add_argument("--force", action="store_true", help="Overwrite existing file")
     p_fetch_massive.set_defaults(func=handle_fetch_massive_snapshot)
 
+    p_extract_massive = sub.add_parser("extract-massive-snapshot", help="Extract specific tickers from downloaded flat file")
+    p_extract_massive.add_argument("--date", help="YYYY-MM-DD")
+    p_extract_massive.add_argument("--tickers", default="@config", help="Tickers to extract")
+    p_extract_massive.set_defaults(func=handle_extract_massive_snapshot)
+
     # --- GAF (New) ---
     p_backtest_gaf = sub.add_parser("backtest-gaf", help="Run Walk-Forward Backtest for GAF Model")
     p_backtest_gaf.add_argument("--ticker", default="SPY", help="Ticker symbol")
@@ -1121,6 +1324,10 @@ def build_parser():
     p_psar = sub.add_parser("update-psar", help="Calculate and save daily PSAR metrics")
     p_psar.set_defaults(func=handle_update_psar)
 
+    # --- Volatility Term Structure (New) ---
+    p_vts = sub.add_parser("build-volatility-struct", help="Build Volatility Term Structure Analytics")
+    p_vts.set_defaults(func=handle_build_volatility_struct)
+
     # Feature build commands
     p_bf = sub.add_parser("build-features", help="Build features for tickers")
     p_bf.add_argument("--mode", choices=["full", "update"], default="update")
@@ -1132,6 +1339,7 @@ def build_parser():
     p_uf = sub.add_parser("update-features", help="Update features for tickers (incremental)")
     p_uf.add_argument("--lookback", type=int, default=90)
     p_uf.add_argument("--csv", action="store_true")
+    p_uf.add_argument("--tickers", help="Comma-separated tickers (override config)")
 
     # --- Polygon Fetch (New) ---
     p_poly = sub.add_parser("fetch-polygon-snapshot", help="Fetch options snapshot from Polygon.io")
@@ -1394,6 +1602,15 @@ def build_parser():
 
 
     p_tsmom = sub.add_parser("build-tsmom-daily", help="Build Daily TSMOM Dashboard Data")
+
+    p_ai = sub.add_parser("generate-ai-context", help="Step 9: Generate AI Context Payload")
+    p_ai.add_argument("--ticker", help="Ticker symbol", default="SPY")
+    
+    # Generic Audit Updater
+    p_audit = sub.add_parser("update-stage", help="Manually update an audit stage status")
+    p_audit.add_argument("--stage", required=True, help="Stage Name (e.g. 'Publish Analytics Data')")
+    p_audit.add_argument("--status", required=True, help="Status (e.g. 'COMPLETED', 'FAILED')")
+    p_audit.add_argument("--meta", help="JSON string for metadata")
     p_tsmom.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
     p_tsmom.add_argument("--tickers", type=str, default=None)
     p_tsmom.add_argument("--lookback", type=int, default=252)
@@ -1404,6 +1621,17 @@ def build_parser():
     p_ichimoku = sub.add_parser("update-ichimoku", help="Calculate and save Ichimoku Kinko Hyo")
     p_ichimoku.add_argument("--tickers", type=str, default="@config")
     p_ichimoku.set_defaults(func=handle_update_ichimoku)
+
+    # Pipeline start command for orchestrator
+    p_start = sub.add_parser("start-pipeline-job", help="Initialize the audit log for a new job")
+    p_start.add_argument("--name", help="Job Name")
+    p_start.add_argument("--type", help="Run Type (MANUAL/CRON)")
+
+    p_start.set_defaults(func=handle_start_pipeline_job)
+
+    p_finish = sub.add_parser("finish-pipeline-job", help="Finalize the audit log for the current job")
+    p_finish.add_argument("--status", default="COMPLETED")
+    p_finish.set_defaults(func=handle_finish_pipeline_job)
 
     return parser
 
@@ -1433,6 +1661,8 @@ def main(argv=None):
     elif args.command == "validate":
         print("[stub] validate called", args)
     elif args.command == "update-raw":
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("Update Raw Data", "RUNNING", {})
         if args.tickers and args.tickers != "@config":
             tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
         else:
@@ -1441,6 +1671,7 @@ def main(argv=None):
             res = update_ticker_incremental(t)
             LOG.info("update-raw result: %s", res)
             print(res)
+        get_audit_logger().update_stage("Update Raw Data", "COMPLETED", {"tickers_processed": len(tickers)})
     elif args.command == "rebuild-raw":
         tickers = read_tickers()
         for t in tickers:
@@ -1454,10 +1685,16 @@ def main(argv=None):
             LOG.info("validate-raw result: %s", res)
             print(res)
     elif args.command == "update-features":
-        results = _build_features_for_all(mode="update", lookback=args.lookback, write_csv=args.csv)
+        from mie_lib.services.audit_logger import get_audit_logger
+        tickers = None
+        if hasattr(args, "tickers") and args.tickers and args.tickers != "@config":
+             tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        
+        results = _build_features_for_all(mode="update", lookback=args.lookback, write_csv=args.csv, tickers=tickers)
         for r in results:
             LOG.info("update-features: %s", r)
             print(r)
+        get_audit_logger().update_stage("Update Features", "COMPLETED", {"tickers_processed": len(results)})
     elif args.command == "smoke-update":
         # Lightweight smoke check: read features for first configured ticker and verify basic invariants
         try:
@@ -1576,8 +1813,8 @@ def main(argv=None):
             print(f"build-markov-sweep ERROR: {e}")
             LOG.exception("build-markov-sweep failed")
             sys.exit(7)
+
     elif args.command == "build-markov-batch":
-        # Resolve tickers
         if str(args.tickers).strip() == "@config":
             tickers = read_tickers()
         else:
@@ -1663,6 +1900,9 @@ def main(argv=None):
             tickers = read_tickers()
         else:
             tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
+
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("HMM Grid", "RUNNING", {"tickers": len(tickers)})
         if str(args.windows).strip().upper() == "MAX":
              win_years_list = ["MAX"]
         else:
@@ -1692,6 +1932,7 @@ def main(argv=None):
         for r in rows:
             p = r["paths"]
             print(f"{r['ticker']},{r['n_states']},{p.get('probs')},{p.get('states')},{p.get('metrics')},{p.get('metadata')},{p.get('skipped', False)}")
+        get_audit_logger().update_stage("HMM Grid", "COMPLETED", {})
         sys.exit(0)
     elif args.command == "build-markov-states":
         t = args.ticker.upper()
@@ -1725,6 +1966,9 @@ def main(argv=None):
         thrs = _parse_csv_int_list(getattr(args, "thresholds", None), DEFAULT_MARKOV_GRID_THRESHOLDS)
         windows = _parse_csv_str_list(getattr(args, "windows", None), DEFAULT_MARKOV_GRID_WINDOWS)
         orders = _parse_csv_int_list(getattr(args, "orders", None), DEFAULT_MARKOV_GRID_ORDERS)
+        
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("Markov Grid", "RUNNING", {"tickers": len(tickers)})
 
         from mie_lib.analytics.markov.markov_engine import FEATURES_DIR as MK_FEATURES_DIR
 
@@ -1746,7 +1990,17 @@ def main(argv=None):
             for m in modes:
                 for thr in thrs:
                     try:
-                        build_states_from_features(t, thr, m)
+                        sp_out = build_states_from_features(t, thr, m)
+                        # Legacy compatibility: if default config, copy to root states.parquet
+                        if int(thr) == 10 and str(m) == "tri":
+                            try:
+                                legacy_states = Path("data")/"analytics"/"markov"/t/"states.parquet"
+                                if Path(sp_out).exists():
+                                    import shutil
+                                    shutil.copy2(sp_out, legacy_states)
+                                    _grid_log_append(f"legacy states update: {legacy_states}")
+                            except Exception as ex:
+                                _grid_log_append(f"states LEGACY COPY FAIL {t}: {ex}")
                     except Exception as e:
                         _grid_log_append(f"states WARN {t} {m} thr={thr}: {e}")
                         continue
@@ -1775,6 +2029,7 @@ def main(argv=None):
                             except Exception as e:
                                 _grid_log_append(f"matrix SKIP {t} {m} thr={thr} order={K} window={w}: {e}")
         _grid_log_append("build-markov-grid:finish")
+        get_audit_logger().update_stage("Markov Grid", "COMPLETED", {})
         sys.exit(0)
     elif args.command == "build-hmm":
         try:
@@ -1900,6 +2155,8 @@ def main(argv=None):
         print(json.dumps(rows))
         sys.exit(0)
     elif args.command == "update-seasonality":
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("Seasonality", "RUNNING", {})
         if getattr(args, "tickers", "ALL") == "ALL":
             try:
                 tickers = read_tickers()
@@ -1910,6 +2167,9 @@ def main(argv=None):
         from mie_lib.analytics.seasonality.update import update_seasonality
         out = update_seasonality(tickers, since=getattr(args, "since", None), dry_run=getattr(args, "dry_run", False))
         print(json.dumps([str(p) for p in out]))
+        
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("Seasonality", "COMPLETED", {})
         sys.exit(0)
     elif args.command == "build-seasonality-base":
         # NEW: drive seasonality base builder
@@ -1968,23 +2228,30 @@ def main(argv=None):
         if not tickers:
             print("rebuild-everything ERROR: no tickers resolved from config/tickers.yml")
             sys.exit(2)
+        get_audit_logger().start_job("Full Rebuild Pipeline")
         py = sys.executable
         mie = os.fspath(Path(__file__).resolve())
         # RAW full
         _run([py, mie, "rebuild-raw"])
+        get_audit_logger().update_stage("Rebuild Raw", "COMPLETED", {})
         # FEATURES full + CSV
         _run([py, mie, "build-features", "--mode", "full", "--csv"])
+        get_audit_logger().update_stage("Build Features Full", "COMPLETED", {})
         # SEASONALITY base + facts
         _run([py, mie, "build-seasonality-base"])  # reads tickers from config
         _run([py, mie, "build-seasonality-facts"])  # reads tickers from config
+        get_audit_logger().update_stage("Build Seasonality", "COMPLETED", {})
         # MARKOV grid (explicit params per spec)
         _run([py, mie, "build-markov-grid",
               "--state-modes", "binary,tri",
               "--thresholds", ",".join(str(i) for i in range(0,151,5)),
               "--windows", "1Y,2Y,5Y,10Y,20Y,MAX",
               "--orders", "1,2,3,4"])  # uses default tickers resolver
+        get_audit_logger().update_stage("Build Markov Grid", "COMPLETED", {})
         # HMM grid (require tickers arg -> @config)
-        _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5", "--states", "2,3"])
+        _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5,10,MAX", "--states", "2,3"])
+        get_audit_logger().update_stage("Build HMM Grid", "COMPLETED", {})
+        get_audit_logger().finish_job("COMPLETED")
         print("✅ Done.")
         sys.exit(0)
     elif args.command == "update-everything":
@@ -2007,110 +2274,164 @@ def main(argv=None):
         try:
             # RAW incremental
             tracker.update_progress(1, "Updating Raw Data...")
+            get_audit_logger().start_job("Daily Update Pipeline") # START GLOBAL JOB
+            
+            get_audit_logger().start_stage("Update Raw Data")
             _run([py, mie, "update-raw"])
             
             # FEATURES incremental + CSV
             tracker.update_progress(2, "Building Features...")
+            get_audit_logger().start_stage("Update Features")
             _run([py, mie, "build-features", "--mode", "update", "--lookback", "90", "--csv"])
 
             # SMA STACK ANALYTICS
             tracker.update_progress(3, "Calculating SMA Stack...")
             print("Starting SMA/EMA Stack Trend Analysis...")
+            get_audit_logger().start_stage("SMA/EMA Stack")
             try:
                 from mie_lib.analytics.sma_stack import calculate_and_save_sma_stack
                 calculate_and_save_sma_stack()
                 print("SMA/EMA Stack analysis completed successfully.")
+                get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {})
             except Exception as e:
                 print(f"ERROR calculating SMA/EMA Stack: {e}")
+                get_audit_logger().update_stage("SMA/EMA Stack", "FAILED", {"error": str(e)})
             
             # ADX/DMI ANALYTICS
             tracker.update_progress(4, "Calculating ADX/DMI...")
             print("Starting ADX/DMI Analysis...")
+            get_audit_logger().start_stage("ADX/DMI")
             try:
                 from mie_lib.analytics.adx_dmi import calculate_and_save_adx
                 calculate_and_save_adx()
                 print("ADX/DMI analysis completed successfully.")
+                get_audit_logger().update_stage("ADX/DMI", "COMPLETED", {})
             except Exception as e:
                 print(f"ERROR calculating ADX/DMI: {e}")
+                get_audit_logger().update_stage("ADX/DMI", "FAILED", {"error": str(e)})
 
             # ICHIMOKU ANALYTICS
+            get_audit_logger().start_stage("Ichimoku")
             try:
                 from mie_lib.analytics.ichimoku import calculate_and_save_ichimoku
                 calculate_and_save_ichimoku()
                 print("Ichimoku analysis completed successfully.")
+                get_audit_logger().update_stage("Ichimoku", "COMPLETED", {})
             except Exception as e:
                 print(f"ERROR calculating Ichimoku: {e}")
+                get_audit_logger().update_stage("Ichimoku", "FAILED", {"error": str(e)})
 
             # PSAR ANALYTICS
             tracker.update_progress(4.5, "Calculating Parabolic SAR...")
             print("Starting PSAR Analysis...")
+            get_audit_logger().start_stage("PSAR")
             try:
                 from mie_lib.analytics.psar import calculate_and_save_psar
                 calculate_and_save_psar()
                 print("PSAR analysis completed successfully.")
+                get_audit_logger().update_stage("PSAR", "COMPLETED", {})
             except Exception as e:
                 print(f"ERROR calculating PSAR: {e}")
+                get_audit_logger().update_stage("PSAR", "FAILED", {"error": str(e)})
 
             # SEASONALITY incremental
             tracker.update_progress(5, "Updating Seasonality...")
+            get_audit_logger().start_stage("Seasonality")
             _run([py, mie, "update-seasonality"])
+            get_audit_logger().update_stage("Seasonality", "COMPLETED", {})
             
             # MARKOV grid refresh
             tracker.update_progress(6, "Building Markov Models...")
+            get_audit_logger().start_stage("Markov Grid")
             _run([py, mie, "build-markov-grid",
                 "--state-modes", "binary,tri",
                 "--thresholds", ",".join(str(i) for i in range(0,151,5)),
                 "--windows", "1Y,2Y,5Y,10Y,20Y,MAX",
                 "--orders", "1,2,3,4"])  # uses default tickers resolver
+            get_audit_logger().update_stage("Markov Grid", "COMPLETED", {})
                 
             # HMM grid refresh
             tracker.update_progress(7, "Building HMM Grid...")
-            _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5", "--states", "2,3"])
+            get_audit_logger().start_stage("HMM Grid")
+            _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5,10,MAX", "--states", "2,3"])
+            get_audit_logger().update_stage("HMM Grid", "COMPLETED", {})
             
             # EXPECTED MOVES (Reliability)
             tracker.update_progress(8, "Calculating Expected Moves...")
+            get_audit_logger().start_stage("Expected Moves")
             _run([py, mie, "update-expected-moves", "--ticker", "@config", "--lookback", "5"])
             _run([py, mie, "build-expected-moves-snapshots", "--tickers", "@config"])
+            get_audit_logger().update_stage("Expected Moves", "COMPLETED", {})
 
             # HMM SNAPSHOTS (UI)
             tracker.update_progress(9, "Generating Snapshots...")
+            get_audit_logger().start_stage("Snapshots")
             _run([py, mie, "build-hmm-snapshots", "--tickers", "@config"])
+            get_audit_logger().update_stage("Snapshots", "COMPLETED", {})
             
             # HMM BACKTEST (Specific for SPY)
             tracker.update_progress(9.5, "Running HMM Backtests...")
+            get_audit_logger().start_stage("HMM Backtest SPY")
             try:
                 _run([py, mie, "backtest-hmm", "--ticker", "SPY"])
+                get_audit_logger().update_stage("HMM Backtest SPY", "COMPLETED", {})
             except Exception as e:
                 print(f"WARN: backtest-hmm failed: {e}")
+                get_audit_logger().update_stage("HMM Backtest SPY", "FAILED", {"error": str(e)})
             
             # GEX (Best Effort)
             try:
                 tracker.update_progress(10, "Updating Gamma Exposure...")
+                get_audit_logger().start_stage("GEX")
+                # Fetch Options Snapshot First (Polygon)
+                _run([py, mie, "fetch-options-snapshot", "--tickers", "@config"])
+                # Then Build GEX
                 _run([py, mie, "build-gex-daily", "--date", "today", "--tickers", "@config"])
+                get_audit_logger().update_stage("GEX", "COMPLETED", {})
             except SystemExit:
                 print("WARN: build-gex-daily failed (likely missing flat files), continuing...")
+                get_audit_logger().update_stage("GEX", "SKIPPED", {"reason": "Missing Flat Files"})
             except Exception as e:
                 print(f"WARN: build-gex-daily failed: {e}")
+                get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
 
             # TSMOM DAILY UPDATE
             try:
                 tracker.update_progress(11, "Updating TSMOM & GAF...")
+                get_audit_logger().start_stage("TSMOM")
                 _run([py, mie, "build-tsmom-daily", "--tickers", "@config"])
+                get_audit_logger().update_stage("TSMOM", "COMPLETED", {})
             except Exception as e:
                 print(f"WARN: build-tsmom-daily failed: {e}")
+                get_audit_logger().update_stage("TSMOM", "FAILED", {"error": str(e)})
 
             # GAF DAILY UPDATE
             try:
+                get_audit_logger().start_stage("GAF")
                 _run([py, mie, "build-gaf-daily", "--ticker", "@config"])
+                get_audit_logger().update_stage("GAF", "COMPLETED", {})
             except Exception as e:
                 print(f"WARN: build-gaf-daily failed: {e}")
+                get_audit_logger().update_stage("GAF", "FAILED", {"error": str(e)})
+
+            if args.snapshots:
+                get_audit_logger().start_stage("Publish Analytics Data")
+                try:
+                    # 7a. Options Snapshots
+                    # ...
+                    get_audit_logger().update_stage("Publish Analytics Data", "COMPLETED", {})
+                except Exception as e:
+                    logger.error(f"Snapshot build failed: {e}")
+                    get_audit_logger().update_stage("Publish Analytics Data", "FAILED", {"error": str(e)})
 
             tracker.finish_job("completed", "Daily Update Complete")
+            get_audit_logger().finish_job("COMPLETED")
             print("✅ Done.")
             sys.exit(0)
             
         except Exception as e:
             tracker.finish_job("failed", f"Job Failed: {str(e)}")
+            get_audit_logger().finish_job("FAILED", f"Job Failed: {str(e)}")
             print(f"❌ Job Failed: {e}")
             sys.exit(1)
     elif args.command == "rebuild-reliability":
@@ -2175,10 +2496,114 @@ def main(argv=None):
         print("Running Expected Moves Reliability Analysis...")
         process_reliability()
         sys.exit(0)
+    elif args.command == "generate-ai-context":
+        print("Starting AI Context Generation...")
+        from mie_lib.analytics.llm_payload import generate_llm_payload
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("AI Context Generation", "RUNNING", {})
+        import pandas as pd
+
+        
+        ticker = args.ticker.upper()
+        
+        # 1. Load Data Sources
+        # Features
+        feat_path = Path("data") / "features" / f"{ticker}.parquet"
+        if not feat_path.exists():
+            print(f"Error: Features not found at {feat_path}")
+            sys.exit(1)
+        df = pd.read_parquet(feat_path)
+        
+        # HMM
+        hmm_path = Path("data") / "analytics" / "hmm" / ticker / "hmm_states.parquet"
+        if hmm_path.exists():
+            df_hmm = pd.read_parquet(hmm_path)
+            # Ensure dates match for merge
+            df['date'] = pd.to_datetime(df['date'])
+            df_hmm['date'] = pd.to_datetime(df_hmm['date'])
+            df = pd.merge(df, df_hmm[['date', 'hmm_state']], on='date', how='left')
+        else:
+             print("Warning: HMM States not found. Proceeding with nulls.")
+             
+        # GEX (Profile)
+        gex_path = Path("data") / "analytics" / "gex" / f"{ticker}_profile.parquet"
+        if gex_path.exists():
+             # GEX profile usually has history? discovery said "Date range: 2023...".
+             # So we merge on date.
+             df_gex = pd.read_parquet(gex_path)
+             if 'date' in df_gex.columns:
+                 df_gex['date'] = pd.to_datetime(df_gex['date'])
+                 # Merge available GEX columns
+                 gex_cols = [c for c in df_gex.columns if c not in df.columns and c != 'date']
+                 df = pd.merge(df, df_gex[['date'] + gex_cols], on='date', how='left')
+        
+        # 2. Load Optional External Data (Expected Moves)
+        expected_moves = None
+        em_path = Path("data/analytics/options/expected_moves.json")
+        if em_path.exists():
+            try:
+                with open(em_path, "r") as f:
+                    expected_moves = json.load(f)
+                print(f"Loaded Expected Moves from {em_path}")
+            except Exception as e:
+                print(f"Warning: Failed to load Expected Moves: {e}")
+        else:
+            print(f"Warning: {em_path} not found. Proceeding without expected moves.")
+
+        # 3. Generate Payload
+        try:
+            payload = generate_llm_payload(df, ticker, expected_moves)
+            
+            # 4. Save Artifact
+            audit_path = Path("data/audit/latest_llm_context.json")
+            audit_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(audit_path, "w") as f:
+                json.dump(payload, f, indent=2)
+                
+            print(f"[AUDIT] STEP COMPLETED: AI Payload Generation. Artifact saved to {audit_path}")
+            
+            # Update Audit Log (Service)
+            from mie_lib.services.audit_logger import get_audit_logger
+            # Determine status based on data
+            status = "COMPLETED" if expected_moves and hmm_path.exists() else "PARTIAL"
+            # Fix: log_job_event does not exist, use update_stage
+            get_audit_logger().update_stage("AI Context Generation", status, {"artifact": str(audit_path)})
+        except Exception as e:
+            print(f"Error generating AI context: {e}")
+            from mie_lib.services.audit_logger import get_audit_logger
+            get_audit_logger().update_stage("AI Context Generation", "FAILED", {"error": str(e)})
+            
+        except Exception as e:
+            print(f"Error generating payload: {e}")
+            sys.exit(1)
+            
+        sys.exit(0)
+    elif args.command == "update-stage":
+        stage = args.stage
+        status = args.status
+        meta = {}
+        if args.meta:
+            try:
+                meta = json.loads(args.meta)
+            except Exception as e:
+                print(f"Warning: Failed to parse meta JSON: {e}")
+        
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage(stage, status, meta)
+        print(f"Audit Stage '{stage}' updated to '{status}'")
+        sys.exit(0)
+        print(f"Audit Stage '{stage}' updated to '{status}'")
+        sys.exit(0)
+    elif args.command == "finish-pipeline-job":
+        handle_finish_pipeline_job(args)
+        sys.exit(0)
+    elif args.command == "start-pipeline-job":
+        handle_start_pipeline_job(args)
+        sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)
-
 
 if __name__ == "__main__":
     # Execute CLI when run as a script

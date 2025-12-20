@@ -40,6 +40,28 @@ class BlackScholes:
         gamma_val = n_prime_d1 / (S * sigma * np.sqrt(T))
         return gamma_val
 
+    @staticmethod
+    def call_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
+        """Calculate Black-Scholes Call Price."""
+        if T <= 0: return max(0.0, S - K)
+        if sigma <= 0: return max(0.0, S - K) # Intrinsic
+        
+        d1 = BlackScholes.d1(S, K, T, r, sigma)
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+    @staticmethod
+    def put_price(S: float, K: float, T: float, r: float, sigma: float) -> float:
+        """Calculate Black-Scholes Put Price."""
+        if T <= 0: return max(0.0, K - S)
+        if sigma <= 0: return max(0.0, K - S) # Intrinsic
+        
+        d1 = BlackScholes.d1(S, K, T, r, sigma)
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+
 class GEXEngine:
     """
     Engine to calculate Gamma Exposure (GEX) for a ticker.
@@ -72,6 +94,7 @@ class GEXEngine:
     def fetch_and_calculate_gex(self, ticker: str, spot_override: Optional[float] = None) -> Dict:
         """
         Fetches option chain from yfinance and calculates GEX profile.
+        Uses consistent Horizon logic (EOW, EOM, EOQ).
         """
         try:
             yf_ticker = yf.Ticker(ticker)
@@ -101,6 +124,10 @@ class GEXEngine:
                 logger.warning(f"No options found for {ticker}")
                 return {}
 
+            # Determine Horizons
+            today = date.today()
+            horizons = self._get_horizon_targets(today)
+            
             all_gex_data = []
 
             # 3. Iterate Expirations and Calculate GEX
@@ -111,18 +138,16 @@ class GEXEngine:
                 if T < 0:
                     continue
                     
-                days_to_expiry = T * 365.0
-                
-                # Determine Group (Weekly vs Monthly)
-                # Weekly: < 15 days
-                # Monthly: 15 <= DTE < 45
-                # Other: >= 45 (Included in Net, but maybe separate group)
-                if days_to_expiry < 15:
-                    group = "Weekly"
-                elif 15 <= days_to_expiry < 45:
-                    group = "Monthly"
-                else:
-                    group = "LongTerm"
+                # Determine Matched Horizons
+                try:
+                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+
+                matched_horizons = ["total"]
+                for h_key, h_date in horizons.items():
+                    if exp_date <= h_date:
+                        matched_horizons.append(h_key)
 
                 try:
                     chain = yf_ticker.option_chain(expiry)
@@ -144,18 +169,14 @@ class GEXEngine:
                             
                         gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
                         
-                        # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100 (Multiplier)
-                        # Call GEX is Positive
+                        # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100
                         gex = gamma * oi * (spot ** 2) * 0.01 * 100
-                        
-                        if strike == 680 or strike == 683:
-                             print(f"DEBUG: type=call strike={strike} iv={iv} gamma={gamma} oi={oi} gex={gex}")
                         
                         all_gex_data.append({
                             "strike": strike,
                             "gex": gex,
                             "type": "call",
-                            "group": group,
+                            "horizons": matched_horizons,
                             "expiry": expiry
                         })
 
@@ -171,95 +192,59 @@ class GEXEngine:
                         
                         gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
                         
-                        # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100 (Multiplier)
-                        # Put GEX is Negative
+                        # GEX Formula (Negative for Puts)
                         gex = -1 * (gamma * oi * (spot ** 2) * 0.01 * 100)
                         
                         all_gex_data.append({
                             "strike": strike,
                             "gex": gex,
                             "type": "put",
-                            "group": group,
+                            "horizons": matched_horizons,
                             "expiry": expiry
                         })
 
             if not all_gex_data:
                 return {}
 
-            # 4. Aggregation
-            df = pd.DataFrame(all_gex_data)
+            # 4. Aggregation by Strike
+            profile_map = {}
+            horizon_keys = list(horizons.keys()) + ["total"]
             
-            # Net GEX (Total Sum)
-            net_gex = df['gex'].sum()
-            
-            # Profile per Strike (Grouped by Weekly/Monthly)
-            # We want: Strike | Weekly Call GEX | Weekly Put GEX | Monthly Call GEX | Monthly Put GEX | Total Net GEX
-            
-            # Pivot to get GEX per strike and group/type
-            # We aggregate by Strike first
-            
-            strikes = sorted(df['strike'].unique())
-            profile = []
-            
-            for strike in strikes:
-                strike_df = df[df['strike'] == strike]
-                
-                # Weekly
-                weekly_calls = strike_df[(strike_df['group'] == 'Weekly') & (strike_df['type'] == 'call')]['gex'].sum()
-                weekly_puts = strike_df[(strike_df['group'] == 'Weekly') & (strike_df['type'] == 'put')]['gex'].sum()
-                
-                # Monthly
-                monthly_calls = strike_df[(strike_df['group'] == 'Monthly') & (strike_df['type'] == 'call')]['gex'].sum()
-                monthly_puts = strike_df[(strike_df['group'] == 'Monthly') & (strike_df['type'] == 'put')]['gex'].sum()
-                
-                # Quarterly / LongTerm
-                quarterly_calls = strike_df[(strike_df['group'] == 'LongTerm') & (strike_df['type'] == 'call')]['gex'].sum()
-                quarterly_puts = strike_df[(strike_df['group'] == 'LongTerm') & (strike_df['type'] == 'put')]['gex'].sum()
+            def init_row(s):
+                row = {"strike": s, "total_net_gex": 0.0}
+                for h in horizon_keys:
+                    row[f"{h}_call_gex"] = 0.0
+                    row[f"{h}_put_gex"] = 0.0
+                    row[f"{h}_net_gex"] = 0.0
+                return row
 
-                # Total (including LongTerm)
-                total_gex = strike_df['gex'].sum()
+            for d in all_gex_data:
+                s = d['strike']
+                gex = d['gex']
+                otype = d['type']
                 
-                profile.append({
-                    "strike": strike,
-                    "weekly_call_gex": weekly_calls,
-                    "weekly_put_gex": weekly_puts,
-                    "weekly_net_gex": weekly_calls + weekly_puts,
-                    "monthly_call_gex": monthly_calls,
-                    "monthly_put_gex": monthly_puts,
-                    "monthly_net_gex": monthly_calls + monthly_puts,
-                    "quarterly_call_gex": quarterly_calls,
-                    "quarterly_put_gex": quarterly_puts,
-                    "quarterly_net_gex": quarterly_calls + quarterly_puts,
-                    "total_net_gex": total_gex
-                })
+                if s not in profile_map:
+                    profile_map[s] = init_row(s)
+                
+                for h in d['horizons']:
+                    if otype == 'call':
+                        profile_map[s][f"{h}_call_gex"] += gex
+                    else:
+                        profile_map[s][f"{h}_put_gex"] += gex
+                    profile_map[s][f"{h}_net_gex"] += gex
 
-            # 5. Metadata (Max Expiry per Group)
-            group_max_dates = {
-                "Weekly": None,
-                "Monthly": None,
-                "LongTerm": None
-            }
+            sorted_strikes = sorted(profile_map.keys())
+            profile = [profile_map[s] for s in sorted_strikes]
+
+            # 5. Metadata
+            group_dates = {k: v.strftime("%Y-%m-%d") for k, v in horizons.items()}
             
-            for row in all_gex_data:
-                g = row['group']
-                e_str = str(row['expiry'])
-                if group_max_dates[g] is None or e_str > group_max_dates[g]:
-                    group_max_dates[g] = e_str
-
             return {
                 "ticker": ticker,
                 "spot_price": spot,
-                "net_gex": net_gex,
+                "net_gex": sum(d['gex'] for d in all_gex_data),
                 "profile": profile,
-                "group_dates": group_max_dates,
-                "timestamp": datetime.now().isoformat()
-            }
-
-            return {
-                "ticker": ticker,
-                "spot_price": spot,
-                "net_gex": net_gex,
-                "profile": profile,
+                "group_dates": group_dates,
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -275,30 +260,24 @@ class GEXEngine:
         # weekday: Mon=0, Sun=6. Friday=4.
         days_to_fri = (4 - as_of.weekday() + 7) % 7
         if as_of.weekday() > 4: # Sat/Sun -> Next Friday
-             # Actually "End of Week" usually implies "This trading week". 
-             # If it's Saturday, the week is over. Let's aim for finding the *next* valid weekly expiry friday.
-             # But simplistic: Just take next Friday if weekend.
              days_to_fri = (4 - as_of.weekday() + 7) % 7
         eow = as_of + timedelta(days=days_to_fri)
 
         # 2. EOM (Last day of month)
-        # The first day of next month - 1 day
         next_month = as_of.replace(day=28) + timedelta(days=4)
         eom = next_month - timedelta(days=next_month.day)
 
         # 3. EOQ (End of current quarter: Mar, Jun, Sep, Dec)
         quarter_months = [3, 6, 9, 12]
         curr_month = as_of.month
-        # Find next quarter end month
-        q_month = next(m for m in quarter_months if m >= curr_month)
-        # If we are in Dec, it returns 12. 
-        # But if we are effectively AT the end of Dec?
-        # Let's calculate last day of that month.
-        # Logic: Get 1st of next month after q_month, minus 1 day.
+        try:
+            q_month = next(m for m in quarter_months if m >= curr_month)
+        except StopIteration:
+             q_month = 3 # fallback
+        
         if q_month == 12:
             eoq = date(as_of.year, 12, 31)
         else:
-            # First day of month avg+1
             tgt = date(as_of.year, q_month, 1) + timedelta(days=32)
             eoq = tgt.replace(day=1) - timedelta(days=1)
         
@@ -308,8 +287,6 @@ class GEXEngine:
         # 5. Next 30
         next30 = as_of + timedelta(days=30)
         
-        # 6. Next 0 (0DTE - distinct logic? No, covered by others usually)
-
         return {
             "eow": eow,
             "eom": eom,
@@ -339,9 +316,6 @@ class GEXEngine:
             today = as_of if as_of else date.today()
             horizons = self._get_horizon_targets(today)
             
-            # Log horizons for debug
-            # logger.info(f"GEX Horizons for {ticker} (as of {today}): {horizons}")
-            
             all_gex_data = []
             
             for _, row in df.iterrows():
@@ -357,7 +331,18 @@ class GEXEngine:
                     # Log debug if needed, but skipping is safer for pipeline resilience
                     continue
                 
-                T = self._get_time_to_expiration(expiry_str)
+                # Calculate T (for Gamma if needed)
+                # We need T for BlackScholes if gamma is missing
+                # Duplicating logic from _get_time_to_expiration but using date obj
+                delta = (exp_date - today).days
+                if delta < 0:
+                    # Expired
+                    continue
+                if delta == 0:
+                    # 0DTE
+                    T = 1.0 / 365.0 / 2.0
+                else:
+                    T = delta / 365.0
                 
                 # Assign to Horizons (One expiry can match multiple)
                 matched_horizons = []
@@ -397,15 +382,9 @@ class GEXEngine:
                 return {}
                 
             # Aggregation by Strike
-            # We want columns: strike, [h]_call, [h]_put, [h]_net for each h in horizons
-            
-            # 1. Initialize Profile Map
-            # Use dictionary for O(1) access to strikes
             profile_map = {} 
-            # Define keys we want
             horizon_keys = list(horizons.keys()) + ["total"]
             
-            # Helper to init strike row
             def init_row(s):
                 row = {"strike": s, "total_net_gex": 0.0}
                 for h in horizon_keys:
@@ -422,7 +401,6 @@ class GEXEngine:
                 if s not in profile_map:
                     profile_map[s] = init_row(s)
                 
-                # Add to all matched horizons
                 for h in d['horizons']:
                     if otype == 'call':
                         profile_map[s][f"{h}_call_gex"] += gex
@@ -430,16 +408,10 @@ class GEXEngine:
                         profile_map[s][f"{h}_put_gex"] += gex
                     profile_map[s][f"{h}_net_gex"] += gex
 
-            # Sort by strike
             sorted_strikes = sorted(profile_map.keys())
             profile = [profile_map[s] for s in sorted_strikes]
 
-            # Metadata (Max Expiry per Group is just the target date essentially, 
-            # except 'total' which is max of all data)
             group_dates = {k: v.strftime("%Y-%m-%d") for k, v in horizons.items()}
-            
-            # Find max overall for total? Or just leave it.
-            # UI uses group_dates["Weekly"] etc. We will now return group_dates["eow"], etc.
             
             return {
                 "ticker": ticker,

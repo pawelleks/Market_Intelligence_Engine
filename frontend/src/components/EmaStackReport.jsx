@@ -119,11 +119,24 @@ const EmaStackReport = () => {
     }
 
     // Chart Data
-    const dates = history.map(d => d.date);
-    const closes = history.map(d => d.close);
-    const ema20 = history.map(d => d.ema_20);
-    const ema50 = history.map(d => d.ema_50);
-    const ema200 = history.map(d => d.ema_200);
+    // Filter to last 24 months (~500 trading days)
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - 24);
+    const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+    const filteredHistory = history.filter(d => d.date >= cutoffStr);
+
+    const dates = filteredHistory.map(d => d.date);
+    const closes = filteredHistory.map(d => d.close);
+    const ema20 = filteredHistory.map(d => d.ema_20);
+    const ema50 = filteredHistory.map(d => d.ema_50);
+    const ema200 = filteredHistory.map(d => d.ema_200);
+
+    // Default Zoom Range (Last 10 Months)
+    const zoomStartDate = new Date();
+    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
 
     return (
         <div style={{ padding: '20px', color: '#e0e0e0', backgroundColor: '#0b1220', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -136,7 +149,10 @@ const EmaStackReport = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <h1 style={{ margin: 0, fontSize: '20px', color: '#94a3b8' }}>EMA Trend Stack</h1>
-                            <h2 style={{ margin: '5px 0 0 0', fontSize: '28px', color: '#fff', fontWeight: 'bold' }}>{ticker}</h2>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                                <h2 style={{ margin: '5px 0 0 0', fontSize: '28px', color: '#fff', fontWeight: 'bold' }}>{ticker}</h2>
+                                {l.date && <span style={{ fontSize: '11px', color: '#64748b' }}>Data as of: {l.date}</span>}
+                            </div>
                         </div>
 
                         {/* Selector */}
@@ -243,11 +259,14 @@ const EmaStackReport = () => {
                             autosize: true,
                             paper_bgcolor: 'rgba(0,0,0,0)',
                             plot_bgcolor: 'rgba(0,0,0,0)',
-                            font: { color: '#94a3b8', family: 'Inter' },
+                            font: { color: '#94a3b8', family: 'Inter, sans-serif' },
                             xaxis: {
                                 gridcolor: '#1e293b',
                                 tickfont: { size: 11 },
-                                autorange: true
+                                autorange: false,
+                                range: [zoomStartStr, todayStr],
+                                rangeslider: { visible: true, thickness: 0.1, bgcolor: '#0f172a' },
+                                type: 'date'
                             },
                             yaxis: {
                                 gridcolor: '#1e293b',

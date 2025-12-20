@@ -27,7 +27,7 @@ def fetch_options_snapshot(ticker: str, api_key: str) -> pd.DataFrame:
     
     while url:
         try:
-            resp = requests.get(url)
+            resp = requests.get(url, timeout=30)
             if resp.status_code != 200:
                 logger.error(f"Error fetching {url}: {resp.status_code} {resp.text}")
                 break
@@ -85,7 +85,7 @@ def fetch_spot_close_polygon(ticker: str, config: dict = None, metrics: dict = N
     url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/prev?adjusted=true&apiKey={api_key}"
     
     try:
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             if data.get("status") == "OK" and data.get("results"):
@@ -128,7 +128,7 @@ def fetch_atm_option_chain(
     all_results = []
     while url:
         try:
-            resp = requests.get(url)
+            resp = requests.get(url, timeout=30)
             if resp.status_code != 200:
                 logger.error(f"Error fetching chain: {resp.status_code}")
                 break
@@ -208,7 +208,7 @@ def fetch_history(ticker: str, start_date: str = None, end_date: str = None) -> 
     logger.info(f"Fetching Polygon history for {ticker} (as {api_ticker})...")
     
     try:
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=30)
         if resp.status_code != 200:
             logger.error(f"Error fetching Polygon history for {ticker}: {resp.status_code} {resp.text}")
             return pd.DataFrame()

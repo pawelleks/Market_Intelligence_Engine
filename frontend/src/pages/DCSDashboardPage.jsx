@@ -32,12 +32,13 @@ const getScoreStatus = (score) => {
 
 // Component to visualize a single signal's contribution
 const SignalTile = ({ signal }) => {
-    const isActive = signal.raw_value === 1.0;
-    const isMissing = signal.raw_value === null;
+    // Fix: Use 'active' property from backend if available, otherwise fallback to threshold
+    const isActive = signal.active !== undefined ? signal.active : (signal.raw_value >= 0.5);
+    const isMissing = signal.raw_value === null || signal.raw_value === undefined;
 
     // Color Logic: 
-    // Active (1.0) -> RISK (Red)
-    // Inactive (0.0) -> OK (Green)
+    // Active (True) -> RISK (Red)
+    // Inactive (False) -> OK (Green)
     // Missing -> N/A (Grey)
     const statusColor = isMissing ? '#9e9e9e' : (isActive ? '#f44336' : '#4caf50');
     const statusText = isMissing ? 'N/A' : (isActive ? 'RISK' : 'OK');
@@ -54,7 +55,7 @@ const SignalTile = ({ signal }) => {
                     {statusText}
                 </span>
                 <span style={{ fontSize: '10px', color: '#9e9e9e' }}>
-                    Cont: {signal.contribution.toFixed(2)}
+                    Cont: {signal.contribution ? signal.contribution.toFixed(2) : "0.00"}
                 </span>
             </div>
         </div>

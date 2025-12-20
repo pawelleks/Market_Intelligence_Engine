@@ -1,5 +1,7 @@
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import subprocess
+import logging
 import json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -20,18 +22,37 @@ router = APIRouter(
 def get_ohlc_status() -> Dict[str, Any]:
     """
     Returns status of OHLC Data Ingestion.
-    Reads from dataset_registry.json and checks Features existence.
+    Reads from dataset_registry.json, falling back to direct file scan if registry missing.
     """
     registry_path = META_DIR / "dataset_registry.json"
+    data = {}
     
-    if not registry_path.exists():
-        return {"status": "no_registry", "data": []}
+    # 1. Load Registry if available
+    if registry_path.exists():
+        try:
+            data = json.loads(registry_path.read_text())
+        except Exception:
+            pass # corrupted registry, ignore
+
+    # 2. Add fallback for tickers present in RAW_DIR but not in registry
+    # Scan raw dir for *.parquet
+    try:
+         for p in Path("data/raw").glob("*.parquet"):
+             ticker = p.stem.upper()
+             if ticker not in data:
+                 data[ticker] = {
+                     "rows": -1, # Unknown without opening
+                     "data_range": ["?", "?"],
+                     "last_update_timestamp": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat(),
+                     "source": "raw_scan"
+                 }
+    except Exception:
+         pass
+
+    if not data:
+        return {"status": "no_data", "data": []}
         
     try:
-        data = json.loads(registry_path.read_text())
-        # Convert dict to list
-        # registry structure: { "TICKER": { ...metadata... } }
-        
         results = []
         for ticker, info in data.items():
             # Check Features status
@@ -46,7 +67,7 @@ def get_ohlc_status() -> Dict[str, Any]:
                 "rows": info.get("rows", 0),
                 "data_range": info.get("data_range", []),
                 "last_update": info.get("last_update_timestamp"),
-                "source": info.get("source", "unknown"), # New field
+                "source": info.get("source", "unknown"),
                 "has_features": has_features,
                 "features_updated": features_updated
             })
@@ -56,109 +77,156 @@ def get_ohlc_status() -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "error": str(e), "data": []}
 
+@router.get("/em")
+def get_em_status() -> Dict[str, Any]:
+    """
+    Returns status of Expected Moves (EM) data.
+    Scans data/analytics/options/*_expected_moves.parquet
+    """
+    if not OPTIONS_DIR.exists():
+        return {"status": "no_dir", "data": []}
+
+    try:
+        em_files = list(OPTIONS_DIR.glob("*_expected_moves.parquet"))
+        results = []
+        for p in em_files:
+            ticker = p.name.replace("_expected_moves.parquet", "").upper()
+            stat = p.stat()
+            results.append({
+                "ticker": ticker,
+                "has_em": True,
+                "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "size_bytes": stat.st_size
+            })
+            
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @router.get("/options")
 def get_options_status() -> Dict[str, Any]:
     """
-    Returns status of Options and Expected Moves.
-    Reads options/latest.json and checks parquet files.
+    Returns status of Raw Options data.
+    Scans data/raw/options/{TICKER}
     """
-    latest_path = OPTIONS_DIR / "latest.json"
-    
-    manifest_info = {}
-    if latest_path.exists():
-        try:
-            latest_data = json.loads(latest_path.read_text())
-            # latest.json typically has top level keys like "tickers", "last_updated"
-            # tickers is a dict of ticker -> data
-            # But we want to iterate over all files too.
+    raw_opts_dir = Path("data/raw/options")
+    if not raw_opts_dir.exists():
+        # Fallback to check if no subdir exists but maybe files?
+        # But logically structure is data/raw/options/ticker/
+        return {"status": "no_dir", "data": []}
+
+    try:
+        ticker_dirs = [d for d in raw_opts_dir.iterdir() if d.is_dir()]
+        results = []
+        for d in ticker_dirs:
+            ticker = d.name.upper()
+            files = list(d.glob("*"))
+            last_mod = max([f.stat().st_mtime for f in files]) if files else d.stat().st_mtime
             
-            # Let's list the parquet files in OPTIONS_DIR
-            expected_moves_files = list(OPTIONS_DIR.glob("*_expected_moves.parquet"))
+            results.append({
+                "ticker": ticker,
+                "has_data": len(files) > 0,
+                "file_count": len(files),
+                "last_modified": datetime.fromtimestamp(last_mod, tz=timezone.utc).isoformat()
+            })
             
-            # Helper to parse filename
-            # SPY_expected_moves.parquet
-            
-            found_tickers = set()
-            
-            results = []
-            
-            for p in expected_moves_files:
-                name_parts = p.name.split("_expected_moves.parquet")
-                if len(name_parts) > 0:
-                    ticker = name_parts[0].upper()
-                    found_tickers.add(ticker)
-                    
-                    last_mod = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat()
-                    
-                    # Check if in latest.json
-                    in_latest = False
-                    latest_entry_ts = None
-                    if latest_data and "tickers" in latest_data and ticker in latest_data["tickers"]:
-                        in_latest = True
-                        # Maybe extract timestamp from json if available
-                        latest_entry_ts = latest_data["last_updated"] # Global timestamp usually
-                        
-                    results.append({
-                        "ticker": ticker,
-                        "has_em_history": True,
-                        "history_last_mod": last_mod,
-                        "in_latest_json": in_latest,
-                        "latest_json_ts": latest_entry_ts
-                    })
-            
-            return {"status": "ok", "data": results}
-            
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-            
-    return {"status": "no_data", "data": []}
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.get("/gex")
 def get_gex_status() -> Dict[str, Any]:
     """
     Returns status of Gamma Exposure (GEX) data.
-    Scans data/analytics/gex/*.json
+    Scans data/analytics/gex/{TICKER}_gex.json
     """
     if not GEX_DIR.exists():
         return {"status": "no_dir", "data": []}
         
     try:
-        # Look for *_gex.json metadata files
-        meta_files = list(GEX_DIR.glob("*_gex.json"))
-        
         results = []
-        for p in meta_files:
-            # Filename: TICKER_gex.json
-            name_parts = p.name.split("_gex.json")
-            if len(name_parts) > 0:
-                ticker = name_parts[0].upper()
+        for json_path in GEX_DIR.glob("*_gex.json"):
+            ticker = json_path.stem.replace("_gex", "").upper()
+            try:
+                meta = json.loads(json_path.read_text())
+                ts = meta.get("timestamp")
+                spot = meta.get("spot_price") or meta.get("last_price")
                 
-                try:
-                    meta = json.loads(p.read_text())
-                    # Expecting "timestamp", "spot_price", etc.
-                    ts = meta.get("timestamp")
-                    spot = meta.get("spot_price")
-                    algo = meta.get("gex_algo", "unknown")
+                results.append({
+                    "ticker": ticker,
+                    "timestamp": ts,
+                    "spot_price": spot,
+                    "algo": "BlackScholes",
+                    "has_profile": True,
+                    "profile_date": ts.split("T")[0] if ts else "unknown"
+                })
+            except Exception:
+                 results.append({
+                     "ticker": ticker,
+                     "has_profile": False,
+                     "error": "corrupted_profile"
+                 })
                     
-                    # Check for profile parquet
-                    profile_path = p.with_name(f"{ticker}_profile.parquet")
-                    has_profile = profile_path.exists()
-                    
-                    results.append({
-                        "ticker": ticker,
-                        "timestamp": ts,
-                        "spot_price": spot,
-                        "algo": algo,
-                        "has_profile": has_profile
-                    })
-                except Exception:
-                    # corrupted file or read error
-                    results.append({
-                        "ticker": ticker,
-                        "error": "corrupted_metadata"
-                    })
-                    
-        return {"status": "ok", "data": results}
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
         
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+def _run_orchestrator_task():
+    """Background task wrapper"""
+    logger = logging.getLogger("uvicorn")
+    logger.info("API: Triggering orchestrator.sh ...")
+    try:
+        # Assumes /app/cli/orchestrator.sh exists and we are in /app
+        result = subprocess.run(
+            ["bash", "cli/orchestrator.sh", "MANUAL"], 
+            capture_output=True, 
+            text=True
+        )
+        if result.returncode != 0:
+            logger.error(f"Orchestrator Failed: {result.stderr}")
+        else:
+            logger.info(f"Orchestrator Success: {result.stdout[:200]}...") # Log first 200 chars
+    except Exception as e:
+        logger.error(f"Orchestrator Exception: {e}")
+
+@router.post("/pipeline/start")
+def start_pipeline(background_tasks: BackgroundTasks):
+    """
+    Triggers the Daily Pipeline (orchestrator.sh) in the background.
+    """
+    background_tasks.add_task(_run_orchestrator_task)
+    return {"status": "ok", "message": "Pipeline started. Check Audit Log for progress."}
+
+@router.get("/pipeline/history")
+def get_pipeline_history(limit: int = 10) -> Dict[str, Any]:
+    """
+    Returns the history of pipeline runs from pipeline_history.jsonl.
+    """
+    from mie_lib.services.audit_logger import HISTORY_FILE_PATH
+    
+    if not HISTORY_FILE_PATH.exists():
+        return {"status": "ok", "data": []}
+        
+    try:
+        lines = []
+        # Read file efficiently (it might be large eventually, but for now just readlines)
+        # Use simple readlines for now.
+        with open(HISTORY_FILE_PATH, "r") as f:
+            lines = f.readlines()
+            
+        # Parse last N lines
+        history = []
+        for line in reversed(lines):
+            if len(history) >= limit:
+                break
+            try:
+                if line.strip():
+                    history.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+                
+        return {"status": "ok", "data": history}
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e), "data": []}

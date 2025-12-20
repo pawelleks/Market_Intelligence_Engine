@@ -48,6 +48,24 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const bypassLogin = async () => {
+        // Dummy JWT: Header.Payload.Signature
+        // Payload: sub=bypass@local.dev, exp=far_future, is_admin=true
+        const dummyToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJieXBhc3NAbG9jYWwuZGV2IiwiZXhwIjo5OTk5OTk5OTk5LCJuYW1lIjoiRGV2ZWxvcGVyIiwiZW1haWwiOiJieXBhc3NAbG9jYWwuZGV2IiwiaXNfYWRtaW4iOnRydWV9.dummy_signature";
+
+        localStorage.setItem('access_token', dummyToken);
+        setToken(dummyToken);
+
+        try {
+            const decoded = jwtDecode(dummyToken);
+            setUser(decoded);
+            return { success: true };
+        } catch (e) {
+            console.error("Bypass token gen failed", e);
+            return { success: false, message: "Bypass failed" };
+        }
+    };
+
     const logout = () => {
         localStorage.removeItem('access_token');
         setToken(null);
@@ -56,7 +74,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+        <AuthContext.Provider value={{ user, token, login, bypassLogin, logout, loading }}>
             {!loading && children}
         </AuthContext.Provider>
     );

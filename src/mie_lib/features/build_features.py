@@ -519,20 +519,22 @@ def build_features_for_ticker(ticker: str, mode: str = "full", lookback: int = 9
     return {"ticker": ticker, "rows": int(len(df_feat)), "parquet": str(p_written)}
 
 
-def build_features_for_all(mode: str = "full", lookback: int = 90, write_csv: bool = False) -> List[Dict]:
-    tickers = []
-    try:
-        tcfg = load_named_config("ticker_list")
-        if isinstance(tcfg, dict):
-            tickers = tcfg.get("tickers", [])
-        elif isinstance(tcfg, list):
-            tickers = tcfg
-    except Exception:
-        # fallback to reading file
-        p = Path("config/ticker_list.yml")
-        if p.exists():
-            lines = [l.strip() for l in p.read_text().splitlines()]
-            tickers = [l for l in lines if l and not l.startswith("#")]
+def build_features_for_all(mode: str = "full", lookback: int = 90, write_csv: bool = False, tickers: List[str] = None) -> List[Dict]:
+    if not tickers:
+        tickers = []
+        try:
+            tcfg = load_named_config("ticker_list")
+            if isinstance(tcfg, dict):
+                tickers = tcfg.get("tickers", [])
+            elif isinstance(tcfg, list):
+                tickers = tcfg
+        except Exception:
+            # fallback to reading file
+            p = Path("config/ticker_list.yml")
+            if p.exists():
+                lines = [l.strip() for l in p.read_text().splitlines()]
+                tickers = [l for l in lines if l and not l.startswith("#")]
+    
     results = []
     for t in tickers:
         res = build_features_for_ticker(t, mode=mode, lookback=lookback, write_csv=write_csv)

@@ -62,12 +62,19 @@ const PsarReport = () => {
     const getChartData = () => {
         if (!data || !data.history) return [];
 
-        const dates = data.history.map(d => d.date);
-        const opens = data.history.map(d => d.open);
-        const highs = data.history.map(d => d.high);
-        const lows = data.history.map(d => d.low);
-        const closes = data.history.map(d => d.close);
-        const psar = data.history.map(d => d.psar);
+        // Filter last 24 months
+        const cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() - 24);
+        const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+        const filteredHistory = data.history.filter(d => d.date >= cutoffStr);
+
+        const dates = filteredHistory.map(d => d.date);
+        const opens = filteredHistory.map(d => d.open);
+        const highs = filteredHistory.map(d => d.high);
+        const lows = filteredHistory.map(d => d.low);
+        const closes = filteredHistory.map(d => d.close);
+        const psar = filteredHistory.map(d => d.psar);
 
         // Determine Color for PSAR Dots
         // If PSAR < Close (Bullish) -> Green
@@ -75,7 +82,7 @@ const PsarReport = () => {
         // We can do this per point or just use logic. Standard convention:
         // Dots below usually green (support), dots above red (resistance).
 
-        const psarColors = data.history.map(d => (d.psar < d.close ? '#4ade80' : '#f87171'));
+        const psarColors = filteredHistory.map(d => (d.psar < d.close ? '#4ade80' : '#f87171'));
 
         return [
             // Candlestick Trace
@@ -110,16 +117,24 @@ const PsarReport = () => {
     };
 
     const getLayout = () => {
+        // Default Zoom Range (Last 10 Months)
+        const zoomStartDate = new Date();
+        zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+        const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+        const todayStr = new Date().toISOString().split('T')[0];
+
         return {
             autosize: true,
             title: `${ticker} - PSAR (0.02, 0.20)`,
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#cbd5e1' },
+            font: { color: '#cbd5e1', family: 'Inter, sans-serif' },
             xaxis: {
                 gridcolor: '#334155',
                 showgrid: true,
-                rangeslider: { visible: false }
+                rangeslider: { visible: true, thickness: 0.1, bgcolor: '#0f172a' },
+                range: [zoomStartStr, todayStr],
+                type: 'date'
             },
             yaxis: {
                 gridcolor: '#334155',
@@ -192,6 +207,7 @@ const PsarReport = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>PSAR Momentum Report</h1>
+                    {l.date && <span style={{ fontSize: '11px', color: '#64748b' }}>Data as of: {l.date}</span>}
                     <span style={{ backgroundColor: '#334155', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', color: '#94a3b8' }}>
                         Step 0.02 / Max 0.20
                     </span>

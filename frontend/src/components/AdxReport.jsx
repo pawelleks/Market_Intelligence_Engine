@@ -60,11 +60,18 @@ const AdxReport = () => {
     const getChartData = () => {
         if (!data || !data.history) return [];
 
-        const dates = data.history.map(d => d.date);
-        const closes = data.history.map(d => d.close);
-        const adx = data.history.map(d => d.adx);
-        const pdi = data.history.map(d => d.plus_di);
-        const mdi = data.history.map(d => d.minus_di);
+        // Filter last 24 months
+        const cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() - 24);
+        const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+        const filteredHistory = data.history.filter(d => d.date >= cutoffStr);
+
+        const dates = filteredHistory.map(d => d.date);
+        const closes = filteredHistory.map(d => d.close);
+        const adx = filteredHistory.map(d => d.adx);
+        const pdi = filteredHistory.map(d => d.plus_di);
+        const mdi = filteredHistory.map(d => d.minus_di);
 
         return [
             // Pane 1: Price
@@ -113,18 +120,27 @@ const AdxReport = () => {
     };
 
     const getLayout = () => {
+        // Default Zoom Range (Last 10 Months)
+        const zoomStartDate = new Date();
+        zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+        const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+        const todayStr = new Date().toISOString().split('T')[0];
+
         return {
             autosize: true,
             title: `${ticker} - Price vs ADX/DMI`,
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { color: '#cbd5e1' },
+            font: { color: '#cbd5e1', family: 'Inter, sans-serif' },
             grid: { rows: 2, columns: 1, pattern: 'independent' },
             xaxis: {
                 gridcolor: '#334155',
                 showgrid: true,
                 domain: [0, 1],
-                anchor: 'y2'
+                anchor: 'y2',
+                range: [zoomStartStr, todayStr],
+                rangeslider: { visible: true, thickness: 0.05, bgcolor: '#0f172a' },
+                type: 'date'
                 // Creating standard stacked subplots manually via axis domains:
             },
             // Top Plot (Price)
@@ -235,6 +251,7 @@ const AdxReport = () => {
         <div style={containerStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>ADX Trend Strength Report</h1>
+                {l.date && <span style={{ fontSize: '11px', color: '#64748b' }}>Data as of: {l.date}</span>}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Ticker:</span>
                     <select

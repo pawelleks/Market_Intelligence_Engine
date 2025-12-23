@@ -302,7 +302,94 @@ const EmaStackReport = () => {
                     </div>
                 </div>
             </div>
+
+            {/* NEW: SMA/EMA Analysis Tables */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '20px' }}>
+
+                {/* SMA Table */}
+                <div style={{ backgroundColor: '#162032', padding: '20px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <h3 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        Simple Moving Averages (SMA)
+                    </h3>
+                    <MATable type="sma" data={l} price={l.close} />
+                </div>
+
+                {/* EMA Table */}
+                <div style={{ backgroundColor: '#162032', padding: '20px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+                    <h3 style={{ margin: '0 0 15px 0', fontSize: '14px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                        Exponential Moving Averages (EMA)
+                    </h3>
+                    <MATable type="ema" data={l} price={l.close} />
+                </div>
+
+            </div>
         </div>
+    );
+};
+
+// Reusable Table Component
+const MATable = ({ type, data, price }) => {
+    if (!price) return <div style={{ fontSize: '12px', color: '#64748b' }}>No Price Data</div>;
+
+    const periods = [20, 50, 100, 200];
+
+    return (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+                <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+                    <th style={{ padding: '8px', fontWeight: 'normal' }}>Period</th>
+                    <th style={{ padding: '8px', fontWeight: 'normal', textAlign: 'right' }}>Value</th>
+                    <th style={{ padding: '8px', fontWeight: 'normal', textAlign: 'center' }}>Signal</th>
+                    <th style={{ padding: '8px', fontWeight: 'normal', textAlign: 'right' }}>Dist %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {periods.map(p => {
+                    const key = `${type}_${p}`;
+                    const val = data[key];
+
+                    if (val === undefined || val === null) {
+                        return (
+                            <tr key={p} style={{ borderBottom: '1px solid #1e293b' }}>
+                                <td style={{ padding: '10px 8px', color: '#cbd5e1' }}>{type.toUpperCase()} {p}</td>
+                                <td style={{ padding: '10px 8px', textAlign: 'right', color: '#64748b' }}>N/A</td>
+                                <td colSpan={2}></td>
+                            </tr>
+                        );
+                    }
+
+                    const isAbove = price >= val;
+                    const color = isAbove ? '#4ade80' : '#ef5350';
+                    const diffPct = ((price - val) / val) * 100;
+
+                    return (
+                        <tr key={p} style={{ borderBottom: '1px solid #1e293b' }}>
+                            <td style={{ padding: '10px 8px', color: '#cbd5e1', fontWeight: '500' }}>
+                                {type.toUpperCase()} {p}
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', color: '#e2e8f0', fontFamily: 'monospace' }}>
+                                {val.toFixed(2)}
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                                <span style={{
+                                    backgroundColor: `${color}20`,
+                                    color: color,
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold'
+                                }}>
+                                    {isAbove ? 'PRICE > MA' : 'PRICE < MA'}
+                                </span>
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'right', color: color, fontWeight: 'bold', fontFamily: 'monospace' }}>
+                                {diffPct > 0 ? '+' : ''}{diffPct.toFixed(2)}%
+                            </td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
     );
 };
 

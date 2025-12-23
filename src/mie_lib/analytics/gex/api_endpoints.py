@@ -41,24 +41,29 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
             try:
                 ts = datetime.fromisoformat(disk_data.get("timestamp"))
                 if (datetime.now() - ts).total_seconds() < (max_age_hours * 3600):
-                     logger.info(f"Serving GEX for {ticker} from disk")
-                     # Update memory cache
-                     import math
-                     def sanitize_floats(obj):
-                         if isinstance(obj, float):
-                             if math.isnan(obj) or math.isinf(obj):
-                                 return None
+                     # Validate Profile Data exists
+                     if not disk_data.get("profile"):
+                         logger.warning(f"GEX disk data for {ticker} missing profile. Ignoring.")
+                     else:
+                         logger.info(f"Serving GEX for {ticker} from disk")
+                         # Update memory cache
+                         import math
+                         def sanitize_floats(obj):
+                             if isinstance(obj, float):
+                                 if math.isnan(obj) or math.isinf(obj):
+                                     return None
+                                 return obj
+                             if isinstance(obj, dict):
+                                 return {k: sanitize_floats(v) for k, v in obj.items()}
+                             if isinstance(obj, list):
+                                 return [sanitize_floats(x) for x in obj]
                              return obj
-                         if isinstance(obj, dict):
-                             return {k: sanitize_floats(v) for k, v in obj.items()}
-                         if isinstance(obj, list):
-                             return [sanitize_floats(x) for x in obj]
-                         return obj
-
-                     sanitized_data = sanitize_floats(disk_data)
-                     _GEX_CACHE[ticker] = {"timestamp": datetime.now(), "data": sanitized_data}
-                     return sanitized_data
-            except:
+    
+                         sanitized_data = sanitize_floats(disk_data)
+                         _GEX_CACHE[ticker] = {"timestamp": datetime.now(), "data": sanitized_data}
+                         return sanitized_data
+            except Exception as e:
+                logger.warning(f"Error validating GEX disk data for {ticker}: {e}")
                 pass
             
     # Calculate (Fallback to yfinance on demand if configured, but plan says we want to move away)

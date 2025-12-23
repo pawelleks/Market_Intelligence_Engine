@@ -90,7 +90,13 @@ def get_target_expirations(as_of: date, ticker: Optional[str] = None) -> Tuple[d
                 LOG.info(f"  -> Today is NOT trading day: {odte_date}")
     else:
         # Historical / Backfill
-        if is_trading_day(as_of):
+        # FIX: If it is Friday (weekday 4), we want EOD to represent the Next Trading Day (Monday),
+        # similar to how we handle "After Market" on weekdays.
+        # This ensures weekend views show "Next Day" logic.
+        if as_of.weekday() == 4:
+             odte_date = get_next_trading_day(as_of)
+             LOG.info(f"0DTE Check (Historical/Friday): Rollover to {odte_date}")
+        elif is_trading_day(as_of):
             odte_date = as_of
         else:
             odte_date = get_next_trading_day(as_of)

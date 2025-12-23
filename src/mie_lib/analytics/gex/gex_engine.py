@@ -259,8 +259,8 @@ class GEXEngine:
         # 1. EOW (Friday of current week)
         # weekday: Mon=0, Sun=6. Friday=4.
         days_to_fri = (4 - as_of.weekday() + 7) % 7
-        if as_of.weekday() > 4: # Sat/Sun -> Next Friday
-             days_to_fri = (4 - as_of.weekday() + 7) % 7
+        if days_to_fri == 0:
+            days_to_fri = 7
         eow = as_of + timedelta(days=days_to_fri)
 
         # 2. EOM (Last day of month)

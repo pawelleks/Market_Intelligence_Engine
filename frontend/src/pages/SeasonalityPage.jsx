@@ -238,7 +238,7 @@ const SeasonalityPage = ({ settings, onSettingsChange }) => {
                                 <React.Fragment key={mIdx}>
                                     <div style={{ alignSelf: 'center', color: '#9e9e9e' }}>{mName}</div>
                                     {Array.from({ length: 31 }, (_, dIdx) => {
-                                        const cell = heatmapData.heatmap.find(h => h.month === mIdx + 1 && h.day === dIdx + 1);
+                                        const cell = heatmapData?.heatmap?.find(h => h.month === mIdx + 1 && h.day === dIdx + 1);
                                         const val = cell ? cell.value : null;
                                         return (
                                             <div

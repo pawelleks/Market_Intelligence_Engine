@@ -78,6 +78,7 @@ export const NAV_DATA = {
             id: 'settings',
             items: [
                 { label: 'Data Pipelines', to: '/system/pipelines', icon: Database },
+                { label: 'All Users', to: '/admin/users', icon: ShieldCheck },
             ]
         }
     ]

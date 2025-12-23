@@ -68,7 +68,7 @@ log "build-minervini-daily completed."
 # 4. Update Markov Data
 log "Running build-markov-grid (Updating Windows)..."
 python -m mie_lib.cli.mie build-markov-grid --state-modes binary,tri --thresholds 0,5,10,15,20,25,30,35,40,45,50 --windows 1Y,2Y,5Y,10Y,15Y,MAX --orders 1,2 >> "${LOG_FILE}" 2>&1
-python -m mie_lib.cli.mie build-markov-snapshots >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-markov-snapshots --allow-missing >> "${LOG_FILE}" 2>&1
 log "build-markov-grid completed."
 
 # 5. Update HMM Data
@@ -76,7 +76,7 @@ log "Running build-hmm-daily..."
 python -m mie_lib.cli.mie build-hmm-daily --tickers @config >> "${LOG_FILE}" 2>&1
 # log "Running build-hmm-grid..."
 # python -m mie_lib.cli.mie build-hmm-grid --tickers @config --windows 5,10,20,MAX --states 2,3 >> "${LOG_FILE}" 2>&1
-python -m mie_lib.cli.mie build-hmm-snapshots >> "${LOG_FILE}" 2>&1
+python -m mie_lib.cli.mie build-hmm-snapshots --allow-missing >> "${LOG_FILE}" 2>&1
 log "build-hmm-snapshots completed."
 
 log "Running backtest-hmm (Generating Strategy Analysis)..."

@@ -69,6 +69,13 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Se
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
+        
+    try:
+        user.visit_count = (user.visit_count or 0) + 1
+        db.commit()
+    except Exception as e:
+        print(f"Failed to track visit: {e}")
+        
     return user
 
 async def verify_admin(current_user: User = Depends(get_current_user)) -> User:

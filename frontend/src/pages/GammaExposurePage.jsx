@@ -5,19 +5,22 @@ const GammaExposurePage = () => {
     const [ticker, setTicker] = useState('SPY');
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [loadingStatus, setLoadingStatus] = useState(''); // Granular Loading Status
     const [error, setError] = useState(null);
     const [emData, setEmData] = useState(null);
     const [viewMode, setViewMode] = useState('split');
     const [horizon, setHorizon] = useState('eow'); // 'eow', 'eom', 'eoq', 'next5', 'next30'
-    const [availableTickers, setAvailableTickers] = useState([]); // Restore missing state
-    const [refreshTrigger, setRefreshTrigger] = useState(0);      // Restore missing state
+    const [availableTickers, setAvailableTickers] = useState([]);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+    // Initial Ticker Fetch
     useEffect(() => {
-        // Fetch allowed tickers
         const fetchTickers = async () => {
             try {
+                console.log("Fetching allowed tickers...");
                 const response = await fetch('/api/v1/tickers/Gamma_Exposure');
                 const data = await response.json();
+                console.log("Tickers fetched:", data);
                 if (data.tickers) {
                     setAvailableTickers(data.tickers);
                     if (!ticker && data.tickers.length > 0) {
@@ -31,31 +34,62 @@ const GammaExposurePage = () => {
         fetchTickers();
     }, []);
 
+    // Main Data Fetch
     useEffect(() => {
         let active = true;
+        let timeoutId = null;
 
         const fetchData = async () => {
             setLoading(true);
             setError(null);
+            setLoadingStatus('Initializing Request...');
+            console.log(`[${ticker}] Starting fetch sequence...`);
+
             try {
+                // Safety Timeout (15s)
+                timeoutId = setTimeout(() => {
+                    if (active) {
+                        console.error("Fetch timed out!");
+                        setError("Request Timed Out (15s). Server might be slow or unreachable.");
+                        setLoading(false);
+                    }
+                }, 15000);
+
                 // 1. Fetch GEX
-                const queryParams = ''; // we can add force refresh logic if needed later
-                const res = await fetch(`/api/v1/gex/latest/${ticker}?_t=${Date.now()}`);
+                const gexUrl = `/api/v1/gex/latest/${ticker}?_t=${Date.now()}`;
+                setLoadingStatus(`Fetching GEX for ${ticker}...`);
+                console.log(`Fetching: ${gexUrl}`);
+
+                const res = await fetch(gexUrl);
+                console.log(`GEX Response Status: ${res.status}`);
+
                 if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Failed to fetch GEX data');
+                    const errText = await res.text();
+                    throw new Error(`Failed to fetch GEX (${res.status}): ${errText}`);
                 }
+
+                setLoadingStatus('Parsing GEX Data...');
                 const json = await res.json();
+                console.log("GEX Data Parsed:", json ? "Valid JSON" : "Empty");
 
                 // 2. Fetch Expected Moves
-                const resEM = await fetch(`/api/v1/expected_moves/latest?_t=${Date.now()}`);
+                setLoadingStatus('Fetching Expected Moves...');
+                const emUrl = `/api/v1/expected_moves/latest?_t=${Date.now()}`;
+                const resEM = await fetch(emUrl);
+                console.log(`EM Response Status: ${resEM.status}`);
+
                 let emJson = null;
                 if (resEM.ok) {
-                    emJson = await resEM.json();
+                    try {
+                        emJson = await resEM.json();
+                    } catch (e) {
+                        console.warn("Expected Moves JSON parse failed", e);
+                    }
                 }
 
-                // Update State ONLY if still active
+                // Update State
                 if (active) {
+                    setLoadingStatus('Finalizing...');
                     setData(json);
 
                     if (emJson && emJson.tickers && emJson.tickers[ticker]) {
@@ -63,16 +97,21 @@ const GammaExposurePage = () => {
                     } else {
                         setEmData(null);
                     }
+                    console.log("Data successfully set.");
                 }
+
             } catch (err) {
                 if (active) {
-                    console.error(err);
+                    console.error("Fetch Error caught:", err);
                     setError(err.message);
                     setData(null);
+                    setLoadingStatus('Error');
                 }
             } finally {
                 if (active) {
+                    clearTimeout(timeoutId);
                     setLoading(false);
+                    console.log("Loading state cleared.");
                 }
             }
         };
@@ -81,8 +120,9 @@ const GammaExposurePage = () => {
 
         return () => {
             active = false;
+            if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [ticker, horizon, refreshTrigger]); // We will trigger refresh when SELECT changes manually
+    }, [ticker, horizon, refreshTrigger]);
 
     // Prepare Data based on Horizon
     const getChartData = () => {
@@ -194,7 +234,6 @@ const GammaExposurePage = () => {
 
     return (
         <div style={{ padding: '20px', backgroundColor: '#121212', minHeight: '100vh', color: '#e0e0e0', fontFamily: 'Inter, sans-serif' }}>
-
             {/* Top Header Row */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
@@ -209,7 +248,7 @@ const GammaExposurePage = () => {
                             value={ticker}
                             onChange={(e) => {
                                 setTicker(e.target.value);
-                                // Trigger refresh immediately on change
+                                // Trigger refresh immediately
                                 setTimeout(() => setRefreshTrigger(prev => prev + 1), 0);
                             }}
                             style={{
@@ -266,7 +305,6 @@ const GammaExposurePage = () => {
 
             {/* Metrics Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '20px' }}>
-                {/* Existing Cards... */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                     <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Spot Price</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
@@ -285,7 +323,6 @@ const GammaExposurePage = () => {
                     </div>
                 </div>
 
-                {/* Max GEX Strike Card */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                     <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Max GEX Strike</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196f3' }}>
@@ -293,7 +330,6 @@ const GammaExposurePage = () => {
                     </div>
                 </div>
 
-                {/* Last Updated Card */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                     <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Last Updated</div>
                     <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#e0e0e0' }}>
@@ -301,7 +337,6 @@ const GammaExposurePage = () => {
                     </div>
                 </div>
 
-                {/* View Mode Toggle Card */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <button
@@ -334,20 +369,30 @@ const GammaExposurePage = () => {
                 </div>
             </div>
 
+            {/* LOADING INDICATOR */}
+            {loading && (
+                <div style={{ textAlign: 'center', padding: '50px', color: '#aaa' }}>
+                    <h2>{loadingStatus || 'Loading GEX Data...'}</h2>
+                </div>
+            )}
+
             {/* ERROR */}
-            {
-                error && (
-                    <div style={{ backgroundColor: 'rgba(244, 67, 54, 0.1)', border: '1px solid #f44336', color: '#f44336', padding: '15px', borderRadius: '4px', marginBottom: '20px' }}>
-                        {error}
-                    </div>
-                )
-            }
+            {error && (
+                <div style={{ backgroundColor: 'rgba(244, 67, 54, 0.1)', border: '1px solid #f44336', color: '#f44336', padding: '15px', borderRadius: '4px', marginBottom: '20px' }}>
+                    <strong>Error:</strong> {error}
+                </div>
+            )}
 
             {/* CONTENT */}
-            {
-                data && (
-                    <div>
-                        {/* MAIN CHART */}
+            {!loading && data && (
+                <div>
+                    {/* Check for empty chart data */}
+                    {chartData.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
+                            <h3>No Options Data Available for this Horizon</h3>
+                            <p>Try selecting a different horizon or ticker.</p>
+                        </div>
+                    ) : (
                         <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                             <GEXChart
                                 data={chartData}
@@ -360,14 +405,13 @@ const GammaExposurePage = () => {
                                 horizonLabel={horizon.charAt(0).toUpperCase()}
                             />
                         </div>
-                    </div>
-                )
-            }
-        </div >
+                    )}
+                </div>
+            )}
+        </div>
     );
 };
 
-// Error Boundary Component
 class ErrorBoundary extends React.Component {
     constructor(props) {
         super(props);

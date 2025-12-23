@@ -17,6 +17,11 @@ def list_unapproved_users(db: Session = Depends(get_db)):
     """List all users who are strictly NOT approved (Pending)."""
     return db.query(User).filter(User.is_approved == False).all()
 
+@router.get("/users/all", response_model=List[UserResponse])
+def list_all_users(db: Session = Depends(get_db)):
+    """List ALL users (Approved and Pending) with stats."""
+    return db.query(User).all()
+
 @router.put("/users/{user_id}/approve", response_model=UserResponse)
 def approve_user(user_id: int, db: Session = Depends(get_db)):
     """Approve a pending user."""

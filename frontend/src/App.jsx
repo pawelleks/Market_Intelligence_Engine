@@ -43,6 +43,7 @@ import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
 // Auth Pages
 import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
+import AdminAllUsersPage from './pages/AdminAllUsersPage';
 import AdminDataDashboard from './pages/AdminDataDashboard';
 
 // Define API URLs and base settings
@@ -520,6 +521,7 @@ function AppContent() {
             {/* Auth Routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<AdminLayout><AdminPage /></AdminLayout>} />
+            <Route path="/admin/users" element={<AdminLayout><AdminAllUsersPage /></AdminLayout>} />
             <Route path="/admin/data" element={<AdminLayout><AdminDataDashboard /></AdminLayout>} />
           </Routes>
         </main>

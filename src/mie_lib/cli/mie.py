@@ -479,9 +479,10 @@ def handle_update_expected_moves(args):
         day_offset += 1
         
         # Skip Today for Flat File integrity (user request)
-        if target_date >= date.today():
-            print(f"Skipping {target_date} (Today): Flat Files are not available yet.")
-            continue
+        # Skip Today check REMOVED to allow Live API Snapshot updates
+        # if target_date >= date.today():
+        #    print(f"Skipping {target_date} (Today): Flat Files are not available yet.")
+        #    continue
         
         # Strict Trading Day Check (Skips Weekends & Holidays)
         if not is_verified_trading_day(target_date):
@@ -2539,7 +2540,7 @@ def main(argv=None):
         
         # 2. Load Optional External Data (Expected Moves)
         expected_moves = None
-        em_path = Path("data/analytics/options/expected_moves.json")
+        em_path = Path("data/analytics/options/latest.json")
         if em_path.exists():
             try:
                 with open(em_path, "r") as f:

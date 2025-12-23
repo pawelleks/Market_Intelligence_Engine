@@ -18,12 +18,25 @@ REMOTE_HOST="${REMOTE_HOST:-}"
 IDENTITY_FILE="${IDENTITY_FILE:-}"
 REMOTE_DIR="${REMOTE_DIR:-~/market_intelligence_engine}"
 
+# --- Load Local .env ---
+if [ -f ".env" ]; then
+    echo "Loading local .env file..."
+    set -a
+    source .env
+    set +a
+fi
+
 
 # --- Validation ---
 if [[ -z "$REMOTE_USER" || -z "$REMOTE_HOST" ]]; then
     echo "Error: REMOTE_USER and REMOTE_HOST environment variables must be set."
     echo "Usage: REMOTE_USER=user REMOTE_HOST=host ./scripts/deploy_remote.sh"
     exit 1
+fi
+
+# Check GOOGLE_CLIENT_ID
+if [[ -z "$GOOGLE_CLIENT_ID" ]]; then
+    echo "WARNING: GOOGLE_CLIENT_ID is not set. Google Sign-In will not work in the deployed app."
 fi
 
 # Check Identity File if provided
@@ -105,6 +118,12 @@ ssh $SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" << EOF
     if ! grep -q "POLYGON_API_KEY" .env; then
         echo "Injecting POLYGON_API_KEY..."
         echo "POLYGON_API_KEY=keXDhBdz5zuofjHkeiYMznzUiyDerXgu" >> .env
+    fi
+    
+    # Ensure MASSIVE_API_KEY exists (Same as Polygon)
+    if ! grep -q "MASSIVE_API_KEY" .env; then
+        echo "Injecting MASSIVE_API_KEY..."
+        echo "MASSIVE_API_KEY=keXDhBdz5zuofjHkeiYMznzUiyDerXgu" >> .env
     fi
 
     # Ensure GOOGLE_CLIENT_ID exists (for OAuth)

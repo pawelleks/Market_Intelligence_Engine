@@ -55,9 +55,14 @@ def load_gex_profile(ticker: str) -> Optional[Dict]:
             
         # 2. Load Profile
         if paths["profile"].exists():
-            df = pd.read_parquet(paths["profile"])
-            data["profile"] = df.to_dict(orient="records")
+            try:
+                df = pd.read_parquet(paths["profile"])
+                data["profile"] = df.to_dict(orient="records")
+            except Exception as e:
+                logger.error(f"Failed to read GEX profile parquet for {ticker}: {e}")
+                data["profile"] = []
         else:
+            logger.warning(f"GEX profile parquet missing for {ticker} at {paths['profile']}")
             data["profile"] = []
             
         return data

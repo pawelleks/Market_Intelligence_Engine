@@ -66,7 +66,7 @@ class HMMBacktester:
         merged['bh_ret'] = merged['ret_1d']
         
         # Filter NaNs from shift
-        valid = merged.dropna()
+        valid = merged.dropna(subset=['strategy_ret', 'bh_ret'])
         
         if valid.empty:
             return {}

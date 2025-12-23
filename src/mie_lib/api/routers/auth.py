@@ -47,6 +47,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     is_approved: bool
     is_admin: bool
+    visit_count: Optional[int] = 0
 
     class Config:
         from_attributes = True # Pydantic v2

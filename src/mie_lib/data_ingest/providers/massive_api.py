@@ -51,17 +51,47 @@ class MassiveAPIClient:
             
         logger.info(f"Fetching Massive Snapshot for {ticker} (Strikes: {min_strike}-{max_strike}, Exp: {expiration_date})...")
         
-        try:
-            resp = requests.get(url, params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch Massive snapshot for {ticker}: {e}")
-            return pd.DataFrame()
-            
-        results = data.get("results", [])
+        # Pagination Loop
+        all_results = []
+        full_url = url
+        
+        while full_url:
+            try:
+                # If it's the initial request, use params. Subsequent 'next_url' requests usually have params embedded 
+                # but might need apiKey if not included (Polygon next_url usually lacks auth).
+                # However, requests.get(next_url, params=params) might duplicate params if next_url has them.
+                # Strategy: For initial, use params. For next, use URL as is but append apiKey if missing.
+                
+                if full_url == url:
+                    resp = requests.get(full_url, params=params, timeout=10)
+                else:
+                    # Append API Key if not present (simple check)
+                    if "apiKey=" not in full_url:
+                        separator = "&" if "?" in full_url else "?"
+                        full_url = f"{full_url}{separator}apiKey={self.api_key}"
+                    resp = requests.get(full_url, timeout=10)
+
+                resp.raise_for_status()
+                data = resp.json()
+                
+                batch = data.get("results", [])
+                if batch:
+                    all_results.extend(batch)
+                    
+                # proper logging of progress
+                if len(all_results) % 1000 == 0:
+                     logger.info(f"Fetched {len(all_results)} rows so far...")
+                     
+                # Next URL
+                full_url = data.get("next_url")
+                
+            except Exception as e:
+                logger.error(f"Failed to fetch Massive snapshot page: {e}")
+                break
+        
+        results = all_results
         if not results:
-            logger.warning(f"No results for {ticker} from Massive API.")
+            logger.warning(f"No results for {ticker} from Massive API (after pagination).")
             return pd.DataFrame()
             
         # Parse Results into DataFrame

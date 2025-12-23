@@ -780,36 +780,10 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
     Intervals: 1h, 4h, 1d.
     Range: max (default), 2y, 5y, etc.
     """
-    try:
-        # 1. Try Massive.com Provider first (Better data, 15min delayed usually)
-        try:
-            provider = MassiveOptionChainProvider()
-            if provider.api_key:
-                # Calculate start date based on range
-                end_date = date.today()
-                start_date = end_date.replace(year=end_date.year - 2) # Default 2y
-                
-                if range == "5y":
-                    start_date = end_date.replace(year=end_date.year - 5)
-                elif range == "1y":
-                    start_date = end_date.replace(year=end_date.year - 1)
-                elif range == "max":
-                    start_date = date(2000, 1, 1) # Reasonable max
-                
-                df_massive = provider.fetch_candles(ticker, interval=interval, start_date=start_date, end_date=end_date)
-                
-                if not df_massive.empty:
-                    # Format for frontend
-                    if "Date" in df_massive.columns:
-                        df_massive["Date"] = df_massive["Date"].astype(str)
-                    
-                    cols = ["Date", "Open", "High", "Low", "Close", "Volume"]
-                    data = df_massive[cols].to_dict(orient="records")
-                    return JSONResponse(content=data)
-                    
-        except Exception as e:
-            print(f"Massive Candle Fetch Failed (falling back to yfinance): {e}")
+    # Massive Candle Fetch Removed (User Request)
+    # Falling back to yfinance directly
 
+    try:
         # 2. Fallback to yfinance
         # Validate interval
         valid_intervals = {"1h", "1d", "5d", "1wk", "1mo"} 
@@ -829,7 +803,8 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
         df = t.history(period=req_range, interval=yf_interval)
         
         if df.empty:
-             return JSONResponse(content=[])
+            # Check if we should try fallback
+            raise ValueError("Empty yfinance data returned")
              
         # Resample if 4h
         if interval == "4h":
@@ -861,8 +836,41 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
         return JSONResponse(content=data)
         
     except Exception as e:
-        # print(f"Error fetching candles: {e}")
+        print(f"yfinance failed for {ticker}: {e}. Attempting Local Fallback...")
+        
+        # 3. Local Fallback (Parquet)
+        try:
+            pq_path = features_parquet_path(ticker)
+            if pq_path.exists():
+                df_local = pd.read_parquet(pq_path)
+                
+                if "date" in df_local.columns:
+                    df_local = df_local.sort_values("date")
+                    df_local = df_local.tail(600)
+                    
+                    records = []
+                    for _, row in df_local.iterrows():
+                        c = row.get("close")
+                        if pd.isna(c): continue
+                        
+                        records.append({
+                            "Date": str(row["date"]),
+                            "Open": c,
+                            "High": c,
+                            "Low": c,
+                            "Close": c,
+                            "Volume": 0
+                        })
+                    
+                    if records:
+                        print(f"Serving {len(records)} local records for {ticker}")
+                        return JSONResponse(content=records)
+        except Exception as local_e:
+            print(f"Local fallback failed: {local_e}")
+            
         return JSONResponse(content=[], status_code=500)
+        
+
 
 # -----------------------------------------------------------------
 # Massive.com Integration (Experimental)
@@ -876,7 +884,7 @@ from mie_lib.data_ingest.providers.massive import MassiveOptionChainProvider
 from mie_lib.analytics.expected_moves.data_ingest import get_target_expirations, fetch_vix1d_close
 
 @app.get("/api/v1/expected_moves/massive/latest")
-async def get_expected_moves_massive():
+def get_expected_moves_massive():
     """
     Fetches 'Live' (Delayed) Expected Moves using yfinance.
     (Massive.com API key does not support real-time data, so we fallback to yfinance for 'Live' view).
@@ -886,6 +894,19 @@ async def get_expected_moves_massive():
     from datetime import datetime
     import yaml
     from mie_lib.utils.paths import ROOT, options_latest_json_path
+    import time
+
+    # --- CACHE CHECK ---
+    if not hasattr(get_expected_moves_massive, "cache"):
+        get_expected_moves_massive.cache = {"last_update": 0, "data": None}
+    
+    now = time.time()
+    if now - get_expected_moves_massive.cache["last_update"] < 300 and get_expected_moves_massive.cache["data"] is not None:
+        print("Serving Expected Moves from Backend Cache (5min TTL)")
+        return JSONResponse(content=get_expected_moves_massive.cache["data"])
+    
+    print(f"Cache expired (Age: {now - get_expected_moves_massive.cache['last_update']:.1f}s). Fetching fresh data...")
+    # -------------------
 
     try:
         # Load scope from config
@@ -896,13 +917,9 @@ async def get_expected_moves_massive():
             try:
                 with open(scope_path, "r") as f:
                     scope_cfg = yaml.safe_load(f)
-                    # Use .get() chains to avoid KeyErrors
                     tickers = scope_cfg.get("scope", {}).get("Expected_Moves_Reliability", tickers)
             except Exception as e:
                 print(f"Error loading scope: {e}")
-
-        # Limit concurrency or just iterate. For 60 tickers, serial is slow but acceptable for "massive/latest" trigger.
-        # Ideally this should be async or cached.
         
         as_of = date.today()
         vix1d_val = fetch_vix1d_close(as_of)
@@ -1059,6 +1076,12 @@ async def get_expected_moves_massive():
                 continue
                 
         print(f"DEBUG: Massive Results Tickers: {list(results['tickers'].keys())}")
+        
+        # --- UPDATE CACHE ---
+        get_expected_moves_massive.cache["last_update"] = time.time()
+        get_expected_moves_massive.cache["data"] = results
+        # --------------------
+        
         return JSONResponse(content=results)
 
     except Exception as e:
@@ -1149,51 +1172,6 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
         except Exception:
             pass # Fallback to yF
 
-    # 2. yfinance
-    try:
-        valid_intervals = {"1h", "1d", "5d", "1wk", "1mo"} 
-        yf_interval = interval
-        if interval == "4h":
-            yf_interval = "1h" 
-            
-        t = yf.Ticker(ticker)
-        
-        req_range = range
-        if (interval == "1h" or interval == "4h") and range == "max":
-            req_range = "2y"
-            
-        df = t.history(period=req_range, interval=yf_interval)
-        
-        if df.empty:
-             return JSONResponse(content=[])
-             
-        # Resample if 4h
-        if interval == "4h":
-            agg_dict = {
-                'Open': 'first',
-                'High': 'max',
-                'Low': 'min',
-                'Close': 'last',
-                'Volume': 'sum'
-            }
-            df = df.resample('4h').agg(agg_dict).dropna()
-            
-        df.reset_index(inplace=True)
-        
-        if "Date" in df.columns:
-            df["Date"] = df["Date"].astype(str)
-        elif "Datetime" in df.columns:
-             df["Date"] = df["Datetime"].astype(str)
-             
-        # Filter for desired columns only
-        out_cols = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c in df.columns]
-        data = df[out_cols].to_dict(orient="records")
-        
-        return JSONResponse(content=data)
-        
-    except Exception as e:
-        print(f"Error fetching candles for {ticker}: {e}")
-        return JSONResponse(content={"error": f"YFinance Error: {str(e)}"}, status_code=500)
 
 @app.get("/api/v1/system/audit/latest")
 def get_latest_audit_log() -> JSONResponse:

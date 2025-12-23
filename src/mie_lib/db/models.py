@@ -13,3 +13,4 @@ class User(Base):
     allowed_pages = Column(JSON, default=[])
     subscription_status = Column(String, default='free')
     subscription_end_date = Column(DateTime, nullable=True)
+    visit_count = Column(Integer, default=0)

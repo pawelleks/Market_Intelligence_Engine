@@ -61,7 +61,11 @@ def get_sma_stack_report(ticker: str) -> JSONResponse:
             
             # Ensure columns exist
             available_cols = df_feat.columns.tolist()
-            selected_cols = [c for c in cols if c in available_cols]
+            # Minimal read: date and price
+            read_cols = ["date", "close", "adj_close"]
+            existing_ma = ["ema_20", "ema_50", "ema_200"] # We keep these if they exist to verify
+            
+            selected_cols = [c for c in read_cols + existing_ma if c in available_cols]
             
             df_subset = df_feat[selected_cols].copy()
             
@@ -71,15 +75,47 @@ def get_sma_stack_report(ticker: str) -> JSONResponse:
             
             # Sort and take full history 
             df_subset = df_subset.sort_values("date")
-           
-            # Format
+            
+            # Format Date
             if "date" in df_subset.columns:
-                df_subset["date"] = df_subset["date"].dt.strftime("%Y-%m-%d")
+                df_subset["date"] = pd.to_datetime(df_subset["date"])
                 
+            # --- ON-THE-FLY RESULT CALCULATION ---
+            # Calculate all requested MAs to ensure availability even if config varies
+            px = df_subset["close"]
+            
+            # SMAs
+            for w in [20, 50, 100, 200]:
+                df_subset[f"sma_{w}"] = px.rolling(window=w).mean()
+                
+            # EMAs
+            for w in [20, 50, 100, 200]:
+                df_subset[f"ema_{w}"] = px.ewm(span=w, adjust=False).mean()
+            
+            # Re-assign to latest status if it exists, to match
+            # Actually, `latest_status` is read from `sma_stack_daily.parquet`.
+            # We should probably update `latest_status` with these new values if we want them in the table header?
+            # The user asked for tables below the chart, likely based on the latest data point?
+            # Or historical table? "As values show if the price is below or above... and the distance"
+            # It implies a dashboard view, so likely LATEST values.
+            
+            # Update latest_status with calculated values from the last row
+            if not df_subset.empty:
+                last_row = df_subset.iloc[-1].to_dict()
+                for k in ["sma_20", "sma_50", "sma_100", "sma_200", "ema_20", "ema_50", "ema_100", "ema_200"]:
+                     val = last_row.get(k)
+                     if pd.notna(val):
+                         latest_status[k] = val
+            
+            # Final Clean for JSON
+            df_subset["date"] = df_subset["date"].dt.strftime("%Y-%m-%d")
             df_subset = df_subset.replace({np.nan: None})
             
-            # Keep only the fields expected by frontend (we mapped adj_close to close)
-            final_cols = ["date", "close", "ema_20", "ema_50", "ema_200"]
+            # Keep relevant columns
+            final_cols = ["date", "close", 
+                          "sma_20", "sma_50", "sma_100", "sma_200",
+                          "ema_20", "ema_50", "ema_100", "ema_200"]
+                          
             history = df_subset[final_cols].to_dict(orient="records")
             
         except Exception as e:

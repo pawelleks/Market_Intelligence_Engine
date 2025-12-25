@@ -131,14 +131,12 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
                 # Convert to DF for easier analysis
                 df_prof = pd.DataFrame(profile)
                 if not df_prof.empty and 'strike' in df_prof.columns and 'total_gex' in df_prof.columns:
-                    # Call Wall: Max Call GEX
-                    if 'call_gex' in df_prof.columns:
-                        call_wall = float(df_prof.loc[df_prof['call_gex'].idxmax()]['strike'])
+                    if 'total_call_gex' in df_prof.columns:
+                        call_wall = float(df_prof.loc[df_prof['total_call_gex'].idxmax()]['strike'])
                     
-                    # Put Wall: Min Put GEX (Most Negative) in absolute terms usually means largest support
-                    # Put GEX is usually negative. We want the largest magnitude.
-                    if 'put_gex' in df_prof.columns:
-                        put_wall = float(df_prof.loc[df_prof['put_gex'].idxmin()]['strike'])
+                    # Put Wall: Min Put GEX (Most Negative)
+                    if 'total_put_gex' in df_prof.columns:
+                        put_wall = float(df_prof.loc[df_prof['total_put_gex'].idxmin()]['strike'])
                     
                     # Zero Gamma (Flip Point)
                     # Find strike where total_gex flips sign or is closest to 0

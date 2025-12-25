@@ -193,14 +193,14 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     
     # Add mapped technicals
     # Map raw columns to pretty names if needed, or just dump interesting ones
-    # SMA Stack
-    sma_keys = ['price_vs_sma20', 'price_vs_sma50', 'price_vs_sma200', 'trend_alignment']
+    # SMA/EMA Stack
+    sma_keys = ['ema_20', 'ema_50', 'ema_200', 'is_ema_stacked_up', 'is_price_above_stack', 'is_200_ema_up']
     # ADX
-    adx_keys = ['adx', 'di_plus', 'di_minus', 'trend_strength']
+    adx_keys = ['adx', 'plus_di', 'minus_di', 'is_adx_strong', 'is_adx_uptrend']
     # PSAR
-    psar_keys = ['psar_direction', 'reversal']
+    psar_keys = ['psar_value', 'is_psar_bullish', 'psar_trailing_stop']
     # Ichimoku
-    ichi_keys = ['cloud_signal', 'tk_cross', 'lagging_span_signal']
+    ichi_keys = ['is_above_cloud', 'is_cloud_green', 'is_chikou_confirmed', 'cloud_age']
     
     technicals = {}
     

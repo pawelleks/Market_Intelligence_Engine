@@ -64,6 +64,7 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
 
     # Load Term Structure (and extract for ticker/date)
     vts_dict = {}
+    vts_path = DATA_DIR / "analytics" / "volatility_term_structure.json"
     if vts_path.exists():
          try:
              import json

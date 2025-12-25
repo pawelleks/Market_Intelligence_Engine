@@ -130,7 +130,7 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
             try:
                 # Convert to DF for easier analysis
                 df_prof = pd.DataFrame(profile)
-                if not df_prof.empty and 'strike' in df_prof.columns and 'total_gex' in df_prof.columns:
+                if not df_prof.empty and 'strike' in df_prof.columns and 'total_net_gex' in df_prof.columns:
                     if 'total_call_gex' in df_prof.columns:
                         call_wall = float(df_prof.loc[df_prof['total_call_gex'].idxmax()]['strike'])
                     

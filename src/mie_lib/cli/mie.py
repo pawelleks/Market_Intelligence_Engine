@@ -267,6 +267,17 @@ def handle_update_adx(args):
     get_audit_logger().update_stage("ADX/DMI", "COMPLETED", {})
 
 
+def handle_update_volatility(args):
+    """Handle update-volatility command."""
+    from mie_lib.analytics.volatility import calculate_and_save_volatility
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Volatility", "RUNNING", {})
+    LOG.info("Running update-volatility...")
+    calculate_and_save_volatility()
+    LOG.info("update-volatility completed.")
+    get_audit_logger().update_stage("Volatility", "COMPLETED", {})
+
+
 def handle_update_ichimoku(args):
     """Handle update-ichimoku command."""
     from mie_lib.analytics.ichimoku import calculate_and_save_ichimoku
@@ -1320,6 +1331,10 @@ def build_parser():
     # --- ADX/DMI (New) ---
     p_adx = sub.add_parser("update-adx", help="Calculate and save daily ADX/DMI status")
     p_adx.set_defaults(func=handle_update_adx)
+
+    # update-volatility
+    p_vol = sub.add_parser("update-volatility", help="Calculate and save daily Volatility (ATR) status")
+    p_vol.set_defaults(func=handle_update_volatility)
     
     # --- PSAR (New) ---
     p_psar = sub.add_parser("update-psar", help="Calculate and save daily PSAR metrics")
@@ -2544,16 +2559,33 @@ def main(argv=None):
         if em_path.exists():
             try:
                 with open(em_path, "r") as f:
-                    expected_moves = json.load(f)
-                print(f"Loaded Expected Moves from {em_path}")
+                    full_em = json.load(f)
+                
+                # Filter for requested tickers only
+                target_tickers = ["SPY", "QQQ", "IWM", "DIA"]
+                expected_moves = {
+                    "as_of": full_em.get("as_of"),
+                    "source": full_em.get("source"),
+                    "tickers": {k: v for k, v in full_em.get("tickers", {}).items() if k in target_tickers}
+                }
+                
+                print(f"Loaded Expected Moves from {em_path} (Filtered to {len(expected_moves['tickers'])})")
             except Exception as e:
                 print(f"Warning: Failed to load Expected Moves: {e}")
         else:
             print(f"Warning: {em_path} not found. Proceeding without expected moves.")
 
+        # 3. Load GEX Snapshot (Freshest Data)
+        from mie_lib.analytics.gex.storage import load_gex_profile
+        gex_snapshot = load_gex_profile(ticker)
+        if gex_snapshot:
+            print(f"Loaded GEX Snapshot for {ticker}")
+        else:
+             print(f"Warning: Failed to load GEX Snapshot for {ticker}")
+
         # 3. Generate Payload
         try:
-            payload = generate_llm_payload(df, ticker, expected_moves)
+            payload = generate_llm_payload(df, ticker, expected_moves, gex_snapshot=gex_snapshot)
             
             # 4. Save Artifact
             audit_path = Path("data/audit/latest_llm_context.json")

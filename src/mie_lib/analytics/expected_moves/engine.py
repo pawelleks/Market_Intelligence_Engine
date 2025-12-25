@@ -56,11 +56,11 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
     # Note: We calculate expirations PER TICKER inside the loop now
     # to handle different monthly conventions (Equity vs Index)
     
-    # FIX: Spot Date should be the PREVIOUS trading day relative to calculation date (as_of)
-    # We want the EOD Close from the last completed session.
-    spot_date = get_previous_trading_day(as_of)
+    # FIX: Spot Price should be from the analysis date (as_of) if available (e.g. EOD run),
+    # falling back to previous day only if today's close is not yet available.
+    spot_date = as_of
     
-    LOG.info(f"Target Spot Date (Prev Close): {spot_date}")
+    LOG.info(f"Target Spot Date: {spot_date}")
     
     # Handle Index mapping: Strip ^ for options data matching
     # e.g. ^SPX -> SPX in flat file
@@ -248,10 +248,11 @@ def _process_ticker(
         spot_price = fetch_underlying_close(ticker, spot_date)
     
     if spot_price is None:
-         # Fallback to as_of
-         if spot_date != as_of:
-             LOG.warning(f"Could not fetch spot for {spot_date}, trying {as_of}")
-             spot_price = fetch_underlying_close(ticker, as_of)
+         # Fallback to previous trading day
+         from mie_lib.utils.trading_calendar import get_previous_trading_day
+         prev_date = get_previous_trading_day(spot_date)
+         LOG.warning(f"Could not fetch spot for {spot_date}, trying previous trading day {prev_date}")
+         spot_price = fetch_underlying_close(ticker, prev_date)
 
     if spot_price is None:
         raise ValueError(f"Could not fetch spot price for {ticker}")

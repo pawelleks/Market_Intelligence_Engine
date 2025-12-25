@@ -110,6 +110,8 @@ log "Running update-ichimoku..."
 python -m mie_lib.cli.mie update-ichimoku >> "${LOG_FILE}" 2>&1
 log "Running build-volatility-struct..."
 python -m mie_lib.cli.mie build-volatility-struct >> "${LOG_FILE}" 2>&1
+log "Running update-volatility (ATR Analysis)..."
+python -m mie_lib.cli.mie update-volatility >> "${LOG_FILE}" 2>&1
 
 # 10. Time Series Momentum (TSMOM)
 log "Running build-tsmom-daily..."

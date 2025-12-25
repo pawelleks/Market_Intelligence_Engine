@@ -45,6 +45,8 @@ export const NAV_DATA = {
                 { label: 'ADX Strength Report', to: '/analysis/adx', icon: Activity },
                 { label: 'PSAR Momentum Report', to: '/analysis/psar', icon: Target },
                 { label: 'Ichimoku Cloud Report', to: '/investing/ichimoku', icon: Cloud },
+                { label: 'Volume Regime', to: '/analysis/volume', icon: BarChart2 },
+                { label: 'Volatility & Risk (ATR)', to: '/analysis/volatility', icon: Activity },
             ]
         },
         {
@@ -78,7 +80,7 @@ export const NAV_DATA = {
             id: 'settings',
             items: [
                 { label: 'Data Pipelines', to: '/system/pipelines', icon: Database },
-                { label: 'All Users', to: '/admin/users', icon: ShieldCheck },
+                { label: 'User Management', to: '/admin', icon: ShieldCheck },
             ]
         }
     ]

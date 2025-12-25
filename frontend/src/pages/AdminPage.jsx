@@ -3,17 +3,17 @@ import axios from 'axios';
 import { Loader2, CheckCircle, XCircle, User, Activity, Clock, AlertTriangle } from 'lucide-react';
 
 const AdminPage = () => {
-    const [activeTab, setActiveTab] = useState('users'); // 'users' | 'system'
-    const [users, setUsers] = useState([]);
-    const [auditData, setAuditData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [auditLoading, setAuditLoading] = useState(false);
-    const [actionLoading, setActionLoading] = useState(null); // ID of user being processed
+    const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'all'
+    const [pendingUsers, setPendingUsers] = useState([]);
+    const [allUsers, setAllUsers] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [actionLoading, setActionLoading] = useState(null);
 
-    const fetchUsers = async () => {
+    const fetchPendingUsers = async () => {
+        setLoading(true);
         try {
             const res = await axios.get('/api/v1/admin/users');
-            setUsers(res.data);
+            setPendingUsers(res.data);
         } catch (err) {
             console.error(err);
         } finally {
@@ -21,28 +21,31 @@ const AdminPage = () => {
         }
     };
 
-    const fetchAuditLog = async () => {
-        setAuditLoading(true);
+    const fetchAllUsers = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get('/api/v1/system/audit/latest');
-            setAuditData(res.data);
+            const res = await axios.get('/api/v1/admin/users/all');
+            setAllUsers(res.data);
         } catch (err) {
-            console.error("Failed to fetch audit log:", err);
+            console.error(err);
         } finally {
-            setAuditLoading(false);
+            setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchUsers();
-        fetchAuditLog();
-    }, []);
+        if (activeTab === 'pending') {
+            fetchPendingUsers();
+        } else {
+            fetchAllUsers();
+        }
+    }, [activeTab]);
 
     const handleApprove = async (id) => {
         setActionLoading(id);
         try {
             await axios.put(`/api/v1/admin/users/${id}/approve`);
-            setUsers(users.filter(u => u.id !== id)); // Remove from list
+            setPendingUsers(pendingUsers.filter(u => u.id !== id));
         } catch (err) {
             console.error(err);
             alert("Failed to approve");
@@ -56,7 +59,7 @@ const AdminPage = () => {
         setActionLoading(id);
         try {
             await axios.put(`/api/v1/admin/users/${id}/deny`);
-            setUsers(users.filter(u => u.id !== id));
+            setPendingUsers(pendingUsers.filter(u => u.id !== id));
         } catch (err) {
             console.error(err);
             alert("Failed to deny");
@@ -77,121 +80,6 @@ const AdminPage = () => {
         warning: '#ff9800',
     };
 
-    const StatusBadge = ({ status }) => {
-        let color = colors.textMuted;
-        let Icon = Clock;
-
-        const s = (status || "").toUpperCase();
-
-        if (s === 'COMPLETED' || s === 'SUCCESS') {
-            color = colors.success;
-            Icon = CheckCircle;
-        } else if (s === 'FAILED' || s === 'ERROR') {
-            color = colors.danger;
-            Icon = XCircle;
-        } else if (s === 'RUNNING') {
-            color = colors.accent;
-            Icon = Loader2;
-        } else if (s === 'SKIPPED') {
-            color = colors.warning;
-            Icon = AlertTriangle;
-        }
-
-        return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: color, fontWeight: 500 }}>
-                <Icon size={16} className={s === 'RUNNING' ? "animate-spin" : ""} />
-                {s || "UNKNOWN"}
-            </div>
-        );
-    };
-
-    const renderAuditSection = () => {
-        if (auditLoading && !auditData) {
-            return (
-                <div style={{ textAlign: 'center', padding: 50, color: colors.textMuted }}>
-                    <Loader2 className="animate-spin" style={{ display: 'inline', marginRight: 10 }} /> Loading Audit Log...
-                </div>
-            );
-        }
-
-        if (!auditData) {
-            return (
-                <div style={{ padding: 20, backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, color: colors.textMuted }}>
-                    No audit logs available. Run a pipeline job to generate data.
-                </div>
-            );
-        }
-
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* Header Card */}
-                <div style={{ padding: 20, backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                        <div>
-                            <h2 style={{ fontSize: '18px', color: colors.text, margin: 0 }}>{auditData.job_name || "Pipeline Job"}</h2>
-                            <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: 5 }}>
-                                Started: {new Date(auditData.start_time).toLocaleString()}
-                            </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '14px', marginBottom: 5 }}>Overall Status</div>
-                            <StatusBadge status={auditData.status} />
-                            {auditData.end_time && (
-                                <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: 5 }}>
-                                    Ended: {new Date(auditData.end_time).toLocaleString()}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Stages List */}
-                <div style={{ backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-                    <div style={{ padding: '15px 20px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <Activity size={18} color={colors.accent} />
-                        <h3 style={{ margin: 0, fontSize: '16px', color: colors.text }}>Pipeline Stages</h3>
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                        <thead style={{ backgroundColor: '#1a2639' }}>
-                            <tr>
-                                <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>Stage Name</th>
-                                <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>Timestamp</th>
-                                <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>Details</th>
-                                <th style={{ textAlign: 'right', padding: 15, color: colors.textMuted }}>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {Object.entries(auditData.stages || {}).map(([name, stage]) => (
-                                <tr key={name} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                                    <td style={{ padding: 15, fontWeight: 500 }}>{name}</td>
-                                    <td style={{ padding: 15, color: colors.textMuted, fontSize: '12px' }}>
-                                        {stage.start_time ? new Date(stage.start_time).toLocaleTimeString() : "-"}
-                                    </td>
-                                    <td style={{ padding: 15, color: colors.textMuted, fontSize: '12px', maxWidth: 300 }}>
-                                        {stage.details ? JSON.stringify(stage.details).slice(0, 100) : "-"}
-                                        {stage.error && <div style={{ color: colors.danger, marginTop: 4 }}>Error: {stage.error}</div>}
-                                    </td>
-                                    <td style={{ padding: 15, textAlign: 'right' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                            <StatusBadge status={stage.status} />
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                            {Object.keys(auditData.stages || {}).length === 0 && (
-                                <tr>
-                                    <td colSpan={4} style={{ padding: 20, textAlign: 'center', color: colors.textMuted }}>
-                                        No stages recorded yet.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        );
-    };
-
     return (
         <div style={{ padding: '20px', backgroundColor: colors.bg, minHeight: '100vh', color: colors.text }}>
 
@@ -199,90 +87,141 @@ const AdminPage = () => {
                 <h1 style={{ fontSize: '24px', margin: 0 }}>Admin Panel</h1>
                 <div style={{ display: 'flex', gap: 10 }}>
                     <button
-                        onClick={() => setActiveTab('users')}
+                        onClick={() => setActiveTab('pending')}
                         style={{
                             padding: '8px 16px', borderRadius: 4, cursor: 'pointer',
-                            backgroundColor: activeTab === 'users' ? colors.accent : 'transparent',
-                            color: activeTab === 'users' ? 'white' : colors.textMuted,
-                            border: `1px solid ${activeTab === 'users' ? colors.accent : colors.border}`
+                            backgroundColor: activeTab === 'pending' ? colors.accent : 'transparent',
+                            color: activeTab === 'pending' ? 'white' : colors.textMuted,
+                            border: `1px solid ${activeTab === 'pending' ? colors.accent : colors.border}`
                         }}
                     >
                         User Approval
                     </button>
                     <button
-                        onClick={() => setActiveTab('system')}
+                        onClick={() => setActiveTab('all')}
                         style={{
                             padding: '8px 16px', borderRadius: 4, cursor: 'pointer',
-                            backgroundColor: activeTab === 'system' ? colors.accent : 'transparent',
-                            color: activeTab === 'system' ? 'white' : colors.textMuted,
-                            border: `1px solid ${activeTab === 'system' ? colors.accent : colors.border}`
+                            backgroundColor: activeTab === 'all' ? colors.accent : 'transparent',
+                            color: activeTab === 'all' ? 'white' : colors.textMuted,
+                            border: `1px solid ${activeTab === 'all' ? colors.accent : colors.border}`
                         }}
                     >
-                        Pipeline Audit
+                        All Users
                     </button>
                 </div>
             </div>
 
-            {activeTab === 'system' ? renderAuditSection() : (
+            {loading ? (
+                <div style={{ textAlign: 'center', padding: 50, color: colors.textMuted }}>
+                    <Loader2 className="animate-spin" style={{ display: 'inline', marginRight: 10 }} /> Loading...
+                </div>
+            ) : (
                 <>
-                    {loading ? (
-                        <div style={{ textAlign: 'center', padding: 50, color: colors.textMuted }}>
-                            <Loader2 className="animate-spin" style={{ display: 'inline', marginRight: 10 }} /> Loading Users...
-                        </div>
-                    ) : users.length === 0 ? (
-                        <div style={{ padding: 20, backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, color: colors.textMuted }}>
-                            No pending users.
-                        </div>
-                    ) : (
+                    {activeTab === 'pending' && (
+                        pendingUsers.length === 0 ? (
+                            <div style={{ padding: 20, backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, color: colors.textMuted }}>
+                                No pending users.
+                            </div>
+                        ) : (
+                            <div style={{ backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                                    <thead style={{ backgroundColor: '#1a2639' }}>
+                                        <tr>
+                                            <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>User</th>
+                                            <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>Email</th>
+                                            <th style={{ textAlign: 'right', padding: 15, color: colors.textMuted }}>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pendingUsers.map(user => (
+                                            <tr key={user.id} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                                <td style={{ padding: 15 }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                        <div style={{ padding: 8, borderRadius: '50%', backgroundColor: '#2a3a50' }}>
+                                                            <User size={16} />
+                                                        </div>
+                                                        {user.full_name || "Unknown"}
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: 15 }}>{user.email}</td>
+                                                <td style={{ padding: 15, textAlign: 'right' }}>
+                                                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                                                        <button
+                                                            onClick={() => handleApprove(user.id)}
+                                                            disabled={actionLoading === user.id}
+                                                            style={{
+                                                                display: 'flex', alignItems: 'center', gap: 5,
+                                                                padding: '6px 12px', borderRadius: 4,
+                                                                border: 'none', backgroundColor: colors.success, color: 'white', cursor: 'pointer',
+                                                                opacity: actionLoading === user.id ? 0.5 : 1
+                                                            }}
+                                                        >
+                                                            {actionLoading === user.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                                                            Approve
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeny(user.id)}
+                                                            disabled={actionLoading === user.id}
+                                                            style={{
+                                                                display: 'flex', alignItems: 'center', gap: 5,
+                                                                padding: '6px 12px', borderRadius: 4,
+                                                                backgroundColor: 'transparent', border: `1px solid ${colors.danger}`, color: colors.danger, cursor: 'pointer',
+                                                                opacity: actionLoading === user.id ? 0.5 : 1
+                                                            }}
+                                                        >
+                                                            <XCircle size={14} />
+                                                            Deny
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )
+                    )}
+
+                    {activeTab === 'all' && (
                         <div style={{ backgroundColor: colors.panelBg, borderRadius: 8, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                                 <thead style={{ backgroundColor: '#1a2639' }}>
                                     <tr>
+                                        <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>ID</th>
                                         <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>User</th>
                                         <th style={{ textAlign: 'left', padding: 15, color: colors.textMuted }}>Email</th>
-                                        <th style={{ textAlign: 'right', padding: 15, color: colors.textMuted }}>Actions</th>
+                                        <th style={{ textAlign: 'center', padding: 15, color: colors.textMuted }}>Role</th>
+                                        <th style={{ textAlign: 'center', padding: 15, color: colors.textMuted }}>Status</th>
+                                        <th style={{ textAlign: 'center', padding: 15, color: colors.textMuted }}>Visits</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {users.map(user => (
+                                    {allUsers.map(user => (
                                         <tr key={user.id} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                            <td style={{ padding: 15, color: colors.textMuted }}>#{user.id}</td>
                                             <td style={{ padding: 15 }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                    <div style={{ padding: 8, borderRadius: '50%', backgroundColor: '#2a3a50' }}>
-                                                        <User size={16} />
+                                                    <div style={{ padding: 6, borderRadius: '50%', backgroundColor: '#2a3a50' }}>
+                                                        <User size={14} />
                                                     </div>
-                                                    {user.full_name || "Unknown"}
+                                                    {user.full_name || "-"}
                                                 </div>
                                             </td>
-                                            <td style={{ padding: 15 }}>{user.email}</td>
-                                            <td style={{ padding: 15, textAlign: 'right' }}>
-                                                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                                                    <button
-                                                        onClick={() => handleApprove(user.id)}
-                                                        disabled={actionLoading === user.id}
-                                                        style={{
-                                                            display: 'flex', alignItems: 'center', gap: 5,
-                                                            padding: '6px 12px', borderRadius: 4,
-                                                            border: 'none', backgroundColor: colors.success, color: 'white', cursor: 'pointer',
-                                                            opacity: actionLoading === user.id ? 0.5 : 1
-                                                        }}
-                                                    >
-                                                        {actionLoading === user.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                                                        Approve
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeny(user.id)}
-                                                        disabled={actionLoading === user.id}
-                                                        style={{
-                                                            display: 'flex', alignItems: 'center', gap: 5,
-                                                            padding: '6px 12px', borderRadius: 4,
-                                                            backgroundColor: 'transparent', border: `1px solid ${colors.danger}`, color: colors.danger, cursor: 'pointer',
-                                                            opacity: actionLoading === user.id ? 0.5 : 1
-                                                        }}
-                                                    >
-                                                        <XCircle size={14} />
-                                                        Deny
-                                                    </button>
+                                            <td style={{ padding: 15, color: colors.text }}>{user.email}</td>
+                                            <td style={{ padding: 15, textAlign: 'center' }}>
+                                                {user.is_admin ? (
+                                                    <span style={{ backgroundColor: 'rgba(124, 58, 237, 0.2)', color: '#a78bfa', padding: '2px 8px', borderRadius: 4, fontSize: '12px' }}>Admin</span>
+                                                ) : <span style={{ color: colors.textMuted }}>User</span>}
+                                            </td>
+                                            <td style={{ padding: 15, textAlign: 'center' }}>
+                                                {user.is_approved ? (
+                                                    <span style={{ color: colors.success }}>Approved</span>
+                                                ) : <span style={{ color: colors.warning }}>Pending</span>}
+                                            </td>
+                                            <td style={{ padding: 15, textAlign: 'center' }}>
+                                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, backgroundColor: 'rgba(33, 150, 243, 0.1)', color: colors.accent, padding: '2px 10px', borderRadius: 12 }}>
+                                                    <Clock size={12} />
+                                                    {user.visit_count || 0}
                                                 </div>
                                             </td>
                                         </tr>

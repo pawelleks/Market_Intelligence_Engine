@@ -43,8 +43,10 @@ import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
 // Auth Pages
 import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
-import AdminAllUsersPage from './pages/AdminAllUsersPage';
+
 import AdminDataDashboard from './pages/AdminDataDashboard';
+import VolumeRegimeReport from './pages/VolumeRegimeReport';
+import VolatilityPage from './pages/VolatilityPage';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -499,6 +501,14 @@ function AppContent() {
               element={<ProtectedLayout><VolatilityTermStructurePage /></ProtectedLayout>}
             />
             <Route
+              path="/analysis/volume"
+              element={<ProtectedLayout><VolumeRegimeReport /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/volatility"
+              element={<ProtectedLayout><VolatilityPage /></ProtectedLayout>}
+            />
+            <Route
               path="/analysis/neural/gaf"
               element={<ProtectedLayout><GAFAnalysisPage /></ProtectedLayout>}
             />
@@ -521,7 +531,7 @@ function AppContent() {
             {/* Auth Routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<AdminLayout><AdminPage /></AdminLayout>} />
-            <Route path="/admin/users" element={<AdminLayout><AdminAllUsersPage /></AdminLayout>} />
+
             <Route path="/admin/data" element={<AdminLayout><AdminDataDashboard /></AdminLayout>} />
           </Routes>
         </main>

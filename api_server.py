@@ -35,6 +35,7 @@ from mie_lib.analytics.gex.api_endpoints import router as gex_router
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
 
+from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_volume_conclusion
 # ... (rest of imports are fine, just updating the specific block if needed, but replace_file_content works on blocks)
 # Actually, I'll just update the endpoint and the import line separately or together if they are close.
 # The import is at line 27. The endpoint is at the end.
@@ -81,6 +82,8 @@ from mie_lib.analytics.trend_summary_api import router as trend_sum_router
 app.include_router(trend_sum_router, prefix="/api/v1/analytics/trend", tags=["trend"])
 from mie_lib.analytics.volatility_term_structure_api import router as vts_router
 app.include_router(vts_router)
+from mie_lib.analytics.volatility_api import router as vol_router
+app.include_router(vol_router)
 # --- AUTH ROUTER ---
 from mie_lib.api.routers.auth import router as auth_router
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
@@ -1191,3 +1194,14 @@ def get_latest_audit_log() -> JSONResponse:
         return JSONResponse(content=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read audit log: {e}")
+
+@app.get("/api/v1/analytics/volume/{ticker}")
+def get_volume_regime_analysis(ticker: str) -> JSONResponse:
+    """Returns the Volume Regime Analysis including metrics and text conclusion."""
+    try:
+        metrics = calculate_volume_regime(ticker)
+        # Generate text conclusion
+        metrics["conclusion"] = generate_volume_conclusion(metrics)
+        return JSONResponse(content=metrics)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Volume analysis failed: {e}")

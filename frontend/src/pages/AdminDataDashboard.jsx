@@ -428,30 +428,96 @@ const AdminDataDashboard = () => {
         </div>
     );
 
-    const renderAiContext = () => (
-        <div style={{ marginTop: '20px' }}>
-            <h3 style={{ color: '#aaa', fontSize: '1rem', borderBottom: '1px solid #333', paddingBottom: '5px' }}>Latest AI Context Payload</h3>
-            {!aiContextData ? (
-                <p style={{ color: '#888' }}>No AI context found. Run "generate-ai-context" via CLI or Pipeline.</p>
-            ) : (
-                <div style={{
-                    backgroundColor: '#1e1e1e',
-                    padding: '15px',
-                    borderRadius: '8px',
-                    border: '1px solid #333',
-                    overflowX: 'auto'
-                }}>
+    const renderAiContext = () => {
+        if (!aiContextData) return <p style={{ color: '#888' }}>No AI context found. Run "generate-ai-context" via CLI or Pipeline.</p>;
+
+        const { market_regime, volatility_landscape, liquidity_volume_profile, seasonality_forecast_next_5d, technical_summary } = aiContextData;
+
+        const Card = ({ title, children, color = '#222' }) => (
+            <div style={{ backgroundColor: color, padding: '15px', borderRadius: '8px', flex: '1 1 300px', border: '1px solid #333' }}>
+                <h4 style={{ margin: '0 0 10px 0', borderBottom: '1px solid #444', paddingBottom: '5px', color: '#ccc' }}>{title}</h4>
+                <div style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>{children}</div>
+            </div>
+        );
+
+        const Row = ({ label, value, unit = '' }) => (
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '4px' }}>
+                <span style={{ color: '#888' }}>{label}:</span>
+                <span style={{ fontWeight: 'bold', color: '#ddd' }}>
+                    {value !== null && value !== undefined ? `${value}${unit}` : <span style={{ color: '#555' }}>N/A</span>}
+                </span>
+            </div>
+        );
+
+        return (
+            <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0 }}>AI Context: <span style={{ color: '#2196f3' }}>{aiContextData.ticker}</span></h3>
+                    <span style={{ color: '#888' }}>Date: {aiContextData.analysis_date}</span>
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+                    {/* MARKET REGIME */}
+                    <Card title="🏛️ Market Regime">
+                        <Row label="HMM State" value={market_regime?.hmm_description} />
+                        <Row label="Gamma Regime" value={market_regime?.gamma_landscape?.gamma_regime?.split('(')[0]} />
+                        <Row label="Net GEX" value={(market_regime?.gamma_landscape?.net_gamma_exposure_notional / 1e9)?.toFixed(2)} unit="B" />
+                        <Row label="Call Wall" value={market_regime?.gamma_landscape?.call_wall} />
+                        <Row label="Put Wall" value={market_regime?.gamma_landscape?.put_wall} />
+                    </Card>
+
+                    {/* VOLATILITY */}
+                    <Card title="⚡ Volatility & Risk">
+                        <Row label="ATR (14)" value={volatility_landscape?.atr_14?.toFixed(2)} />
+                        <Row label="ATR Rank (6M)" value={volatility_landscape?.atr_rank_6m?.toFixed(1)} unit="%" />
+                        <Row label="ATR % Price" value={volatility_landscape?.atr_pct_price?.toFixed(2)} unit="%" />
+                        <Row label="Regime" value={volatility_landscape?.volatility_regime} />
+                        <Row label="Desc" value={volatility_landscape?.volatility_description} />
+                        <h5 style={{ margin: '10px 0 5px 0', color: '#aaa' }}>Expected Moves</h5>
+                        <Row label="Day Move" value={volatility_landscape?.day_iv_em} />
+                        <Row label="Week Move" value={volatility_landscape?.week_iv_em} />
+                    </Card>
+
+                    {/* LIQUIDITY */}
+                    <Card title="💧 Liquidity & Volume">
+                        <Row label="Volume Regime" value={liquidity_volume_profile?.volume_regime} />
+                        <Row label="Rel Vol (10d)" value={liquidity_volume_profile?.relative_volume_10d?.toFixed(2)} />
+                        <Row label="Trend Score" value={liquidity_volume_profile?.volume_trend_score} />
+                        <Row label="Buy Pressure" value={liquidity_volume_profile?.buying_pressure_ratio?.toFixed(2)} />
+                    </Card>
+
+                    {/* SEASONALITY */}
+                    <Card title="📅 Seasonality (Next 5d)">
+                        {seasonality_forecast_next_5d?.status === 'ok' ? (
+                            <>
+                                <Row label="Win Rate" value={seasonality_forecast_next_5d?.win_rate} unit="%" />
+                                <Row label="Exp Return" value={seasonality_forecast_next_5d?.avg_return} unit="%" />
+                                <Row label="Trajectory" value={seasonality_forecast_next_5d?.trajectory} />
+                            </>
+                        ) : (
+                            <span style={{ color: '#666' }}>No forecast available</span>
+                        )}
+                    </Card>
+                </div>
+
+                {/* RAW JSON TOGGLE */}
+                <details style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '10px' }}>
+                    <summary style={{ cursor: 'pointer', color: '#888' }}>View Raw JSON</summary>
                     <pre style={{
+                        backgroundColor: '#111',
+                        padding: '15px',
+                        borderRadius: '8px',
                         color: '#ce9178',
-                        fontSize: '0.85rem',
-                        fontFamily: 'Consolas, Monaco, "Andale Mono", monospace'
+                        fontSize: '0.8rem',
+                        overflowX: 'auto',
+                        marginTop: '10px'
                     }}>
                         {JSON.stringify(aiContextData, null, 2)}
                     </pre>
-                </div>
-            )}
-        </div>
-    );
+                </details>
+            </div>
+        );
+    };
 
     return (
         <div style={{ padding: '20px', color: '#d7e3f3', minHeight: '100vh', backgroundColor: '#0b1220' }}>

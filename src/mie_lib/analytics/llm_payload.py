@@ -171,8 +171,12 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
 
     # 6. Handle Expected Moves (Merge if provided)
     if expected_moves_data:
-        # We assume expected_moves_data is already a dict structure
-        payload["volatility_landscape"] = expected_moves_data
+        # Flatten logic: If we have {tickers: {SPY: {...}}}, extract SPY's data
+        if "tickers" in expected_moves_data and ticker in expected_moves_data["tickers"]:
+             payload["volatility_landscape"] = expected_moves_data["tickers"][ticker]
+             # Preserve metadata if needed? for now just the metrics
+        else:
+             payload["volatility_landscape"] = expected_moves_data
 
     # 6.5 Add ATR / Volatility Regime
     if vol_data:

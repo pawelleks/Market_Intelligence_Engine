@@ -164,7 +164,7 @@ const SeasonalityPage = ({ settings, onSettingsChange }) => {
                     <h3 style={{ marginTop: 0 }}>Seasonality vs Actual: {settings.ticker}</h3>
                     {loading && <p style={{ color: '#9ec4ff' }}>Loading data...</p>}
 
-                    {curvesData ? (
+                    {curvesData && curvesData.curves ? (
                         <Plot
                             data={[
                                 // Historical Curves (Ghosts)

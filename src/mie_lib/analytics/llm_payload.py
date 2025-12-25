@@ -60,21 +60,31 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
             except Exception:
                 pass
 
-    # Load Term Structure
-    vts_data = {}
-    vts_path = DATA_DIR / "analytics" / "volatility_term_structure.json"
+
+
+    # Load Term Structure (and extract for ticker/date)
+    vts_dict = {}
     if vts_path.exists():
-        try:
-            import json
-            with open(vts_path, 'r') as f:
-                full_vts = json.load(f)
-            # Find ticker in history
-            # Structure is list of snapshots usually? Or dict?
-            # Assuming standard structure based on file name
-            # If it's a list, find latest for ticker
-            pass 
-        except Exception:
-            pass
+         try:
+             import json
+             with open(vts_path, 'r') as f:
+                 full_vts = json.load(f)
+            # full_vts is likely a dict of date -> {ticker -> { ... }} or just a list of snapshots
+            # Assuming structure: { "data_date": [ {ticker: ..., term_structure: ...} ] } or similar
+            # If flat list of records:
+             if isinstance(full_vts, list):
+                  # find latest for ticker
+                  matches = [x for x in full_vts if x.get('ticker') == ticker]
+                  if matches:
+                       # Sort by date
+                       matches.sort(key=lambda x: x.get('date', ''), reverse=True)
+                       vts_dict = matches[0]
+             elif isinstance(full_vts, dict):
+                 # Maybe keyed by ticker directly?
+                 if ticker in full_vts:
+                     vts_dict = full_vts[ticker]
+         except Exception:
+             pass
 
     # 1. Extract Latest Row
     if df.empty:
@@ -226,9 +236,56 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     # 6. Handle Expected Moves (Merge if provided)
     if expected_moves_data:
         # Flatten logic: If we have {tickers: {SPY: {...}}}, extract SPY's data
+        vol_data_em = None
         if "tickers" in expected_moves_data and ticker in expected_moves_data["tickers"]:
-             payload["volatility_landscape"] = expected_moves_data["tickers"][ticker]
-             # Preserve metadata if needed? for now just the metrics
+             vol_data_em = expected_moves_data["tickers"][ticker]
+        elif "spot_price" in expected_moves_data:
+             vol_data_em = expected_moves_data
+             
+        if vol_data_em:
+            payload["volatility_landscape"] = vol_data_em
+            
+            # --- DERIVE DAY / WEEK / MONTH MOVES ---
+            # Parsing "expirations" dictionary
+            # Expirations: { "YYYY-MM-DD": { "days_to_expiry": N, "em_dollars": X, "em_iv": Y, ... } }
+            exps = vol_data_em.get("expirations", {})
+            if exps:
+                sorted_dates = sorted(exps.keys())
+                
+                # Helper to find closest DTE
+                def find_closest(target_dte):
+                    best_k = None
+                    best_diff = 9999
+                    for d_str in sorted_dates:
+                        info = exps[d_str]
+                        dte = info.get("days_to_expiry", 0)
+                        diff = abs(dte - target_dte)
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_k = d_str
+                    return best_k
+                
+                # Day (~1 DTE or 0 DTE if trade day) - Use closest to 1 for "next day" planning, or 0 if intraday
+                # Actually user usually wants "next session"
+                day_key = find_closest(1)
+                week_key = find_closest(7) # ~1 week
+                month_key = find_closest(30) # ~1 month
+                
+                if day_key:
+                    payload["volatility_landscape"]["day_iv_em"] = exps[day_key].get("em_dollars")
+                    payload["volatility_landscape"]["day_dte"] = exps[day_key].get("days_to_expiry")
+                else: 
+                     payload["volatility_landscape"]["day_iv_em"] = None
+                     
+                if week_key:
+                    payload["volatility_landscape"]["week_iv_em"] = exps[week_key].get("em_dollars")
+                else:
+                    payload["volatility_landscape"]["week_iv_em"] = None
+                    
+                if month_key:
+                    payload["volatility_landscape"]["month_iv_em"] = exps[month_key].get("em_dollars")
+                else:
+                    payload["volatility_landscape"]["month_iv_em"] = None
         else:
              payload["volatility_landscape"] = expected_moves_data
 
@@ -244,7 +301,9 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
             "atr_rank_6m": vol_data.get('atr_rank'),
             "atr_pct_price": vol_data.get('atr_percent'),
             "volatility_regime": vol_data.get('volatility_regime'),
-            "volatility_description": vol_data.get('volatility_desc')
+            "volatility_description": vol_data.get('volatility_desc'),
+            "term_structure_slope": vts_dict.get('slope') if vts_dict else None,
+            "term_structure_regime": vts_dict.get('regime') if vts_dict else None
         })
 
     # 6.6 Add Volume Regime

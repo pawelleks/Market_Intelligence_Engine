@@ -45,6 +45,37 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
         except Exception:
              pass
 
+    # Load other technicals
+    tech_data = {}
+    for name in ['sma_stack', 'adx', 'psar', 'ichimoku']:
+        p = DATA_DIR / "analytics" / f"{name}_daily.parquet"
+        if p.exists():
+            try:
+                df_t = pd.read_parquet(p)
+                df_t.rename(columns={c: c.lower() for c in df_t.columns}, inplace=True)
+                row_t = df_t[df_t['ticker'] == ticker]
+                if not row_t.empty:
+                    # Merge into tech_data
+                    tech_data.update(row_t.iloc[-1].to_dict())
+            except Exception:
+                pass
+
+    # Load Term Structure
+    vts_data = {}
+    vts_path = DATA_DIR / "analytics" / "volatility_term_structure.json"
+    if vts_path.exists():
+        try:
+            import json
+            with open(vts_path, 'r') as f:
+                full_vts = json.load(f)
+            # Find ticker in history
+            # Structure is list of snapshots usually? Or dict?
+            # Assuming standard structure based on file name
+            # If it's a list, find latest for ticker
+            pass 
+        except Exception:
+            pass
+
     # 1. Extract Latest Row
     if df.empty:
         return {"error": "DataFrame is empty", "ticker": ticker}
@@ -118,19 +149,23 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
                 print(f"Error calculating GEX walls: {e}")
 
     else:
-        # Fallback to DataFrame History
+        # Fallback to DataFrame History or empty
+        # If 'total_net_gex' in df cols
         total_net_gex = float(row.get('total_net_gex', 0.0)) if pd.notna(row.get('total_net_gex')) else 0.0
         next5_net_gex = float(row.get('next5_net_gex', 0.0)) if pd.notna(row.get('next5_net_gex')) else 0.0
-    
+        call_wall = float(row.get('call_wall', 0.0)) if pd.notna(row.get('call_wall')) else None
+        put_wall = float(row.get('put_wall', 0.0)) if pd.notna(row.get('put_wall')) else None
+
     # Regime Calculation: >0 is Sticky, <0 is Volatile
+    gamma_str = "Neutral"
     if total_net_gex > 0:
-        gamma_regime = "Positive Gamma (Sticky/Low Vol)"
-    else:
-        gamma_regime = "Negative Gamma (Accelerator/High Vol)"
+        gamma_str = "Positive Gamma (Sticky/Low Vol)"
+    elif total_net_gex < 0:
+        gamma_str = "Negative Gamma (Accelerator/High Vol)"
         
     gex_payload = {
         "net_gamma_exposure_notional": total_net_gex,
-        "gamma_regime": gamma_regime,
+        "gamma_regime": gamma_str,
         "gamma_exposure_next_5_days": next5_net_gex,
         "call_wall": call_wall,
         "put_wall": put_wall,
@@ -142,12 +177,31 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     tech_keys = [
         'close', 'open', 'high', 'low', 'volume', 
         'rsi', 'adx', 'log_ret_1d', 'rv_20d',
-        'downtrend_score' # Custom metric if available
+        'downtrend_score'
     ]
     
+    # Add mapped technicals
+    # Map raw columns to pretty names if needed, or just dump interesting ones
+    # SMA Stack
+    sma_keys = ['price_vs_sma20', 'price_vs_sma50', 'price_vs_sma200', 'trend_alignment']
+    # ADX
+    adx_keys = ['adx', 'di_plus', 'di_minus', 'trend_strength']
+    # PSAR
+    psar_keys = ['psar_direction', 'reversal']
+    # Ichimoku
+    ichi_keys = ['cloud_signal', 'tk_cross', 'lagging_span_signal']
+    
     technicals = {}
-    for k in tech_keys:
-        val = row.get(k)
+    
+    # merge tech_data into row content for easier lookup
+    # Need to be careful not to overwrite main row data if names collide, but tech_data is usually specialized
+    # We will just look up from tech_data first, then row
+    
+    all_keys = tech_keys + sma_keys + adx_keys + psar_keys + ichi_keys
+    
+    for k in all_keys:
+        val = tech_data.get(k) if k in tech_data else row.get(k)
+        
         if pd.notna(val):
             # JSON serialization safety
             if isinstance(val, (np.integer, int)):

@@ -34,6 +34,7 @@ const AdminDataDashboard = () => {
     const [gexData, setGexData] = useState([]);
     const [auditData, setAuditData] = useState(null);
     const [historyData, setHistoryData] = useState([]);
+    const [aiContextData, setAiContextData] = useState(null);
     const [auditLoading, setAuditLoading] = useState(false);
 
     useEffect(() => {
@@ -111,6 +112,7 @@ const AdminDataDashboard = () => {
             fetchData('options', setOptionsData),
             fetchData('em', setEmData),
             fetchData('gex', setGexData),
+            fetchData('ai-context', setAiContextData),
             fetchAudit(),
             fetchHistory()
         ]).finally(() => setLoading(false));
@@ -426,6 +428,31 @@ const AdminDataDashboard = () => {
         </div>
     );
 
+    const renderAiContext = () => (
+        <div style={{ marginTop: '20px' }}>
+            <h3 style={{ color: '#aaa', fontSize: '1rem', borderBottom: '1px solid #333', paddingBottom: '5px' }}>Latest AI Context Payload</h3>
+            {!aiContextData ? (
+                <p style={{ color: '#888' }}>No AI context found. Run "generate-ai-context" via CLI or Pipeline.</p>
+            ) : (
+                <div style={{
+                    backgroundColor: '#1e1e1e',
+                    padding: '15px',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    overflowX: 'auto'
+                }}>
+                    <pre style={{
+                        color: '#ce9178',
+                        fontSize: '0.85rem',
+                        fontFamily: 'Consolas, Monaco, "Andale Mono", monospace'
+                    }}>
+                        {JSON.stringify(aiContextData, null, 2)}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+
     return (
         <div style={{ padding: '20px', color: '#d7e3f3', minHeight: '100vh', backgroundColor: '#0b1220' }}>
             <h1>Admin Data Dashboard</h1>
@@ -507,6 +534,14 @@ const AdminDataDashboard = () => {
                     🔄 Refresh
                 </button>
                 <button
+                    onClick={() => setActiveTab('ai-context')}
+                    style={{
+                        background: activeTab === 'ai-context' ? '#e91e63' : '#222',
+                        color: 'white', border: 'none', padding: '6px 12px', cursor: 'pointer', borderRadius: '4px', fontSize: '0.85rem'
+                    }}>
+                    AI Context
+                </button>
+                <button
                     onClick={triggerPipeline}
                     style={{
                         background: '#2196f3',
@@ -528,6 +563,7 @@ const AdminDataDashboard = () => {
                     {activeTab === 'options' && renderOptionsTable()}
                     {activeTab === 'em' && renderEmTable()}
                     {activeTab === 'gex' && renderGexTable()}
+                    {activeTab === 'ai-context' && renderAiContext()}
                 </div>
             )}
         </div>

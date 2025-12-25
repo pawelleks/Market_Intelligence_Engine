@@ -329,6 +329,7 @@ def handle_start_pipeline_job(args):
     logger.update_stage("PSAR", "PENDING", {})
     logger.update_stage("Seasonality", "PENDING", {})
     logger.update_stage("VolatilityTermStructure", "PENDING", {})
+    logger.update_stage("Volatility", "PENDING", {})
     logger.update_stage("AI Context Generation", "PENDING", {})
     logger.update_stage("Markov Grid", "PENDING", {})
     logger.update_stage("Markov Snapshots", "PENDING", {})

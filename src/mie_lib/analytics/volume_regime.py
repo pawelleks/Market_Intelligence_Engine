@@ -214,7 +214,7 @@ def calculate_and_save_volume_regime():
     """
     Calculates Volume Regime metrics for all tickers and saves daily snapshot.
     """
-    from mie_lib.utils.ticker_service import read_tickers
+    from mie_lib.data_ingest.yfinance_loader import read_tickers
     from mie_lib.utils.paths import ANALYTICS_DIR
     
     tickers = read_tickers()

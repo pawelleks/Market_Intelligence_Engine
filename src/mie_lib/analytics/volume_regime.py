@@ -168,7 +168,9 @@ def calculate_volume_regime(ticker: str, data: pd.DataFrame = None) -> dict:
             "volume_mean_20d": round(volume_mean_20d, 0),
             "current_volume": round(current_volume, 0),
             "price_change_20d": round(price_change_20d, 4),
-            "last_date": str(current_row["date"].date())
+            "last_date": str(current_row["date"].date()),
+            "rel_vol_20": round(current_volume / volume_mean_20d, 2) if volume_mean_20d > 0 else 0,
+            "buy_pressure_ratio": round(current_ratio, 2)
         }
 
     except Exception as e:
@@ -207,6 +209,63 @@ def generate_volume_conclusion(metrics: dict) -> str:
             return f"ℹ️ Neutral: {ticker} volume flow is slightly positive (Ratio: {ratio})."
         else:
             return f"ℹ️ Neutral: {ticker} volume flow is balanced to slightly negative (Ratio: {ratio})."
+
+def calculate_and_save_volume_regime():
+    """
+    Calculates Volume Regime metrics for all tickers and saves daily snapshot.
+    """
+    from mie_lib.utils.ticker_service import read_tickers
+    from mie_lib.utils.paths import ANALYTICS_DIR
+    
+    tickers = read_tickers()
+    results = []
+    
+    ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+    LOG.info(f"Starting Volume Regime Analysis for {len(tickers)} tickers...")
+    
+    score_map = {
+        "Accumulation": 9,
+        "Consolidation": 7,
+        "Neutral": 5,
+        "Distribution": 3,
+        "Capitulation": 1,
+        "Insufficient Data": 0
+    }
+    
+    for ticker in tickers:
+        ticker = ticker.strip().upper()
+        try:
+            metrics = calculate_volume_regime(ticker)
+            if "error" in metrics:
+                continue
+                
+            state = metrics.get("market_state", "Neutral")
+            
+            # Map keys to LLM payload expectations
+            # "volume_regime": market_state
+            # "relative_volume_10d": rel_vol_20 (using 20d as proxy or re-calc)
+            # "volume_trend_score": mapped from state
+            # "buying_pressure_ratio": current_ratio
+            
+            results.append({
+                "ticker": ticker,
+                "date": metrics.get("last_date"),
+                "volume_regime": state,
+                "rel_vol_10": metrics.get("rel_vol_20"), # Using 20d as proxy
+                "vol_trend_score": score_map.get(state, 5),
+                "buy_pressure_ratio": metrics.get("buy_pressure_ratio")
+            })
+            
+        except Exception as e:
+            LOG.error(f"Error processing Volume Regime for {ticker}: {e}")
+            
+    if results:
+        df_out = pd.DataFrame(results)
+        out_path = ANALYTICS_DIR / "volume_daily.parquet"
+        df_out.to_parquet(out_path, index=False)
+        LOG.info(f"Saved Volume Regime data to {out_path} ({len(df_out)} records)")
+    else:
+        LOG.warning("No Volume Regime results generated.")
 
 if __name__ == "__main__":
     # Test block

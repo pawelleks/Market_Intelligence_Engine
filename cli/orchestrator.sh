@@ -123,9 +123,15 @@ log "Running build-gaf-daily..."
 python -m mie_lib.cli.mie build-gaf-daily >> "${LOG_FILE}" 2>&1
 log "build-gaf-daily completed."
 
-# 12. AI Context Generation
-log "Running generate-ai-context..."
-python -m mie_lib.cli.mie generate-ai-context --ticker SPY >> "${LOG_FILE}" 2>&1
+# 8d. Volume Regime
+log_step "Volume Regime"
+run_cmd "python -m mie_lib.cli.mie update-volume-regime" "Volume Regime"
+
+# 9. AI Context Generation
+log_step "AI Context Generation"
+# Generate logic needs a ticker, let's stick to SPY for now or iterate config
+# For now, default to SPY as the primary context
+run_cmd "python -m mie_lib.cli.mie generate-ai-context --ticker SPY" "AI Context Generation"
 log "generate-ai-context completed."
 
 # 13. Finalize Status

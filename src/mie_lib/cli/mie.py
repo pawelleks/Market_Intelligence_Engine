@@ -269,13 +269,31 @@ def handle_update_adx(args):
 
 def handle_update_volatility(args):
     """Handle update-volatility command."""
-    from mie_lib.analytics.volatility import calculate_and_save_volatility
     from mie_lib.services.audit_logger import get_audit_logger
     get_audit_logger().update_stage("Volatility", "RUNNING", {})
-    LOG.info("Running update-volatility...")
-    calculate_and_save_volatility()
-    LOG.info("update-volatility completed.")
-    get_audit_logger().update_stage("Volatility", "COMPLETED", {})
+    try:
+        from mie_lib.analytics.volatility import calculate_and_save_volatility
+        LOG.info("Running update-volatility...")
+        calculate_and_save_volatility()
+        LOG.info("update-volatility completed.")
+        get_audit_logger().update_stage("Volatility", "COMPLETED", {})
+    except Exception as e:
+        LOG.error(f"Error calculating volatility: {e}")
+        get_audit_logger().update_stage("Volatility", "FAILED", {"error": str(e)})
+
+def handle_update_volume_regime(args):
+    """Handle update-volume-regime command."""
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Volume Regime", "RUNNING", {})
+    try:
+        from mie_lib.analytics.volume_regime import calculate_and_save_volume_regime
+        LOG.info("Running update-volume-regime...")
+        calculate_and_save_volume_regime()
+        LOG.info("update-volume-regime completed.")
+        get_audit_logger().update_stage("Volume Regime", "COMPLETED", {})
+    except Exception as e:
+        LOG.error(f"Error calculating volume regime: {e}")
+        get_audit_logger().update_stage("Volume Regime", "FAILED", {"error": str(e)})
 
 
 def handle_update_ichimoku(args):
@@ -330,6 +348,7 @@ def handle_start_pipeline_job(args):
     logger.update_stage("Seasonality", "PENDING", {})
     logger.update_stage("VolatilityTermStructure", "PENDING", {})
     logger.update_stage("Volatility", "PENDING", {})
+    logger.update_stage("Volume Regime", "PENDING", {})
     logger.update_stage("AI Context Generation", "PENDING", {})
     logger.update_stage("Markov Grid", "PENDING", {})
     logger.update_stage("Markov Snapshots", "PENDING", {})
@@ -1336,6 +1355,10 @@ def build_parser():
     # update-volatility
     p_vol = sub.add_parser("update-volatility", help="Calculate and save daily Volatility (ATR) status")
     p_vol.set_defaults(func=handle_update_volatility)
+    
+    # --- Volume Regime (New) ---
+    p_vol_regime = sub.add_parser("update-volume-regime", help="Calculate and save daily Volume Regime status")
+    p_vol_regime.set_defaults(func=handle_update_volume_regime)
     
     # --- PSAR (New) ---
     p_psar = sub.add_parser("update-psar", help="Calculate and save daily PSAR metrics")
@@ -2509,8 +2532,8 @@ def main(argv=None):
         run_inference_latest(ticker=ticker)
         sys.exit(0)
     elif args.command == "analyze-expected-moves-reliability":
-        from mie_lib.analytics.expected_moves.reliability_processor import process_reliability
         print("Running Expected Moves Reliability Analysis...")
+        from mie_lib.analytics.expected_moves.reliability_processor import process_reliability
         process_reliability()
         sys.exit(0)
     elif args.command == "generate-ai-context":
@@ -2627,7 +2650,11 @@ def main(argv=None):
         get_audit_logger().update_stage(stage, status, meta)
         print(f"Audit Stage '{stage}' updated to '{status}'")
         sys.exit(0)
-        print(f"Audit Stage '{stage}' updated to '{status}'")
+    elif args.command == "update-volatility":
+        handle_update_volatility(args)
+        sys.exit(0)
+    elif args.command == "update-volume-regime":
+        handle_update_volume_regime(args)
         sys.exit(0)
     elif args.command == "finish-pipeline-job":
         handle_finish_pipeline_job(args)

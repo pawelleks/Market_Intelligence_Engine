@@ -246,14 +246,24 @@ def _grid_log_append(msg: str):
 # ---------------- Feature build handler (refactored) -----------------
 
 def handle_update_sma_stack(args):
-    """Handle update-sma-stack command."""
-    from mie_lib.analytics.sma_stack import calculate_and_save_sma_stack
+    """
+    Handle update-sma-stack command.
+    Uses PARALLEL pipeline with ThreadPoolExecutor.
+    """
+    from mie_lib.analytics.tech_indicators_pipeline import run_sma_stack_parallel
     from mie_lib.services.audit_logger import get_audit_logger
+    
     get_audit_logger().update_stage("SMA/EMA Stack", "RUNNING", {})
-    LOG.info("Running update-sma-stack...")
-    calculate_and_save_sma_stack()
-    LOG.info("update-sma-stack completed.")
-    get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {})
+    LOG.info("Running update-sma-stack (parallel)...")
+    
+    workers = getattr(args, "workers", 10)
+    result = run_sma_stack_parallel(max_workers=workers)
+    
+    LOG.info(f"update-sma-stack completed: {result.get('success', 0)}/{result.get('processed', 0)}")
+    get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {
+        "processed": result.get("processed", 0),
+        "success": result.get("success", 0)
+    })
 
 
 def handle_update_adx(args):

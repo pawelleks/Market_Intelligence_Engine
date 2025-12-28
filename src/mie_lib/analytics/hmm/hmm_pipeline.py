@@ -193,6 +193,34 @@ def run_hmm_daily_parallel(
     return results
 
 
+
+def _run_single_backtest_task(ticker: str) -> Tuple[str, bool, str]:
+    """
+    Run backtest for a single ticker. 
+    Top-level function for ProcessPoolExecutor picklability.
+    """
+    try:
+        # Check cache
+        from mie_lib.utils.paths import DATA_DIR
+        out_file = DATA_DIR / "analytics" / "hmm" / f"backtest_results_{ticker}.json"
+        
+        # Simple cache check: if exists and > 0 size
+        if out_file.exists() and out_file.stat().st_size > 0:
+            # We could check timestamp here vs data, but for now existence implies done for this run cycle
+            # LOG.info(f"Skipping backtest for {ticker}, already exists.")
+            return (ticker, True, "cached")
+
+        from mie_lib.analytics.hmm.backtest_engine import HMMBacktester
+        
+        engine = HMMBacktester(ticker=ticker)
+        engine.run_grid_search()
+        return (ticker, True, None)
+        
+    except Exception as e:
+        LOG.error(f"Backtest failed for {ticker}: {e}")
+        return (ticker, False, str(e))
+
+
 def run_backtest_hmm_parallel(
     tickers: List[str],
     max_workers: int = 6
@@ -200,55 +228,52 @@ def run_backtest_hmm_parallel(
     """
     Parallel HMM Backtest pipeline.
     
-    Runs grid search backtesting for each ticker in parallel.
+    Runs grid search backtesting for each ticker in parallel using ProcessPoolExecutor.
+    (CPU-bound task benefits from separate processes).
     
     Args:
         tickers: List of tickers to backtest
-        max_workers: Thread pool size (lower default due to CPU intensity)
+        max_workers: Process pool size
         
     Returns:
         Dict with results and statistics
     """
-    LOG.info(f"Starting parallel HMM Backtest: {len(tickers)} tickers, {max_workers} workers")
+    from concurrent.futures import ProcessPoolExecutor
     
-    def _backtest_ticker(ticker: str) -> Tuple[str, bool, str]:
-        try:
-            from mie_lib.analytics.hmm.backtest_engine import HMMBacktester
-            
-            engine = HMMBacktester(ticker=ticker)
-            engine.run_grid_search()
-            return (ticker, True, None)
-            
-        except Exception as e:
-            LOG.error(f"Backtest failed for {ticker}: {e}")
-            return (ticker, False, str(e))
+    LOG.info(f"Starting parallel HMM Backtest (ProcessPool): {len(tickers)} tickers, {max_workers} worker processes")
     
     results = {
         "processed": 0,
         "success": 0,
-        "failed": 0
+        "failed": 0,
+        "cached": 0
     }
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Use ProcessPoolExecutor for CPU-bound backtesting
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_ticker = {
-            executor.submit(_backtest_ticker, ticker): ticker
+            executor.submit(_run_single_backtest_task, ticker): ticker
             for ticker in tickers
         }
         
         for future in as_completed(future_to_ticker):
             ticker = future_to_ticker[future]
             try:
-                t, success, error = future.result(timeout=600)  # 10 min timeout
+                t, success, error = future.result(timeout=1200)  # 20 min timeout per ticker
                 results["processed"] += 1
+                
                 if success:
                     results["success"] += 1
+                    if error == "cached":
+                        results["cached"] += 1
                 else:
                     results["failed"] += 1
+                    
             except Exception as e:
-                LOG.error(f"Backtest exception for {ticker}: {e}")
+                LOG.error(f"Backtest process exception for {ticker}: {e}")
                 results["processed"] += 1
                 results["failed"] += 1
     
-    LOG.info(f"HMM Backtest complete: {results['success']}/{results['processed']} succeeded")
+    LOG.info(f"HMM Backtest complete: {results['success']}/{results['processed']} succeeded ({results['cached']} cached)")
     
     return results

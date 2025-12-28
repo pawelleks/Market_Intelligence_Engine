@@ -56,6 +56,7 @@ export const NAV_DATA = {
                 { label: 'Expected Moves', to: '/analysis/expected-moves', icon: Target },
                 { label: 'EM Reliability', to: '/analysis/reliability', icon: ShieldCheck },
                 { label: 'Gamma Exposure (GEX)', to: '/analysis/gex', icon: Layers },
+                { label: 'Option Skew & PCR', to: '/analysis/skew', icon: Activity },
                 { label: 'Volatility Term Structure', to: '/analysis/volatility-term-structure', icon: Activity },
                 { label: 'Seasonality & Time', to: '/market/seasonality', icon: Calendar },
             ]

@@ -39,6 +39,7 @@ import PsarReport from './components/PsarReport';
 import IchimokuReport from './components/IchimokuReport';
 import TrendMatrix from './components/TrendMatrix';
 import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
+import SkewAnalysisPage from './pages/SkewAnalysisPage';
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -499,6 +500,10 @@ function AppContent() {
             <Route
               path="/analysis/volatility-term-structure"
               element={<ProtectedLayout><VolatilityTermStructurePage /></ProtectedLayout>}
+            />
+            <Route
+              path="/analysis/skew"
+              element={<ProtectedLayout><SkewAnalysisPage /></ProtectedLayout>}
             />
             <Route
               path="/analysis/volume"

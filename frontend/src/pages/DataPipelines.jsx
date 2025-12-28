@@ -142,6 +142,7 @@ const DataPipelines = () => {
             "build-features": "Features: Update",
             "rebuild-features": "Features: Rebuild All",
             "build-gex": "Analytics: Build GEX (Gamma Exposure)",
+            "build-skew-daily": "Analytics: Option Skew & PCR",
             "update-expected-moves": "Analytics: Exp. Moves",
             "build-hmm": "Analytics: Build HMM",
             "build-minervini": "Analytics: Minervini",

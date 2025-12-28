@@ -361,6 +361,7 @@ def handle_start_pipeline_job(args):
     logger.update_stage("GAF", "PENDING", {})
     
     # Phase 4: Data Publishing (Renamed from Snapshots)
+    logger.update_stage("Skew & PCR", "PENDING", {})
     logger.update_stage("Publish Analytics Data", "PENDING", {})
     
     print("Audit Log initialized with stages.")
@@ -1669,9 +1670,16 @@ def build_parser():
 
     p_start.set_defaults(func=handle_start_pipeline_job)
 
+
     p_finish = sub.add_parser("finish-pipeline-job", help="Finalize the audit log for the current job")
     p_finish.add_argument("--status", default="COMPLETED")
     p_finish.set_defaults(func=handle_finish_pipeline_job)
+
+    # NEW SKEW COMMAND
+    p_skew = sub.add_parser("build-skew-daily", help="Calculate Option Skew & PCR")
+    p_skew.add_argument("--tickers", help="Comma separated or @config")
+    p_skew.add_argument("--date", help="YYYY-MM-DD")
+    p_skew.set_defaults(func=handle_build_skew_daily)
 
     return parser
 
@@ -2662,9 +2670,66 @@ def main(argv=None):
     elif args.command == "start-pipeline-job":
         handle_start_pipeline_job(args)
         sys.exit(0)
+    elif args.command == "build-skew-daily":
+        handle_build_skew_daily(args)
+        sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)
+
+def handle_build_skew_daily(args):
+    """
+    Handle build-skew-daily command.
+    Calculates PCR and Skew for the given date (default: today).
+    """
+    from mie_lib.services.audit_logger import get_audit_logger
+    from mie_lib.analytics.skew.skew_engine import SkewEngine
+    from datetime import date
+    import logging
+    
+    LOG = logging.getLogger(__name__)
+
+    get_audit_logger().update_stage("Skew & PCR", "RUNNING", {})
+    LOG.info("Running build-skew-daily...")
+    
+    try:
+        engine = SkewEngine()
+        ticker_arg = getattr(args, "tickers", "@config")
+        date_arg = getattr(args, "date", None)
+        
+        target_date = date_arg if date_arg else str(date.today())
+        
+         # Resolve tickers
+        tickers = []
+        if ticker_arg == "@config":
+            # Use 'skew' scope or core tickers
+            tickers = _load_scope_tickers("Skew")
+            if not tickers:
+                tickers = _load_yaml_tickers() # Assuming _load_yaml_tickers exists and is accessible
+        elif ticker_arg:
+             tickers = [t.strip().upper() for t in ticker_arg.split(",") if t.strip()]
+        
+        if not tickers:
+            tickers = ["SPY", "QQQ", "IWM", "DIA"] # Default fallback per user request context
+            
+        LOG.info(f"Target Tickers: {tickers}, Date: {target_date}")
+            
+        success_count = 0
+        for ticker in tickers:
+            try:
+                # Engine handles calculation and saving
+                result = engine.calculate_skew_and_pcr_for_date(ticker, target_date)
+                if result:
+                    success_count += 1
+            except Exception as e:
+                LOG.error(f"Failed Skew calc for {ticker}: {e}")
+                
+        LOG.info(f"build-skew-daily completed. Processed {success_count}/{len(tickers)}.")
+        get_audit_logger().update_stage("Skew & PCR", "COMPLETED", {"processed": success_count})
+        
+    except Exception as e:
+        LOG.error(f"Error in build-skew-daily: {e}")
+        get_audit_logger().update_stage("Skew & PCR", "FAILED", {"error": str(e)})
 
 if __name__ == "__main__":
     # Execute CLI when run as a script

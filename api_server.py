@@ -32,6 +32,7 @@ from mie_lib.analytics.downtrend_engine import compute_downtrend_score_latest, c
 from mie_lib.data_ingest.data_aligner import fetch_and_align_dcs_assets
 from mie_lib.analytics.expected_moves.api_endpoints import router as reliability_router
 from mie_lib.analytics.gex.api_endpoints import router as gex_router
+from mie_lib.analytics.skew.api_endpoints import router as skew_router
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -58,6 +59,7 @@ app = FastAPI(
 # Include Routers
 app.include_router(reliability_router)
 app.include_router(gex_router)
+app.include_router(skew_router)
 from mie_lib.analytics.scanner.api_endpoints import router as minervini_router
 app.include_router(minervini_router)
 from mie_lib.analytics.gaf.api_endpoints import router as gaf_router

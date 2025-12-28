@@ -35,7 +35,7 @@ def get_ohlc_status() -> Dict[str, Any]:
             pass # corrupted registry, ignore
 
     # 2. Add fallback for tickers present in RAW_DIR but not in registry
-    # Scan raw dir for *.parquet
+    # Scan raw dir for *.parquet (OHLC data only)
     try:
          for p in Path("data/raw").glob("*.parquet"):
              ticker = p.stem.upper()
@@ -55,27 +55,44 @@ def get_ohlc_status() -> Dict[str, Any]:
     try:
         results = []
         for ticker, info in data.items():
-            # Check Features status
-            feat_path = FEATURES_DIR / f"{ticker}.parquet"
-            has_features = feat_path.exists()
-            features_updated = None
-            if has_features:
-                features_updated = datetime.fromtimestamp(feat_path.stat().st_mtime, timezone.utc).isoformat()
-            
             results.append({
                 "ticker": ticker,
                 "rows": info.get("rows", 0),
                 "data_range": info.get("data_range", []),
                 "last_update": info.get("last_update_timestamp"),
                 "source": info.get("source", "unknown"),
-                "has_features": has_features,
-                "features_updated": features_updated
             })
             
-        return {"status": "ok", "data": results}
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
         
     except Exception as e:
         return {"status": "error", "error": str(e), "data": []}
+
+
+@router.get("/features")
+def get_features_status() -> Dict[str, Any]:
+    """
+    Returns status of Features data.
+    Scans data/features/*.parquet
+    """
+    if not FEATURES_DIR.exists():
+        return {"status": "no_dir", "data": []}
+
+    try:
+        results = []
+        for p in FEATURES_DIR.glob("*.parquet"):
+            ticker = p.stem.upper()
+            stat = p.stat()
+            results.append({
+                "ticker": ticker,
+                "has_features": True,
+                "size_bytes": stat.st_size,
+                "last_updated": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            })
+            
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
 
 @router.get("/em")
 def get_em_status() -> Dict[str, Any]:
@@ -106,33 +123,40 @@ def get_em_status() -> Dict[str, Any]:
 @router.get("/options")
 def get_options_status() -> Dict[str, Any]:
     """
-    Returns status of Raw Options data.
-    Scans data/raw/options/{TICKER}
+    Returns status of Raw Options data from Massive flat files.
+    Scans data/raw/massive/options/*.csv or *.parquet
     """
-    raw_opts_dir = Path("data/raw/options")
-    if not raw_opts_dir.exists():
-        # Fallback to check if no subdir exists but maybe files?
-        # But logically structure is data/raw/options/ticker/
-        return {"status": "no_dir", "data": []}
+    massive_opts_dir = Path("data/raw/massive/options")
+    
+    # Also check for individual CSV files if directory structure differs
+    if not massive_opts_dir.exists():
+        massive_opts_dir = Path("data/raw/massive")
+    
+    if not massive_opts_dir.exists():
+        return {"status": "no_dir", "message": "Massive options directory not found", "data": []}
 
     try:
-        ticker_dirs = [d for d in raw_opts_dir.iterdir() if d.is_dir()]
+        # Scan for CSV and Parquet files (Massive flat files)
+        files = list(massive_opts_dir.glob("*.csv")) + list(massive_opts_dir.glob("*.parquet"))
+        
+        if not files:
+            # Check subdirectories
+            files = list(massive_opts_dir.glob("**/*.csv")) + list(massive_opts_dir.glob("**/*.parquet"))
+        
         results = []
-        for d in ticker_dirs:
-            ticker = d.name.upper()
-            files = list(d.glob("*"))
-            last_mod = max([f.stat().st_mtime for f in files]) if files else d.stat().st_mtime
-            
+        for f in sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)[:50]:  # Last 50 files
+            stat = f.stat()
             results.append({
-                "ticker": ticker,
-                "has_data": len(files) > 0,
-                "file_count": len(files),
-                "last_modified": datetime.fromtimestamp(last_mod, tz=timezone.utc).isoformat()
+                "filename": f.name,
+                "path": str(f.relative_to(Path("data"))),
+                "size_bytes": stat.st_size,
+                "size_mb": round(stat.st_size / (1024*1024), 2),
+                "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             })
             
-        return {"status": "ok", "data": sorted(results, key=lambda x: x['ticker'])}
+        return {"status": "ok", "count": len(files), "data": results}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e), "data": []}
 
 @router.get("/gex")
 def get_gex_status() -> Dict[str, Any]:

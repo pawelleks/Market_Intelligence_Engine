@@ -29,6 +29,7 @@ const AdminDataDashboard = () => {
     const [activeTab, setActiveTab] = useState('audit');
     const [loading, setLoading] = useState(false);
     const [ohlcData, setOhlcData] = useState([]);
+    const [featuresData, setFeaturesData] = useState([]);
     const [optionsData, setOptionsData] = useState([]);
     const [emData, setEmData] = useState([]);
     const [gexData, setGexData] = useState([]);
@@ -109,6 +110,7 @@ const AdminDataDashboard = () => {
         // Trigger all
         Promise.all([
             fetchData('ohlc', setOhlcData),
+            fetchData('features', setFeaturesData),
             fetchData('options', setOptionsData),
             fetchData('em', setEmData),
             fetchData('gex', setGexData),
@@ -288,19 +290,21 @@ const AdminDataDashboard = () => {
             <thead>
                 <tr style={{ borderBottom: '1px solid #444', textAlign: 'left', color: '#888' }}>
                     <th style={{ padding: '6px' }}>Ticker</th>
-                    <th style={{ padding: '6px' }}>Features Status</th>
+                    <th style={{ padding: '6px' }}>Status</th>
+                    <th style={{ padding: '6px' }}>Size</th>
                     <th style={{ padding: '6px' }}>Last Updated</th>
                 </tr>
             </thead>
             <tbody>
-                {ohlcData.map((row) => (
+                {featuresData.map((row) => (
                     <tr key={row.ticker} style={{ borderBottom: '1px solid #222' }}>
                         <td style={{ padding: '6px', fontWeight: 'bold', color: '#009688' }}>{row.ticker}</td>
-                        <td style={{ padding: '6px', color: row.has_features ? '#4caf50' : '#f44336' }}>
-                            {row.has_features ? '✅ Built' : '❌ Missing'}
+                        <td style={{ padding: '6px', color: '#4caf50' }}>✅ Built</td>
+                        <td style={{ padding: '6px', color: '#aaa' }}>
+                            {row.size_bytes ? `${(row.size_bytes / 1024).toFixed(1)} KB` : '-'}
                         </td>
                         <td style={{ padding: '6px', color: '#aaa' }}>
-                            {row.features_updated ? new Date(row.features_updated).toLocaleString() : '-'}
+                            {row.last_updated ? new Date(row.last_updated).toLocaleString() : '-'}
                         </td>
                     </tr>
                 ))}
@@ -312,23 +316,27 @@ const AdminDataDashboard = () => {
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px', fontSize: '0.85rem' }}>
             <thead>
                 <tr style={{ borderBottom: '1px solid #444', textAlign: 'left' }}>
-                    <th style={{ padding: '10px' }}>Ticker</th>
-                    <th style={{ padding: '10px' }}>Raw Data</th>
-                    <th style={{ padding: '10px' }}>Files Count</th>
+                    <th style={{ padding: '10px' }}>Filename</th>
+                    <th style={{ padding: '10px' }}>Size (MB)</th>
                     <th style={{ padding: '10px' }}>Last Modified (UTC)</th>
                 </tr>
             </thead>
             <tbody>
-                {optionsData.map((row) => (
-                    <tr key={row.ticker} style={{ borderBottom: '1px solid #222' }}>
-                        <td style={{ padding: '10px', fontWeight: 'bold', color: '#2196f3' }}>{row.ticker}</td>
-                        <td style={{ padding: '10px', color: row.has_data ? '#4caf50' : '#f44336' }}>
-                            {row.has_data ? '✅ Available' : '❌ Missing'}
+                {optionsData.length === 0 ? (
+                    <tr>
+                        <td colSpan="3" style={{ padding: '20px', color: '#888', textAlign: 'center' }}>
+                            No Massive flat files found. Run Download Daily Options step to fetch data.
                         </td>
-                        <td style={{ padding: '10px' }}>{row.file_count}</td>
-                        <td style={{ padding: '10px' }}>{row.last_modified ? new Date(row.last_modified).toLocaleString() : '-'}</td>
                     </tr>
-                ))}
+                ) : (
+                    optionsData.map((row, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #222' }}>
+                            <td style={{ padding: '10px', fontWeight: 'bold', color: '#2196f3' }}>{row.filename}</td>
+                            <td style={{ padding: '10px' }}>{row.size_mb} MB</td>
+                            <td style={{ padding: '10px' }}>{row.last_modified ? new Date(row.last_modified).toLocaleString() : '-'}</td>
+                        </tr>
+                    ))
+                )}
             </tbody>
         </table>
     );

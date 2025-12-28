@@ -396,13 +396,14 @@ const GammaExposurePage = () => {
                                     ];
 
                                     return horizons.map(h => {
-                                        // Calculate Walls Logic Per Horizon (Inline or Helper)
-                                        // We iterate the profile to find max Call and min Put for THIS horizon
-                                        let maxCallGex = -1;
-                                        let maxCallStrike = 0;
-                                        let minPutGex = 1; // Put GEX is negative
-                                        let minPutStrike = 0;
+                                        // 1. Get Date Label
+                                        let dateLabel = '';
+                                        if (data.group_dates && data.group_dates[h.key]) {
+                                            // Format YYYY-MM-DD to cleaner format if needed, or just use as is
+                                            dateLabel = ` (${data.group_dates[h.key]})`;
+                                        }
 
+                                        // 2. Variable Keys
                                         // Column mapping based on horizon
                                         const callKey = h.key === 'next5' ? 'next5_call_gex' :
                                             h.key === 'next30' ? 'next30_call_gex' :
@@ -410,6 +411,9 @@ const GammaExposurePage = () => {
                                         const putKey = h.key === 'next5' ? 'next5_put_gex' :
                                             h.key === 'next30' ? 'next30_put_gex' :
                                                 `${h.key}_put_gex`;
+                                        const netKey = h.key === 'next5' ? 'next5_net_gex' :
+                                            h.key === 'next30' ? 'next30_net_gex' :
+                                                `${h.key}_net_gex`;
 
                                         // Fallback keys for legacy data
                                         const callKeyLegacy = h.key === 'eow' ? 'weekly_call_gex' :
@@ -418,32 +422,98 @@ const GammaExposurePage = () => {
                                         const putKeyLegacy = h.key === 'eow' ? 'weekly_put_gex' :
                                             h.key === 'eom' ? 'monthly_put_gex' :
                                                 h.key === 'eoq' ? 'quarterly_put_gex' : putKey;
+                                        const netKeyLegacy = h.key === 'eow' ? 'weekly_net_gex' :
+                                            h.key === 'eom' ? 'monthly_net_gex' :
+                                                h.key === 'eoq' ? 'quarterly_net_gex' : netKey;
 
-                                        data.profile.forEach(p => {
+
+                                        // 3. Find Walls
+                                        let maxCallGex = -1;
+                                        let maxCallStrike = 0;
+                                        let minPutGex = 1; // Put GEX is negative
+                                        let minPutStrike = 0;
+
+                                        // For Zero GEX Calculation
+                                        let zeroGexLevel = null;
+                                        let minFlipDist = Infinity;
+                                        const spot = data.spot_price || 0;
+
+                                        // Retrieve sorted profile for linear scan (Zero GEX)
+                                        // Assuming data.profile is sorted by strike ascending (GEXEngine usually does this)
+                                        const sortedProfile = [...data.profile].sort((a, b) => a.strike - b.strike);
+
+                                        // Track previous net gex for sign flip check
+                                        let prevNetGex = null;
+                                        let prevStrike = null;
+
+                                        sortedProfile.forEach(p => {
                                             const cVol = p[callKey] || p[callKeyLegacy] || 0;
                                             const pVol = p[putKey] || p[putKeyLegacy] || 0;
+                                            const nVol = p[netKey] || p[netKeyLegacy] || (cVol + pVol);
 
+                                            // Max Call
                                             if (cVol > maxCallGex) {
                                                 maxCallGex = cVol;
                                                 maxCallStrike = p.strike;
                                             }
-                                            // Put GEX is usually negative, we want the "Largest Negative" (Scanning for min)
+                                            // Min Put (Max Magnitude Negative)
                                             if (pVol < minPutGex) {
                                                 minPutGex = pVol;
                                                 minPutStrike = p.strike;
                                             }
+
+                                            // Zero GEX Check (Sign Flip)
+                                            if (prevNetGex !== null) {
+                                                if ((prevNetGex > 0 && nVol < 0) || (prevNetGex < 0 && nVol > 0)) {
+                                                    // Flip detected between prevStrike and current p.strike
+                                                    // Determine which is closer to the true zero (linear interpolation or just pick closer value)
+                                                    // Simple: Pick the one with smaller absolute GEX? Or just interpolation?
+                                                    // Let's use the strike closest to Spot if we have multiple flips?
+                                                    // Or usually we report the strike where the regime changes. 
+                                                    // Let's take the midpoint or the one closer to zero GEX value.
+
+                                                    // But we want the MAJOR flip. 
+                                                    // Let's record this candidate.
+                                                    const flipStrike = (Math.abs(nVol) < Math.abs(prevNetGex)) ? p.strike : prevStrike;
+
+                                                    // Distance to spot
+                                                    const dist = Math.abs(flipStrike - spot);
+
+                                                    // We prioritize the flip closest to SPOT Price as the "Active" zero gamma level
+                                                    if (dist < minFlipDist) {
+                                                        minFlipDist = dist;
+                                                        zeroGexLevel = flipStrike;
+                                                    }
+                                                }
+                                            }
+
+                                            // Handle exact zero (rare)
+                                            if (nVol === 0 && prevNetGex !== 0) {
+                                                const dist = Math.abs(p.strike - spot);
+                                                if (dist < minFlipDist) {
+                                                    minFlipDist = dist;
+                                                    zeroGexLevel = p.strike;
+                                                }
+                                            }
+
+                                            prevNetGex = nVol;
+                                            prevStrike = p.strike;
                                         });
 
                                         if (maxCallGex === -1 && minPutGex === 1) return null; // No data for this timeframe
 
                                         return (
                                             <tr key={h.key} style={{ borderBottom: '1px solid #222' }}>
-                                                <td style={{ padding: '10px', fontWeight: 'bold' }}>{h.label}</td>
+                                                <td style={{ padding: '10px', fontWeight: 'bold' }}>
+                                                    {h.label}<span style={{ fontSize: '12px', color: '#666', fontWeight: 'normal' }}>{dateLabel}</span>
+                                                </td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>${maxCallStrike}</td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace' }}>${maxCallGex.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>${minPutStrike}</td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace' }}>${minPutGex.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                                                <td style={{ padding: '10px', textAlign: 'right', color: '#666' }}>-</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', color: '#2196f3', fontWeight: 'bold' }}>
+                                                    {zeroGexLevel ? `$${zeroGexLevel}` : '-'}
+                                                </td>
                                             </tr>
                                         );
                                     });

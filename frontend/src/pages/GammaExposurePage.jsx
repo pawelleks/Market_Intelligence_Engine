@@ -369,6 +369,91 @@ const GammaExposurePage = () => {
                 </div>
             </div>
 
+            {/* NEW: GEX WALLS SUMMARY TABLE */}
+            {!loading && data && data.profile && (
+                <div style={{ marginBottom: '20px', backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
+                    <h3 style={{ marginTop: 0, marginBottom: '15px', color: '#e0e0e0' }}>Key Gamma Walls by Timeframe</h3>
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', color: '#e0e0e0' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid #333' }}>
+                                    <th style={{ padding: '10px', textAlign: 'left', color: '#888' }}>Timeframe</th>
+                                    <th style={{ padding: '10px', textAlign: 'right', color: '#4caf50' }}>Call Wall (Strike)</th>
+                                    <th style={{ padding: '10px', textAlign: 'right', color: '#4caf50' }}>Call GEX ($)</th>
+                                    <th style={{ padding: '10px', textAlign: 'right', color: '#f44336' }}>Put Wall (Strike)</th>
+                                    <th style={{ padding: '10px', textAlign: 'right', color: '#f44336' }}>Put GEX ($)</th>
+                                    <th style={{ padding: '10px', textAlign: 'right', color: '#2196f3' }}>Zero GEX</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(() => {
+                                    const horizons = [
+                                        { key: 'eow', label: 'EOW' },
+                                        { key: 'eom', label: 'EOM' },
+                                        { key: 'eoq', label: 'EOQ' },
+                                        { key: 'next5', label: '+5 Days' },
+                                        { key: 'next30', label: '+30 Days' },
+                                    ];
+
+                                    return horizons.map(h => {
+                                        // Calculate Walls Logic Per Horizon (Inline or Helper)
+                                        // We iterate the profile to find max Call and min Put for THIS horizon
+                                        let maxCallGex = -1;
+                                        let maxCallStrike = 0;
+                                        let minPutGex = 1; // Put GEX is negative
+                                        let minPutStrike = 0;
+
+                                        // Column mapping based on horizon
+                                        const callKey = h.key === 'next5' ? 'next5_call_gex' :
+                                            h.key === 'next30' ? 'next30_call_gex' :
+                                                `${h.key}_call_gex`;
+                                        const putKey = h.key === 'next5' ? 'next5_put_gex' :
+                                            h.key === 'next30' ? 'next30_put_gex' :
+                                                `${h.key}_put_gex`;
+
+                                        // Fallback keys for legacy data
+                                        const callKeyLegacy = h.key === 'eow' ? 'weekly_call_gex' :
+                                            h.key === 'eom' ? 'monthly_call_gex' :
+                                                h.key === 'eoq' ? 'quarterly_call_gex' : callKey;
+                                        const putKeyLegacy = h.key === 'eow' ? 'weekly_put_gex' :
+                                            h.key === 'eom' ? 'monthly_put_gex' :
+                                                h.key === 'eoq' ? 'quarterly_put_gex' : putKey;
+
+                                        data.profile.forEach(p => {
+                                            const cVol = p[callKey] || p[callKeyLegacy] || 0;
+                                            const pVol = p[putKey] || p[putKeyLegacy] || 0;
+
+                                            if (cVol > maxCallGex) {
+                                                maxCallGex = cVol;
+                                                maxCallStrike = p.strike;
+                                            }
+                                            // Put GEX is usually negative, we want the "Largest Negative" (Scanning for min)
+                                            if (pVol < minPutGex) {
+                                                minPutGex = pVol;
+                                                minPutStrike = p.strike;
+                                            }
+                                        });
+
+                                        if (maxCallGex === -1 && minPutGex === 1) return null; // No data for this timeframe
+
+                                        return (
+                                            <tr key={h.key} style={{ borderBottom: '1px solid #222' }}>
+                                                <td style={{ padding: '10px', fontWeight: 'bold' }}>{h.label}</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>${maxCallStrike}</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace' }}>${maxCallGex.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>${minPutStrike}</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace' }}>${minPutGex.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                                <td style={{ padding: '10px', textAlign: 'right', color: '#666' }}>-</td>
+                                            </tr>
+                                        );
+                                    });
+                                })()}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             {/* LOADING INDICATOR */}
             {loading && (
                 <div style={{ textAlign: 'center', padding: '50px', color: '#aaa' }}>

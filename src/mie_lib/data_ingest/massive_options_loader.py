@@ -5,11 +5,19 @@ import logging
 import re
 from pathlib import Path
 from typing import Optional, List
-import boto3
-from botocore.config import Config
 import os
 import gzip
 import shutil
+
+# Optional S3 dependencies (only needed for download_day_snapshot)
+try:
+    import boto3
+    from botocore.config import Config
+    BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None
+    Config = None
+    BOTO3_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 

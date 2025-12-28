@@ -1675,10 +1675,11 @@ def build_parser():
     p_finish.add_argument("--status", default="COMPLETED")
     p_finish.set_defaults(func=handle_finish_pipeline_job)
 
-    # NEW SKEW COMMAND
-    p_skew = sub.add_parser("build-skew-daily", help="Calculate Option Skew & PCR")
+    # NEW SKEW COMMAND (Parallel Pipeline)
+    p_skew = sub.add_parser("build-skew-daily", help="Calculate Option Skew & PCR (parallel)")
     p_skew.add_argument("--tickers", help="Comma separated or @config")
     p_skew.add_argument("--date", help="YYYY-MM-DD")
+    p_skew.add_argument("--workers", type=int, default=10, help="Parallel worker threads (default: 10)")
     p_skew.set_defaults(func=handle_build_skew_daily)
 
     return parser
@@ -2680,55 +2681,73 @@ def main(argv=None):
 def handle_build_skew_daily(args):
     """
     Handle build-skew-daily command.
-    Calculates PCR and Skew for the given date (default: today).
+    
+    Uses PARALLEL pipeline:
+    - OPTIONS: Massive flat files (source of truth)
+    - SPOT: yfinance via ThreadPoolExecutor
     """
     from mie_lib.services.audit_logger import get_audit_logger
-    from mie_lib.analytics.skew.skew_engine import SkewEngine
+    from mie_lib.analytics.skew.skew_pipeline import run_skew_pipeline_parallel
     from datetime import date
     import logging
+    import json
     
     LOG = logging.getLogger(__name__)
 
     get_audit_logger().update_stage("Skew & PCR", "RUNNING", {})
-    LOG.info("Running build-skew-daily...")
+    LOG.info("Running build-skew-daily (parallel pipeline)...")
     
     try:
-        engine = SkewEngine()
+        # Parse arguments
         ticker_arg = getattr(args, "tickers", "@config")
         date_arg = getattr(args, "date", None)
+        workers = getattr(args, "workers", 10)
         
         target_date = date_arg if date_arg else str(date.today())
         
-         # Resolve tickers
+        # Resolve tickers
         tickers = []
-        if ticker_arg == "@config":
-            # Use 'skew' scope or core tickers
+        if ticker_arg == "@config" or ticker_arg is None:
             tickers = _load_scope_tickers("Skew")
             if not tickers:
-                tickers = _load_yaml_tickers() # Assuming _load_yaml_tickers exists and is accessible
+                tickers = _load_yaml_tickers()
         elif ticker_arg:
-             tickers = [t.strip().upper() for t in ticker_arg.split(",") if t.strip()]
+            tickers = [t.strip().upper() for t in ticker_arg.split(",") if t.strip()]
         
         if not tickers:
-            tickers = ["SPY", "QQQ", "IWM", "DIA"] # Default fallback per user request context
+            tickers = ["SPY", "QQQ", "IWM", "DIA"]
             
-        LOG.info(f"Target Tickers: {tickers}, Date: {target_date}")
-            
-        success_count = 0
-        for ticker in tickers:
-            try:
-                # Engine handles calculation and saving
-                result = engine.calculate_skew_and_pcr_for_date(ticker, target_date)
-                if result:
-                    success_count += 1
-            except Exception as e:
-                LOG.error(f"Failed Skew calc for {ticker}: {e}")
-                
-        LOG.info(f"build-skew-daily completed. Processed {success_count}/{len(tickers)}.")
-        get_audit_logger().update_stage("Skew & PCR", "COMPLETED", {"processed": success_count})
+        LOG.info(f"Target: {len(tickers)} tickers, Date: {target_date}, Workers: {workers}")
+        
+        # Run parallel pipeline
+        result = run_skew_pipeline_parallel(
+            tickers=tickers,
+            target_date=target_date,
+            max_workers=workers
+        )
+        
+        # Log results
+        LOG.info(f"Parallel pipeline complete: {json.dumps({k: v for k, v in result.items() if k != 'details'})}")
+        
+        # Update audit status
+        if result.get("failed", 0) == 0:
+            status = "COMPLETED"
+        elif result.get("success", 0) > 0:
+            status = "PARTIAL"
+        else:
+            status = "FAILED"
+        
+        get_audit_logger().update_stage("Skew & PCR", status, {
+            "processed": result.get("processed", 0),
+            "success": result.get("success", 0),
+            "failed": result.get("failed", 0),
+            "skipped": result.get("skipped", 0)
+        })
         
     except Exception as e:
         LOG.error(f"Error in build-skew-daily: {e}")
+        import traceback
+        traceback.print_exc()
         get_audit_logger().update_stage("Skew & PCR", "FAILED", {"error": str(e)})
 
 if __name__ == "__main__":

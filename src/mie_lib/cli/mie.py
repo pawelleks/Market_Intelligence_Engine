@@ -625,7 +625,55 @@ def handle_build_hmm_snapshots(args):
     return summary
 
 
+def handle_build_markov_grid(args):
+    """
+    Build Markov transition matrix grid for all tickers.
+    Uses PARALLEL pipeline with ThreadPoolExecutor.
+    """
+    from mie_lib.analytics.markov.markov_pipeline import run_markov_grid_parallel
+    from mie_lib.services.audit_logger import get_audit_logger
+    
+    # Resolve tickers
+    if not getattr(args, "tickers", None) or str(args.tickers).strip() == "@config":
+        tickers = _default_markov_tickers()
+    else:
+        tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
+    
+    # Parse grid parameters
+    modes = _parse_csv_str_list(getattr(args, "state_modes", None), DEFAULT_MARKOV_GRID_STATE_MODES)
+    thresholds = _parse_csv_int_list(getattr(args, "thresholds", None), DEFAULT_MARKOV_GRID_THRESHOLDS)
+    windows = _parse_csv_str_list(getattr(args, "windows", None), DEFAULT_MARKOV_GRID_WINDOWS)
+    orders = _parse_csv_int_list(getattr(args, "orders", None), DEFAULT_MARKOV_GRID_ORDERS)
+    workers = getattr(args, "workers", 8)
+    
+    print(f"Building Markov Grid (parallel) for {len(tickers)} tickers, {workers} workers...")
+    get_audit_logger().update_stage("Markov Grid", "RUNNING", {"tickers": len(tickers)})
+    
+    try:
+        result = run_markov_grid_parallel(
+            tickers=tickers,
+            modes=modes,
+            thresholds=thresholds,
+            windows=windows,
+            orders=orders,
+            max_workers=workers
+        )
+        
+        print(f"Markov Grid Complete: {result.get('success')}/{result.get('processed')} tickers, "
+              f"{result.get('total_matrices', 0)} matrices")
+        get_audit_logger().update_stage("Markov Grid", "COMPLETED", {
+            "processed": result.get("processed", 0),
+            "success": result.get("success", 0),
+            "total_matrices": result.get("total_matrices", 0)
+        })
+        
+    except Exception as e:
+        LOG.error(f"Markov Grid pipeline failed: {e}")
+        get_audit_logger().update_stage("Markov Grid", "FAILED", {"error": str(e)})
+
+
 def handle_build_markov_snapshots(args):
+    """Build Markov snapshots from grid data."""
     tickers_arg = getattr(args, "tickers", None)
     if tickers_arg and tickers_arg.strip().upper() != "@CONFIG":
         tickers = [t.strip().upper() for t in tickers_arg.split(",") if t.strip()]
@@ -2087,14 +2135,11 @@ def main(argv=None):
             print(f"derive-markov-matrix ERROR: {e}")
             sys.exit(3)
     elif args.command == "build-markov-grid":
-        if not getattr(args, "tickers", None) or str(args.tickers).strip() == "@config":
-            tickers = _default_markov_tickers()
-        else:
-            tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-        modes = _parse_csv_str_list(getattr(args, "state_modes", None), DEFAULT_MARKOV_GRID_STATE_MODES)
-        thrs = _parse_csv_int_list(getattr(args, "thresholds", None), DEFAULT_MARKOV_GRID_THRESHOLDS)
-        windows = _parse_csv_str_list(getattr(args, "windows", None), DEFAULT_MARKOV_GRID_WINDOWS)
-        orders = _parse_csv_int_list(getattr(args, "orders", None), DEFAULT_MARKOV_GRID_ORDERS)
+        # Use parallel handler
+        handle_build_markov_grid(args)
+        sys.exit(0)
+
+
         
         from mie_lib.services.audit_logger import get_audit_logger
         get_audit_logger().update_stage("Markov Grid", "RUNNING", {"tickers": len(tickers)})

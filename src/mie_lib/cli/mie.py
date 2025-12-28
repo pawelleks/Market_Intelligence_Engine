@@ -1128,9 +1128,11 @@ def handle_backtest_gaf(args):
 def handle_backtest_hmm(args):
     """
     Run Grid Search Optimization for HMM.
+    Uses PARALLEL pipeline with ThreadPoolExecutor.
     """
-    from mie_lib.analytics.hmm.backtest_engine import HMMBacktester
+    from mie_lib.analytics.hmm.hmm_pipeline import run_backtest_hmm_parallel
     from mie_lib.services.audit_logger import get_audit_logger
+    
     get_audit_logger().update_stage("Backtest HMM", "RUNNING", {})
     
     # Resolve tickers
@@ -1138,37 +1140,68 @@ def handle_backtest_hmm(args):
         tickers = _load_yaml_tickers()
     else:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
-        
-    print(f"Starting HMM Grid Search for {len(tickers)} tickers...")
     
-    for ticker in tickers:
-        try:
-            print(f"  Processing Backtest for {ticker}...")
-            engine = HMMBacktester(ticker=ticker)
-            engine.run_grid_search()
-            # engine.print_leaderboard() # Skip printing to avoid log spam, or keep for debugging?
-            # Keeping it short
-            print(f"  > Backtest complete for {ticker}")
-        except Exception as e:
-            print(f"Error running backtest for {ticker}: {e}")
-    get_audit_logger().update_stage("Backtest HMM", "COMPLETED", {})
+    workers = getattr(args, "workers", 6)  # Lower default for CPU-intensive backtests
+    
+    print(f"Starting HMM Grid Search (parallel) for {len(tickers)} tickers, {workers} workers...")
+    
+    try:
+        result = run_backtest_hmm_parallel(tickers=tickers, max_workers=workers)
+        
+        print(f"HMM Backtest Complete: {result.get('success')}/{result.get('processed')} succeeded")
+        get_audit_logger().update_stage("Backtest HMM", "COMPLETED", {
+            "processed": result.get("processed", 0),
+            "success": result.get("success", 0)
+        })
+        
+    except Exception as e:
+        LOG.error(f"HMM Backtest pipeline failed: {e}")
+        get_audit_logger().update_stage("Backtest HMM", "FAILED", {"error": str(e)})
 
 
 def handle_build_hmm_daily(args):
     """
     Build HMM analytics for all tickers.
-    Generates both the primary default model and the full standardized grid.
+    Uses PARALLEL pipeline with ThreadPoolExecutor.
     """
     from mie_lib.services.audit_logger import get_audit_logger
+    from mie_lib.analytics.hmm.hmm_pipeline import run_hmm_daily_parallel
+    import json
     
     tickers = _load_yaml_tickers()
     if args.tickers and args.tickers != "@config":
         tickers = _parse_csv_str_list(args.tickers, [])
-        
-    # Exclude VIX-related tickers (HMM not applicable)
+    
+    # Exclude VIX-related tickers
     tickers = [t for t in tickers if not t.startswith("^VIX")]
+    
+    workers = getattr(args, "workers", 8)
+    
+    print(f"Building HMM models for {len(tickers)} tickers (parallel, {workers} workers)...")
+    get_audit_logger().update_stage("HMM Grid", "RUNNING", {"tickers": len(tickers)})
+    
+    try:
+        result = run_hmm_daily_parallel(
+            tickers=tickers,
+            windows=[1, 5, 10, 15, 20, 25, 50, "MAX"],
+            n_states_list=[2, 3],
+            max_workers=workers,
+            include_primary=True
+        )
         
-    print(f"Building HMM models for {len(tickers)} tickers...")
+        print(f"HMM Build Complete: {result.get('success')}/{result.get('processed')} tasks succeeded")
+        get_audit_logger().update_stage("HMM Grid", "COMPLETED", {
+            "processed": result.get("processed", 0),
+            "success": result.get("success", 0),
+            "failed": result.get("failed", 0)
+        })
+        
+    except Exception as e:
+        LOG.error(f"HMM Daily pipeline failed: {e}")
+
+        get_audit_logger().update_stage("HMM Grid", "FAILED", {"error": str(e)})
+
+
     get_audit_logger().update_stage("HMM Grid", "RUNNING", {"status": "Starting full grid build...", "total": len(tickers)})
     
     # Grid Configuration

@@ -667,56 +667,92 @@ def handle_build_markov_snapshots(args):
 
 def handle_build_gex_daily(args):
     """
-    Handler for building daily GEX snapshots from Massive Flat Files.
-    Defaults to previous trading day (completed session) if date not specified.
+    Handler for building daily GEX snapshots.
+    
+    Uses PARALLEL pipeline:
+    - OPTIONS: Massive flat files (source of truth)
+    - SPOT: yfinance via ThreadPoolExecutor
     """
     from mie_lib.services.audit_logger import get_audit_logger
-    get_audit_logger().update_stage("GEX", "RUNNING", {})
-    
-    from datetime import date, datetime, timedelta
-    from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader
-    from mie_lib.analytics.gex.gex_engine import GEXEngine
-    from mie_lib.analytics.gex.storage import save_gex_profile
+    from mie_lib.analytics.gex.gex_pipeline import run_gex_pipeline_parallel
     from mie_lib.utils.trading_calendar import get_previous_trading_day
-    import yfinance as yf # Only for spot price if needed
-    import pandas as pd
+    from datetime import date
     import logging
+    import json
     
     logger = logging.getLogger(__name__)
+    get_audit_logger().update_stage("GEX", "RUNNING", {})
     
-    today_val = date.today()
-    if args.date and args.date.lower() == "today":
-        target_date = today_val.strftime("%Y-%m-%d")
-    elif args.date and args.date.lower() == "yesterday":
-        target_date = get_previous_trading_day(today_val).strftime("%Y-%m-%d")
-    elif args.date:
-        target_date = args.date
-    else:
-        # Default: Previous Session Close (safest for EOD data)
-        target_date = get_previous_trading_day(today_val).strftime("%Y-%m-%d")
+    logger.info("Running build-gex-daily (parallel pipeline)...")
+    
+    try:
+        # Parse date argument
+        today_val = date.today()
+        if args.date and args.date.lower() == "today":
+            target_date = today_val.strftime("%Y-%m-%d")
+        elif args.date and args.date.lower() == "yesterday":
+            target_date = get_previous_trading_day(today_val).strftime("%Y-%m-%d")
+        elif args.date:
+            target_date = args.date
+        else:
+            target_date = get_previous_trading_day(today_val).strftime("%Y-%m-%d")
         
-    tickers = []
-    if args.tickers == "@config":
-        tickers = _load_scope_tickers("Gamma_Exposure")
+        # Parse tickers
+        tickers = []
+        if args.tickers == "@config":
+            tickers = _load_scope_tickers("Gamma_Exposure")
+            if not tickers:
+                tickers = _load_yaml_tickers()
+        elif args.tickers:
+            tickers = _parse_csv_str_list(args.tickers, [])
+        
         if not tickers:
             tickers = _load_yaml_tickers()
-    elif args.tickers:
-        tickers = _parse_csv_str_list(args.tickers, [])
         
-    if not tickers:
-        tickers = _load_yaml_tickers()
-            
-    from mie_lib.analytics.expected_moves.engine import enrich_with_yf_data
+        # Parse workers
+        workers = getattr(args, "workers", 10)
+        online_mode = getattr(args, "online", False)
+        
+        logger.info(f"Target: {len(tickers)} tickers, Date: {target_date}, Workers: {workers}, Online: {online_mode}")
+        
+        # Run parallel pipeline
+        result = run_gex_pipeline_parallel(
+            tickers=tickers,
+            target_date=target_date,
+            max_workers=workers,
+            online_mode=online_mode
+        )
+        
+        # Log results
+        logger.info(f"GEX parallel pipeline complete: {json.dumps({k: v for k, v in result.items() if k != 'details'})}")
+        
+        # Update audit status
+        if result.get("failed", 0) == 0:
+            status = "COMPLETED"
+        elif result.get("success", 0) > 0:
+            status = "PARTIAL"
+        else:
+            status = "FAILED"
+        
+        get_audit_logger().update_stage("GEX", status, {
+            "processed": result.get("processed", 0),
+            "success": result.get("success", 0),
+            "failed": result.get("failed", 0),
+            "skipped": result.get("skipped", 0)
+        })
+        
+        return 0
+        
+    except Exception as e:
+        logger.error(f"Error in build-gex-daily: {e}")
+        import traceback
+        traceback.print_exc()
+        get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
+        return 1
 
-    logger.info(f"Starting GEX Build for {target_date} for {len(tickers)} tickers. Mode: {'ONLINE' if args.online else 'OFFLINE'}")
-    
-    loader = MassiveOptionsLoader()
-    engine = GEXEngine()
-    
-    # 1. Load Data (Offline Mode)
-    df_all = pd.DataFrame()
-    if not args.online:
-        logger.info(f"Loading options flat file for {target_date}...")
+
+
+
         df_all = loader.load_day_aggregates(target_date, tickers)
         
         if df_all.empty:
@@ -1298,12 +1334,13 @@ def build_parser():
     sub.add_parser("rebuild-raw", help="Rebuild raw data for all tickers (full history)")
     sub.add_parser("validate-raw", help="Validate raw data files for tickers")
 
-    # --- GEX (New) ---
-    p_gex = sub.add_parser("build-gex-daily", help="Build Daily GEX from Massive Flat Files (Offline)")
-    p_gex.add_argument("--date", type=str, help="YYYY-MM-DD (Default Today)")
+    # --- GEX (Parallel Pipeline) ---
+    p_gex = sub.add_parser("build-gex-daily", help="Build Daily GEX (Parallel Pipeline)")
+    p_gex.add_argument("--date", type=str, help="YYYY-MM-DD (Default: Previous Trading Day)")
     p_gex.add_argument("--tickers", type=str, default="@config")
     p_gex.add_argument("--spot", type=float, help="Manual spot price override")
     p_gex.add_argument("--online", action="store_true", help="Use online data fetch (yfinance) instead of CSV")
+    p_gex.add_argument("--workers", type=int, default=10, help="Parallel worker threads (default: 10)")
     p_gex.set_defaults(func=handle_build_gex_daily)
 
     p_fetch_gex = sub.add_parser("fetch-options-snapshot", help="Fetch fresh options snapshot from YFinance (Optional)")

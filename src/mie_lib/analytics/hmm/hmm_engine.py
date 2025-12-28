@@ -12,6 +12,7 @@ from mie_lib.utils.paths import FEATURES_DIR, HMM_DIR, hmm_std_out_dir as _std_o
 from mie_lib.utils.io import atomic_write_parquet, atomic_write_json
 # --- END NEW IMPORT ---
 import sys
+import io
 from contextlib import contextmanager
 import os
 import signal
@@ -24,14 +25,28 @@ class TimeoutException(Exception): pass
 
 @contextmanager
 def time_limit(seconds):
+    """
+    Context manager for timeout. Only works in main thread.
+    In worker threads, runs without timeout (returns immediately).
+    """
+    import threading
+    
+    # signal.alarm only works in main thread
+    if threading.current_thread() is not threading.main_thread():
+        # In worker thread - no timeout available, just yield
+        yield
+        return
+    
     def signal_handler(signum, frame):
         raise TimeoutException("Timed out!")
-    signal.signal(signal.SIGALRM, signal_handler)
+    
+    old_handler = signal.signal(signal.SIGALRM, signal_handler)
     signal.alarm(seconds)
     try:
         yield
     finally:
         signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 ANALYTICS_DIR = HMM_DIR
 
@@ -119,14 +134,30 @@ def _map_state_names_by_mean_return(model, feature_names):
 
 @contextmanager
 def suppress_stdout():
-    """Context manager to suppress stdout output, used during external model fitting."""
-    with open(os.devnull, 'w') as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
+    """
+    Thread-safe context manager to suppress stdout output.
+    Uses file descriptor duplication instead of modifying global sys.stdout.
+    """
+    # Save original stdout file descriptor
+    try:
+        original_stdout_fd = sys.stdout.fileno()
+        saved_stdout_fd = os.dup(original_stdout_fd)
+        
+        # Redirect stdout to devnull at the file descriptor level
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, original_stdout_fd)
+        os.close(devnull_fd)
+        
         try:
             yield
         finally:
-            sys.stdout = old_stdout
+            # Restore original stdout
+            os.dup2(saved_stdout_fd, original_stdout_fd)
+            os.close(saved_stdout_fd)
+    except (AttributeError, io.UnsupportedOperation):
+        # If stdout doesn't have a fileno (e.g., in some test environments),
+        # fall back to no-op
+        yield
 
 
 def _calculate_annualized_metrics(stats_raw: pd.DataFrame, n_trading_days: int = 252) -> pd.DataFrame:

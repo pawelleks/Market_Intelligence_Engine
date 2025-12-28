@@ -193,9 +193,18 @@ const GammaExposurePage = () => {
     };
     const chartTitle = `${horizonDisplay[horizon]} GEX - ${ticker}${validTill ? ` (til ${validTill})` : ''} - ${viewMode === 'split' ? '(Split View)' : '(Net View)'}`;
 
-    // Calculate Zoom Range (Monthly EM + 10%)
+    // Calculate Zoom Range (Active Horizon EM + Buffer)
     const getZoomRange = () => {
-        // Fallback strategy: Monthly -> Weekly -> ODTE
+        // 1. Prioritize Valid EM for the CURRENT horizon so it's always visible
+        if (emRange && typeof emRange.low === 'number' && typeof emRange.high === 'number') {
+            const width = emRange.high - emRange.low;
+            if (width > 0.1) {
+                const buffer = width * 0.15; // 15% buffer
+                return [emRange.low - buffer, emRange.high + buffer];
+            }
+        }
+
+        // 2. Fallback strategy: Monthly -> Weekly -> ODTE
         const m = emData?.expirations?.MONTHLY || emData?.expirations?.WEEKLY || emData?.expirations?.ODTE;
 
         // Strict safety check: Need m object AND defined numeric ranges
@@ -369,7 +378,47 @@ const GammaExposurePage = () => {
                 </div>
             </div>
 
-            {/* NEW: GEX WALLS SUMMARY TABLE */}
+            {/* ERROR */}
+            {error && (
+                <div style={{ backgroundColor: 'rgba(244, 67, 54, 0.1)', border: '1px solid #f44336', color: '#f44336', padding: '15px', borderRadius: '4px', marginBottom: '20px' }}>
+                    <strong>Error:</strong> {error}
+                </div>
+            )}
+
+            {/* LOADING INDICATOR */}
+            {loading && (
+                <div style={{ textAlign: 'center', padding: '50px', color: '#aaa' }}>
+                    <h2>{loadingStatus || 'Loading GEX Data...'}</h2>
+                </div>
+            )}
+
+            {/* CHART CONTENT */}
+            {!loading && data && (
+                <div>
+                    {/* Check for empty chart data */}
+                    {chartData.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
+                            <h3>No Options Data Available for this Horizon</h3>
+                            <p>Try selecting a different horizon or ticker.</p>
+                        </div>
+                    ) : (
+                        <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px' }}>
+                            <GEXChart
+                                data={chartData}
+                                spotPrice={data.spot_price}
+                                emRange={emRange}
+                                title={chartTitle}
+                                viewMode={viewMode}
+                                yAxisRange={zoomRange}
+                                height={800}
+                                horizonLabel={horizon.charAt(0).toUpperCase()}
+                            />
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* GEX WALLS SUMMARY TABLE (Moved to Bottom) */}
             {!loading && data && data.profile && (
                 <div style={{ marginBottom: '20px', backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
                     <h3 style={{ marginTop: 0, marginBottom: '15px', color: '#e0e0e0' }}>Key Gamma Walls by Timeframe</h3>
@@ -466,14 +515,6 @@ const GammaExposurePage = () => {
                                             if (prevNetGex !== null) {
                                                 if ((prevNetGex > 0 && nVol < 0) || (prevNetGex < 0 && nVol > 0)) {
                                                     // Flip detected between prevStrike and current p.strike
-                                                    // Determine which is closer to the true zero (linear interpolation or just pick closer value)
-                                                    // Simple: Pick the one with smaller absolute GEX? Or just interpolation?
-                                                    // Let's use the strike closest to Spot if we have multiple flips?
-                                                    // Or usually we report the strike where the regime changes. 
-                                                    // Let's take the midpoint or the one closer to zero GEX value.
-
-                                                    // But we want the MAJOR flip. 
-                                                    // Let's record this candidate.
                                                     const flipStrike = (Math.abs(nVol) < Math.abs(prevNetGex)) ? p.strike : prevStrike;
 
                                                     // Distance to spot
@@ -521,46 +562,6 @@ const GammaExposurePage = () => {
                             </tbody>
                         </table>
                     </div>
-                </div>
-            )}
-
-            {/* LOADING INDICATOR */}
-            {loading && (
-                <div style={{ textAlign: 'center', padding: '50px', color: '#aaa' }}>
-                    <h2>{loadingStatus || 'Loading GEX Data...'}</h2>
-                </div>
-            )}
-
-            {/* ERROR */}
-            {error && (
-                <div style={{ backgroundColor: 'rgba(244, 67, 54, 0.1)', border: '1px solid #f44336', color: '#f44336', padding: '15px', borderRadius: '4px', marginBottom: '20px' }}>
-                    <strong>Error:</strong> {error}
-                </div>
-            )}
-
-            {/* CONTENT */}
-            {!loading && data && (
-                <div>
-                    {/* Check for empty chart data */}
-                    {chartData.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
-                            <h3>No Options Data Available for this Horizon</h3>
-                            <p>Try selecting a different horizon or ticker.</p>
-                        </div>
-                    ) : (
-                        <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                            <GEXChart
-                                data={chartData}
-                                spotPrice={data.spot_price}
-                                emRange={emRange}
-                                title={chartTitle}
-                                viewMode={viewMode}
-                                yAxisRange={zoomRange}
-                                height={600}
-                                horizonLabel={horizon.charAt(0).toUpperCase()}
-                            />
-                        </div>
-                    )}
                 </div>
             )}
         </div>

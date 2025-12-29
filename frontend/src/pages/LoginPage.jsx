@@ -62,32 +62,34 @@ const LoginPage = () => {
                     />
                 </div>
 
-                {/* Developer Bypass for Localhost */}
-                {(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
-                    <div style={{ marginBottom: 20 }}>
-                        <button
-                            onClick={async () => {
-                                const result = await bypassLogin();
-                                if (result.success) {
-                                    navigate('/');
-                                } else {
-                                    setError('Bypass Failed');
-                                }
-                            }}
-                            style={{
-                                background: 'transparent',
-                                border: '1px solid #444',
-                                color: '#888',
-                                padding: '8px 16px',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontSize: '0.8rem'
-                            }}
-                        >
-                            Developer Bypass
-                        </button>
-                    </div>
-                )}
+                {/* Developer Bypass for Localhost & Remote Test Domain */}
+                {(window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1' ||
+                    window.location.hostname.endsWith('.nip.io')) && (
+                        <div style={{ marginBottom: 20 }}>
+                            <button
+                                onClick={async () => {
+                                    const result = await bypassLogin();
+                                    if (result.success) {
+                                        navigate('/');
+                                    } else {
+                                        setError('Bypass Failed');
+                                    }
+                                }}
+                                style={{
+                                    background: 'transparent',
+                                    border: '1px solid #444',
+                                    color: '#888',
+                                    padding: '8px 16px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.8rem'
+                                }}
+                            >
+                                Developer Bypass
+                            </button>
+                        </div>
+                    )}
 
                 {error && (
                     <div style={{

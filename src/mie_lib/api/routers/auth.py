@@ -140,6 +140,13 @@ async def login(
         )
 
     # --- APPROVED CASE ---
+    # Update Visit Count
+    try:
+        user.visit_count = (user.visit_count or 0) + 1
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to increment visit_count for {email}: {e}")
+        # Continue login anyway, don't block user for a counter
     # Generate JWT
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

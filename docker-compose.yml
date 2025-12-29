@@ -21,7 +21,6 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app/src
-      - MOCK_AUTH_USER=bypass@local.dev # Bypasses Google Auth for local dev
     restart: unless-stopped
     networks:
       - mie-net

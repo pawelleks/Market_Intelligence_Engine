@@ -18,12 +18,17 @@ def _safe_val(val: Any, default: Any = 0.0, as_type: type = float) -> Any:
         return default
     return val
 
-def _calc_relative_dist(level: float, close: float) -> str:
-    """Convert absolute levels into % distance from Close."""
+def _calc_relative_dist(level: float, close: float) -> tuple[str, str]:
+    """Convert absolute levels into % distance from Close and a human label."""
     if not level or not close or close == 0:
-        return "N/A"
-    dist_pct = ((level - close) / close) * 100
-    return f"{dist_pct:+.2f}%"
+        return "N/A", "Unknown"
+    
+    # Standard: (Close - Level) / Level
+    # If Close > Level, dist is positive (Above)
+    dist_pct = ((close - level) / level) * 100
+    direction = "above" if dist_pct >= 0 else "below"
+    
+    return f"{dist_pct:+.2f}%", f"{abs(dist_pct):.2f}% {direction}"
 
 def _get_dcs_status(score: float) -> str:
     """Logic Injection: Downtrend Confirmation Score status."""
@@ -118,19 +123,21 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     # --- 4. Construct "price" ---
     # Need 52w high and SMA200 if available in df or tech_data
     # Usually in df features: 'high_52w', 'sma_200'
-    # Or calculate if not present? Assuming features DF has them or we load them.
+    # Or calculate if not present?    # Usually in df features: 'high_52w', 'sma_200'
     # Standard features usually include rolling max.
     
     high_52w = _safe_val(row.get('rolling_max_252'), 0.0) # 252 days ~ 52 weeks
     sma200 = _safe_val(tech_data.get('sma_200') or row.get('sma_200'), 0.0)
     
-    dist_52w = _calc_relative_dist(high_52w, close_price) if high_52w > 0 else "N/A"
-    dist_sma200 = _calc_relative_dist(sma200, close_price) if sma200 > 0 else "N/A"
+    dist_52w_pct, dist_52w_label = _calc_relative_dist(high_52w, close_price) if high_52w > 0 else ("N/A", "Unknown")
+    dist_sma200_pct, dist_sma200_label = _calc_relative_dist(sma200, close_price) if sma200 > 0 else ("N/A", "Unknown")
 
     price_section = {
         "close": close_price,
-        "dist_52w_high_pct": dist_52w,
-        "dist_sma200_pct": dist_sma200
+        "dist_52w_high_pct": dist_52w_pct,
+        "dist_52w_high_label": dist_52w_label,
+        "dist_sma200_pct": dist_sma200_pct,
+        "dist_sma200_label": dist_sma200_label
     }
 
     # --- 5. Construct "regime" ---
@@ -234,11 +241,13 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
                 if not df_prof.empty and 'strike' in df_prof.columns and 'total_call_gex' in df_prof.columns:
                      cw = df_prof.loc[df_prof['total_call_gex'].idxmax()]['strike']
                      pw = df_prof.loc[df_prof['total_put_gex'].idxmin()]['strike']
-                     call_wall_dist = _calc_relative_dist(cw, close_price)
-                     put_wall_dist = _calc_relative_dist(pw, close_price)
+                     cw_pct, cw_label = _calc_relative_dist(cw, close_price)
+                     pw_pct, pw_label = _calc_relative_dist(pw, close_price)
+                     call_wall_dist = f"{cw_pct} ({cw_label})"
+                     put_wall_dist = f"{pw_pct} ({pw_label})"
             except: pass
 
-    options_gex = { "net_regime": net_regime, "put_wall_dist_pct": put_wall_dist, "call_wall_dist_pct": call_wall_dist }
+    options_gex = { "net_regime": net_regime, "put_wall_dist": put_wall_dist, "call_wall_dist": call_wall_dist }
 
     # Expected Moves
     em_0dte = 0.0

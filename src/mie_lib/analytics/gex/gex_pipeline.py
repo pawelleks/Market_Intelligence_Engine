@@ -412,6 +412,8 @@ def run_gex_pipeline_parallel(
             gex_result = engine.calculate_gex_from_frame(ticker, working_df, spot, as_of=target_date_obj)
             
             if gex_result:
+                from .storage import save_gex_profile
+                save_gex_profile(ticker, gex_result)
                 return {"status": "ok"}
             else:
                 return {"status": "error", "error": "Calculation returned empty"}

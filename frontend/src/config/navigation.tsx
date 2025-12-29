@@ -23,7 +23,8 @@ import {
 export const NAV_DATA = {
     // Items that sit at the top, outside of any accordion
     start: [
-        { label: 'Dashboard Home', to: '/', icon: LayoutDashboard }
+        { label: 'Dashboard Home', to: '/', icon: LayoutDashboard },
+        { label: 'Daily Intelligence (AI)', to: '/analysis/daily', icon: Brain }
     ],
     // Collapsible sections
     sections: [

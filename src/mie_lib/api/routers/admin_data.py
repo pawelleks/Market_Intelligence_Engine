@@ -196,21 +196,8 @@ def get_gex_status() -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-@router.get("/ai-context")
-def get_ai_context() -> Dict[str, Any]:
-    """
-    Returns the latest AI Context Generation JSON payload.
-    Reads from data/audit/latest_llm_context.json
-    """
-    path = Path("data/ai_context/spy_latest.json")
-    if not path.exists():
-        return {"status": "no_file", "data": None, "message": "No AI context generated yet."}
-        
-    try:
-        content = json.loads(path.read_text())
-        return {"status": "ok", "data": content}
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "message": str(e), "data": []}
 
 def _run_orchestrator_task():
     """Background task wrapper"""

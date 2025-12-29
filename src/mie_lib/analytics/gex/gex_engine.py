@@ -442,21 +442,32 @@ class GEXEngine:
                         matched_horizons.append(h_key)
                 
                 strike = row['strike']
-                oi = row['oi']
-                otype = row['type'].lower() # 'call' or 'put'
+                oi = row['oi'] if not pd.isna(row['oi']) else 0
+                
+                # Robust type parsing: 'C'/'P' (Massive/Polygon) or 'call'/'put' (yfinance)
+                otype_raw = str(row['type']).strip().lower()
+                if otype_raw in ('c', 'call'):
+                    otype = 'call'
+                elif otype_raw in ('p', 'put'):
+                    otype = 'put'
+                else:
+                    continue # Skip unknown types
                 
                 # Use provided Gamma if available, else calc (if IV present)
                 if 'gamma' in row and not pd.isna(row['gamma']) and row['gamma'] != 0:
                     gamma_val = row['gamma']
-                elif 'iv' in row and row['iv'] > 0:
+                elif 'iv' in row and not pd.isna(row['iv']) and row['iv'] > 0:
                      gamma_val = BlackScholes.gamma(spot_price, strike, T, self.r, row['iv'])
                 else:
                     continue # Cannot calc GEX without Gamma
                     
                 raw_gex = gamma_val * oi * (spot_price ** 2) * 0.01 * 100
+                if pd.isna(raw_gex):
+                    continue
                 
                 if otype == 'put':
                     raw_gex *= -1 # Puts are negative GEX usually implies Dealer Short Gamma
+
                     
                 all_gex_data.append({
                     "strike": strike,

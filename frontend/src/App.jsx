@@ -46,6 +46,7 @@ import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
 
 import AdminDataDashboard from './pages/AdminDataDashboard';
+import DailyAnalysisPage from './pages/DailyAnalysisPage';
 import VolumeRegimeReport from './pages/VolumeRegimeReport';
 import VolatilityPage from './pages/VolatilityPage';
 
@@ -438,6 +439,10 @@ function AppContent() {
               /></ProtectedLayout>}
             />
             {/* Future Nested Routes will go here */}
+            <Route
+              path="/analysis/daily"
+              element={<ProtectedLayout><DailyAnalysisPage /></ProtectedLayout>}
+            />
             <Route
               path="/analysis/markov"
               element={<ProtectedLayout><MarkovAnalysisPage

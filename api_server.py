@@ -1207,3 +1207,42 @@ def get_volume_regime_analysis(ticker: str) -> JSONResponse:
         return JSONResponse(content=metrics)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Volume analysis failed: {e}")
+
+# -----------------------------------------------------------------
+# AI Intelligence Endpoints
+# -----------------------------------------------------------------
+
+@app.get("/api/v1/ai-context")
+def get_ai_context() -> Dict[str, Any]:
+    """
+    Returns the latest AI Context Generation JSON payload.
+    """
+    path = Path("data/ai_context/spy_latest.json")
+    if not path.exists():
+        # Fallback to old path
+        fallback = Path("data/audit/latest_llm_context.json")
+        if fallback.exists():
+             path = fallback
+        else:
+             return {"status": "no_file", "data": None, "message": "No AI context generated yet."}
+        
+    try:
+        content = json.loads(path.read_text())
+        return {"status": "ok", "data": content}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@app.get("/api/v1/ai-report")
+def get_ai_report() -> Dict[str, Any]:
+    """
+    Returns the latest AI Analysis Report.
+    """
+    path = Path("data/reports/daily_report_latest.json")
+    if not path.exists():
+        return {"status": "no_file", "data": None, "message": "No AI report generated yet."}
+        
+    try:
+        content = json.loads(path.read_text())
+        return {"status": "ok", "data": content}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}

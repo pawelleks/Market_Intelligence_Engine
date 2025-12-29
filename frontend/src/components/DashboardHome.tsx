@@ -123,6 +123,13 @@ const DashboardHome = () => {
                     </h2>
 
                     <InfoCard
+                        title="Daily Intelligence (AI)"
+                        description="AI-driven market analysis synthesizing technical regimes and options data."
+                        to="/analysis/daily"
+                        icon={Brain}
+                        color="#a78bfa"
+                    />
+                    <InfoCard
                         title="GAF Neural Net"
                         description="Gramian Angular Field computer vision for deep learning trend forecasting."
                         to="/analysis/neural/gaf"

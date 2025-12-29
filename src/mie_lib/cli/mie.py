@@ -1774,6 +1774,10 @@ def build_parser():
 
     p_ai = sub.add_parser("generate-ai-context", help="Step 9: Generate AI Context Payload")
     p_ai.add_argument("--ticker", help="Ticker symbol", default="SPY")
+
+    p_ai_report = sub.add_parser("generate-ai-report", help="Step 10: Generate AI Analysis Report")
+    p_ai_report.add_argument("--ticker", help="Ticker symbol", default="SPY")
+    p_ai_report.add_argument("--model", help="LLM Model", default="gpt-4-turbo-preview")
     
     # Generic Audit Updater
     p_audit = sub.add_parser("update-stage", help="Manually update an audit stage status")
@@ -2588,6 +2592,20 @@ def main(argv=None):
                 print(f"WARN: build-gaf-daily failed: {e}")
                 get_audit_logger().update_stage("GAF", "FAILED", {"error": str(e)})
 
+            # AI CONTEXT + REPORT
+            try:
+                tracker.update_progress(11.5, "Generating AI Analysis...")
+                get_audit_logger().start_stage("AI Context Generation")
+                _run([py, mie, "generate-ai-context", "--ticker", "SPY"])
+                
+                # New Stage for Report
+                # get_audit_logger().start_stage("AI Report Generation") 
+                # (Assuming audit logger has this stage or we update generic)
+                _run([py, mie, "generate-ai-report", "--ticker", "SPY"])
+            except Exception as e:
+                print(f"WARN: AI Generation failed: {e}")
+                get_audit_logger().update_stage("AI Context Generation", "FAILED", {"error": str(e)})
+
             if args.snapshots:
                 get_audit_logger().start_stage("Publish Analytics Data")
                 try:
@@ -2780,6 +2798,17 @@ def main(argv=None):
             sys.exit(1)
             
         sys.exit(0)
+    elif args.command == "generate-ai-report":
+        print("Starting AI Report Generation...")
+        from mie_lib.services.llm_analyst import generate_daily_report
+        # No separate audit stage logic here, maybe add later or rely on service return
+        res = generate_daily_report(ticker=args.ticker, model=args.model)
+        if res.get("status") == "ok":
+            print(f"Report generated: {res.get('path')}")
+            sys.exit(0)
+        else:
+            print(f"Report generation failed: {res.get('message')}")
+            sys.exit(1)
     elif args.command == "update-stage":
         stage = args.stage
         status = args.status

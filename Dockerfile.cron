@@ -26,6 +26,8 @@ RUN curl -fsSLO "$SUPERCRONIC_URL" \
 # Copy Source & Script
 # Copy Source & Script
 COPY src/ ./src/
+# Copy prompts (required for AI features)
+COPY prompts/ ./prompts/
 COPY cli/ ./cli/
 # Orchestrator script is now in cli/orchestrator.sh
 RUN chmod +x cli/orchestrator.sh

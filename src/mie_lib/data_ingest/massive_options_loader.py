@@ -1,3 +1,14 @@
+"""
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+
+ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+
+Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
+"""
 import pandas as pd
 import numpy as np
 from datetime import datetime, date
@@ -115,20 +126,9 @@ class MassiveOptionsLoader:
             
             return df
                 
-            # Rename/Standardize columns for GEX Engine
-            # Map: open_interest -> oi, implied_volatility -> iv
-            df = df.rename(columns={
-                "open_interest": "oi",
-                "implied_volatility": "iv"
-            })
-            
-            # Ensure proper types
-            df['strike'] = pd.to_numeric(df['strike'], errors='coerce')
-            df['oi'] = pd.to_numeric(df['oi'], errors='coerce').fillna(0)
-            df['iv'] = pd.to_numeric(df['iv'], errors='coerce').fillna(0)
-            df['gamma'] = pd.to_numeric(df['gamma'], errors='coerce').fillna(0)
-            
-            return df
+        except Exception as e:
+            logger.error(f"Failed to load flat file {filepath}: {e}")
+            return pd.DataFrame()
             
         except Exception as e:
             logger.error(f"Failed to load flat file {filepath}: {e}")

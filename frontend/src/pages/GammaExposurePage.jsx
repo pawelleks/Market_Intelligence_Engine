@@ -398,8 +398,14 @@ const GammaExposurePage = () => {
                     {/* Check for empty chart data */}
                     {chartData.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>
-                            <h3>No Options Data Available for this Horizon</h3>
-                            <p>Try selecting a different horizon or ticker.</p>
+                            <h3>No Options Data / Zero GEX</h3>
+                            <p style={{ maxWidth: '400px', margin: '10px auto', lineHeight: '1.5' }}>
+                                The GEX profile is empty. This usually happens when the data provider (Yahoo Finance)
+                                returns <strong>0 Open Interest</strong> for the selected horizon.
+                                <br /><br />
+                                This can occur during pre-market hours (Monday morning) or data outages.
+                                Try selecting a different ticker or checking back after market open.
+                            </p>
                         </div>
                     ) : (
                         <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px' }}>

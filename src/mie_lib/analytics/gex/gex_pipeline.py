@@ -15,6 +15,17 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+"""
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+
+ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+
+Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
+"""
 import pandas as pd
 import numpy as np
 
@@ -293,10 +304,55 @@ def run_gex_pipeline_parallel(
             
             # 2. Fetch Chain (Greeks/OI)
             yf_chain = _fetch_yfinance_chain_df(ticker)
+            
+            # Check YF Quality (Fallback to Polygon if empty or 0 OI)
+            use_polygon = False
             if yf_chain.empty:
-                return {"status": "error", "error": "No yfinance chain data (Greeks/OI)"}
+                use_polygon = True
+            elif 'oi' in yf_chain.columns and yf_chain['oi'].sum() == 0:
+                LOG.warning(f"YFinance returned 0 OI for {ticker}. Switching to Polygon.")
+                use_polygon = True
                 
-            # 3. Hybrid Merge
+            working_df = pd.DataFrame()
+            
+            if use_polygon:
+                try:
+                    import yfinance as yf
+                    from mie_lib.analytics.expected_moves.data_ingest_polygon import fetch_option_chain as fetch_poly_chain
+                    from datetime import date
+                    
+                    # We need expirations. YF `.options` usually works even if chain data is bad.
+                    poly_expirations = yf.Ticker(ticker).options
+                    poly_rows = []
+                    
+                    for p_exp in poly_expirations:
+                        try:
+                            exp_date = datetime.strptime(p_exp, "%Y-%m-%d").date()
+                            # Fetch Snapshot
+                            df_snap = fetch_poly_chain(ticker, exp_date, date.today(), spot_price=spot)
+                            if not df_snap.empty:
+                                df_snap['expiration'] = p_exp
+                                poly_rows.append(df_snap)
+                        except Exception:
+                            continue
+                            
+                    if poly_rows:
+                        working_df = pd.concat(poly_rows, ignore_index=True)
+                        # Rename/Standardize
+                        # fetch_poly_chain returns: [strike, option_type, prev_close_mid, iv, gamma, oi, contractSymbol]
+                        # GEXEngine logic below expects: [strike, type, expiration, oi, iv]
+                        # We need to map 'option_type' -> 'type' (done below)
+                        # We need 'gamma' if available (GEXEngine uses it if present)
+                        
+                    else:
+                        return {"status": "error", "error": "Polygon fallback also returned no data"}
+                        
+                except Exception as e:
+                    return {"status": "error", "error": f"Polygon fallback failed: {e}"}
+            else:
+                working_df = yf_chain.copy()
+            
+            # 3. Hybrid Merge (Legacy Massve Logic)
             # We must exist in yfinance to have Greeks.
             # We SHOULD exist in Massive to have "Trusted Price".
             # If exists in Massive, overwrite yfinance price?

@@ -2745,21 +2745,31 @@ def main(argv=None):
         try:
             payload = generate_llm_payload(df, ticker, expected_moves, gex_snapshot=gex_snapshot)
             
-            # 4. Save Artifact
-            audit_path = Path("data/audit/latest_llm_context.json")
-            audit_path.parent.mkdir(parents=True, exist_ok=True)
+            # 4. Save Artifacts (Active + Archive)
+            # Active Copy
+            active_path = Path("data/ai_context/spy_latest.json")
+            active_path.parent.mkdir(parents=True, exist_ok=True)
             
-            with open(audit_path, "w") as f:
+            with open(active_path, "w") as f:
                 json.dump(payload, f, indent=2)
                 
-            print(f"[AUDIT] STEP COMPLETED: AI Payload Generation. Artifact saved to {audit_path}")
+            # Archive Copy
+            from datetime import datetime
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            archive_path = Path(f"data/ai_context/archive/spy_context_{today_str}.json")
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(archive_path, "w") as f:
+                json.dump(payload, f, indent=2)
+                
+            print(f"[AUDIT] STEP COMPLETED: AI Payload Generation. Saved to {active_path} and {archive_path}")
             
             # Update Audit Log (Service)
             from mie_lib.services.audit_logger import get_audit_logger
             # Determine status based on data
             status = "COMPLETED" if expected_moves and hmm_path.exists() else "PARTIAL"
             # Fix: log_job_event does not exist, use update_stage
-            get_audit_logger().update_stage("AI Context Generation", status, {"artifact": str(audit_path)})
+            get_audit_logger().update_stage("AI Context Generation", status, {"artifact": str(active_path)})
         except Exception as e:
             print(f"Error generating AI context: {e}")
             from mie_lib.services.audit_logger import get_audit_logger

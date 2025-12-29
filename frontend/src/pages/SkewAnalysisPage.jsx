@@ -3,6 +3,8 @@ import {
     ComposedChart, Line, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Cell
 } from 'recharts';
 import { Activity, TrendingUp, TrendingDown, AlertTriangle, Info } from 'lucide-react';
+import SkewCurveChart from '../components/SkewCurveChart';
+
 
 // --- Utility: Moving Average ---
 const calculateSMA = (data, window = 5, key = 'value') => {
@@ -52,11 +54,16 @@ const CustomTooltip = ({ active, payload, label }) => {
         return (
             <div style={{ backgroundColor: '#0f172a', border: '1px solid #334155', padding: '10px', borderRadius: '4px' }}>
                 <p style={{ color: '#e2e8f0', marginBottom: '5px' }}>{label}</p>
-                {payload.map((entry, index) => (
-                    <p key={index} style={{ color: entry.color, fontSize: '0.9rem', margin: 0 }}>
-                        {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(4) : entry.value}
-                    </p>
-                ))}
+                {payload.map((entry, index) => {
+                    const formattedValue = entry.name === "25d Skew"
+                        ? `${(entry.value * 100).toFixed(1)}%`
+                        : (typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value);
+                    return (
+                        <p key={index} style={{ color: entry.color, fontSize: '0.9rem', margin: 0 }}>
+                            {entry.name}: {formattedValue}
+                        </p>
+                    );
+                })}
             </div>
         );
     }
@@ -154,11 +161,11 @@ const SkewAnalysisPage = () => {
             sentiment.primaryState = "Defensive";
         }
 
-        // Scenario B: PCR < 0.7 (Complacency)
+        // Scenario B: PCR < 0.7 (Bullish Exuberance)
         if (pcr < 0.7) {
             sentiment.scanResults.push({
-                msg: "Complacency Warning",
-                detail: "Extreme bullish sentiment (Low PCR) often precedes a pullback.",
+                msg: "Bullish Exuberance",
+                detail: "High call demand relative to puts. Watch for potential trend exhaustion.",
                 type: "warning"
             });
             if (sentiment.primaryState === "Neutral") sentiment.primaryState = "Overbought";
@@ -176,10 +183,11 @@ const SkewAnalysisPage = () => {
         // Additional: High PCR
         if (pcr > 1.2) {
             sentiment.scanResults.push({
-                msg: "Bearish Sentiment / Capitulation",
-                detail: "High Put volume relative to Calls.",
+                msg: "Protective Hedging / Bearish Speculation",
+                detail: "Elevated put demand detected. Market participants are paying up for protection.",
                 type: "bearish"
             });
+            if (sentiment.primaryState === "Neutral") sentiment.primaryState = "Defensive";
         }
 
         return {
@@ -264,7 +272,7 @@ const SkewAnalysisPage = () => {
                     <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={processedData}>
                             <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickFormatter={str => str.slice(5)} />
+                            <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickFormatter={str => str.split(' ')[0].slice(5)} />
                             <YAxis yAxisId="left" stroke="#f43f5e" tick={{ fontSize: 12 }} label={{ value: 'Skew', angle: -90, position: 'insideLeft', fill: '#f43f5e' }} />
                             <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tick={{ fontSize: 12 }} domain={['auto', 'auto']} label={{ value: 'Price', angle: 90, position: 'insideRight', fill: '#3b82f6' }} />
                             <Tooltip content={<CustomTooltip />} />
@@ -285,7 +293,7 @@ const SkewAnalysisPage = () => {
                     <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={processedData}>
                             <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickFormatter={str => str.slice(5)} />
+                            <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} tickFormatter={str => str.split(' ')[0].slice(5)} />
                             <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
@@ -303,6 +311,7 @@ const SkewAnalysisPage = () => {
                 </div>
             </div>
 
+            <SkewCurveChart ticker={ticker} />
         </div>
     );
 };

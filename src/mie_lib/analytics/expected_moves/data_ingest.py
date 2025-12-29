@@ -1,4 +1,15 @@
 """
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+
+ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+
+Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
+"""
+"""
 Data ingestion layer for Expected Moves (EM).
 Handles fetching VIX1D, determining expiration dates, and retrieving option chains.
 Uses yfinance for all data to avoid missing provider dependencies.

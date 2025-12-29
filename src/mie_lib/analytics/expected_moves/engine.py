@@ -1,4 +1,15 @@
 """
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+
+ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+
+Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
+"""
+"""
 Orchestration engine for Expected Moves (EM).
 Runs the daily build process.
 """

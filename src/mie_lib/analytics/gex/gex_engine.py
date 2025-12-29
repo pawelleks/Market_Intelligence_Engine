@@ -1,3 +1,14 @@
+"""
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+
+ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+
+Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
+"""
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -130,78 +141,155 @@ class GEXEngine:
             
             all_gex_data = []
 
-            # 3. Iterate Expirations and Calculate GEX
-            for expiry in expirations:
-                T = self._get_time_to_expiration(expiry)
+            # 3. Provider Strategy (YFinance -> Polygon Fallback)
+            use_polygon = False
+            
+            # Check data quality on first expiry
+            check_expiry = expirations[0]
+            try:
+                check_chain = yf_ticker.option_chain(check_expiry)
+                # Check total OI
+                total_oi = check_chain.calls['openInterest'].sum() + check_chain.puts['openInterest'].sum()
+                if total_oi == 0:
+                    logger.warning(f"YFinance returned 0 Open Interest/Volume for {ticker} ({check_expiry}). Switching to Polygon/Massive API.")
+                    use_polygon = True
+            except Exception:
+                use_polygon = True
+
+            if use_polygon:
+                from mie_lib.analytics.expected_moves.data_ingest_polygon import fetch_option_chain as fetch_impl_polygon
                 
-                # Skip expired options
-                if T < 0:
-                    continue
+                for expiry in expirations:
+                    T = self._get_time_to_expiration(expiry)
+                    if T < 0: continue
+
+                    # Determine Horizons
+                    try:
+                        exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    except ValueError: continue
                     
-                # Determine Matched Horizons
-                try:
-                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
-                except ValueError:
-                    continue
+                    matched_horizons = ["total"]
+                    for h_key, h_date in horizons.items():
+                        if exp_date <= h_date:
+                            matched_horizons.append(h_key)
 
-                matched_horizons = ["total"]
-                for h_key, h_date in horizons.items():
-                    if exp_date <= h_date:
-                        matched_horizons.append(h_key)
-
-                try:
-                    chain = yf_ticker.option_chain(expiry)
-                    calls = chain.calls
-                    puts = chain.puts
-                except Exception as e:
-                    logger.warning(f"Failed to fetch chain for {ticker} {expiry}: {e}")
-                    continue
-
-                # Process Calls
-                if not calls.empty:
-                    for _, row in calls.iterrows():
-                        strike = row['strike']
-                        iv = row['impliedVolatility']
-                        oi = row['openInterest']
+                    # Fetch Polygon Snapshot
+                    try:
+                        # fetch_impl_polygon returns DF with [strike, option_type, prev_close_mid, iv, gamma, oi, contractSymbol]
+                        # We need to map expiration date object
+                        df_poly = fetch_impl_polygon(ticker, exp_date, date.today(), spot_price=spot)
                         
-                        if pd.isna(iv) or iv <= 0 or pd.isna(oi) or oi <= 0:
+                        if df_poly.empty:
                             continue
                             
-                        gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
-                        
-                        # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100
-                        gex = gamma * oi * (spot ** 2) * 0.01 * 100
-                        
-                        all_gex_data.append({
-                            "strike": strike,
-                            "gex": gex,
-                            "type": "call",
-                            "horizons": matched_horizons,
-                            "expiry": expiry
-                        })
+                        for _, row in df_poly.iterrows():
+                            strike = row['strike']
+                            # Polygon returns 'open_interest' mapped to 'oi' in our modified ingest
+                            oi = row.get('oi', 0)
+                            gamma_val = row.get('gamma')
+                            iv = row.get('iv')
+                            otype = row.get('option_type') # 'C' or 'P'
+                            
+                            if oi <= 0: continue
+                            
+                            # Use provided Gamma or Calculate
+                            if gamma_val is None or pd.isna(gamma_val):
+                                if iv and iv > 0:
+                                    gamma_val = BlackScholes.gamma(spot, strike, T, self.r, iv)
+                                else:
+                                    continue
+                                    
+                            # GEX Formula
+                            gex = gamma_val * oi * (spot ** 2) * 0.01 * 100
+                            
+                            if otype == 'P':
+                                gex *= -1
+                                
+                            all_gex_data.append({
+                                "strike": strike,
+                                "gex": gex,
+                                "type": "call" if otype == 'C' else "put",
+                                "horizons": matched_horizons,
+                                "expiry": expiry
+                            })
+                            
+                    except Exception as e:
+                        logger.warning(f"Polygon fetch failed for {ticker} {expiry}: {e}")
+                        continue
 
-                # Process Puts
-                if not puts.empty:
-                    for _, row in puts.iterrows():
-                        strike = row['strike']
-                        iv = row['impliedVolatility']
-                        oi = row['openInterest']
+            else:
+                # 3b. Iterate Expirations and Calculate GEX (YFinance Legacy)
+                for expiry in expirations:
+                    T = self._get_time_to_expiration(expiry)
+                    
+                    # Skip expired options
+                    if T < 0:
+                        continue
                         
-                        if pd.isna(iv) or iv <= 0 or pd.isna(oi) or oi <= 0:
-                            continue
-                        
-                        gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
-                        
-                        # GEX Formula (Negative for Puts)
-                        gex = -1 * (gamma * oi * (spot ** 2) * 0.01 * 100)
-                        
-                        all_gex_data.append({
-                            "strike": strike,
-                            "gex": gex,
-                            "type": "put",
-                            "horizons": matched_horizons,
-                            "expiry": expiry
-                        })
+                    # Determine Matched Horizons
+                    try:
+                        exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    except ValueError:
+                        continue
+    
+                    matched_horizons = ["total"]
+                    for h_key, h_date in horizons.items():
+                        if exp_date <= h_date:
+                            matched_horizons.append(h_key)
+    
+                    try:
+                        chain = yf_ticker.option_chain(expiry)
+                        calls = chain.calls
+                        puts = chain.puts
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch chain for {ticker} {expiry}: {e}")
+                        continue
+    
+                    # Process Calls
+                    if not calls.empty:
+                        for _, row in calls.iterrows():
+                            strike = row['strike']
+                            iv = row['impliedVolatility']
+                            oi = row['openInterest']
+                            
+                            if pd.isna(iv) or iv <= 0 or pd.isna(oi) or oi <= 0:
+                                continue
+                                
+                            gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
+                            
+                            # GEX Formula: Gamma * OI * Spot^2 * 0.01 * 100
+                            gex = gamma * oi * (spot ** 2) * 0.01 * 100
+                            
+                            all_gex_data.append({
+                                "strike": strike,
+                                "gex": gex,
+                                "type": "call",
+                                "horizons": matched_horizons,
+                                "expiry": expiry
+                            })
+    
+                    # Process Puts
+                    if not puts.empty:
+                        for _, row in puts.iterrows():
+                            strike = row['strike']
+                            iv = row['impliedVolatility']
+                            oi = row['openInterest']
+                            
+                            if pd.isna(iv) or iv <= 0 or pd.isna(oi) or oi <= 0:
+                                continue
+                            
+                            gamma = BlackScholes.gamma(spot, strike, T, self.r, iv)
+                            
+                            # GEX Formula (Negative for Puts)
+                            gex = -1 * (gamma * oi * (spot ** 2) * 0.01 * 100)
+                            
+                            all_gex_data.append({
+                                "strike": strike,
+                                "gex": gex,
+                                "type": "put",
+                                "horizons": matched_horizons,
+                                "expiry": expiry
+                            })
 
             if not all_gex_data:
                 return {}

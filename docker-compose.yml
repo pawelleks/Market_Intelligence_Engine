@@ -15,6 +15,7 @@ services:
       - ./cli:/app/cli                 # Management CLI
       - ./cli:/app/cli                 # Management CLI
       - ./src:/app/src                 # Live Code Reload (Optional)
+      - ./scripts:/app/scripts         # Administrative scripts
       - ./api_server.py:/app/api_server.py # Mount entrypoint for updates
     env_file:
       - .env

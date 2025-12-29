@@ -202,7 +202,7 @@ def get_ai_context() -> Dict[str, Any]:
     Returns the latest AI Context Generation JSON payload.
     Reads from data/audit/latest_llm_context.json
     """
-    path = Path("data/audit/latest_llm_context.json")
+    path = Path("data/ai_context/spy_latest.json")
     if not path.exists():
         return {"status": "no_file", "data": None, "message": "No AI context generated yet."}
         

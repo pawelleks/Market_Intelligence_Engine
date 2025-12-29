@@ -1,0 +1,81 @@
+def _calculate_skew_for_ticker(
+    ticker: str,
+    spot: float,
+    options_df: pd.DataFrame,
+    target_date: str
+) -> Dict[str, Any]:
+    """
+    Calculate Skew and PCR metrics for a single ticker.
+    Arg: options_df can be empty or deficient (missing Greeks).
+    """
+    source_used = "massive"
+    
+    # 1. Calculate Historical PCR (Prioritize actual daily volume/OI from Massive)
+    hist_pcr_volume = None
+    hist_pcr_oi = None
+    
+    if not options_df.empty and "type" in options_df.columns:
+        c_hist = options_df[options_df["type"].str.lower() == "call"]
+        p_hist = options_df[options_df["type"].str.lower() == "put"]
+        
+        if not c_hist.empty and not p_hist.empty:
+            if "volume" in options_df.columns:
+                cv, pv = c_hist["volume"].sum(), p_hist["volume"].sum()
+                if cv > 0: hist_pcr_volume = float(pv / cv)
+            oi_col = "oi" if "oi" in options_df.columns else ("open_interest" if "open_interest" in options_df.columns else None)
+            if oi_col:
+                co, po = c_hist[oi_col].sum(), p_hist[oi_col].sum()
+                if co > 0: hist_pcr_oi = float(po / co)
+
+    # 2. Validate Data Quality (Do we have Greeks for Skew?)
+    has_greeks = False
+    if not options_df.empty:
+        has_iv = 'iv' in options_df.columns or 'implied_volatility' in options_df.columns
+        if has_iv:
+            iv_col = 'iv' if 'iv' in options_df.columns else 'implied_volatility'
+            if options_df[iv_col].sum() > 0:
+                has_greeks = True
+    
+    # 3. Hybrid Fallback for Greeks (Skew)
+    hybrid_df = pd.DataFrame()
+    if not has_greeks:
+        LOG.info(f"Massive data missing Greeks for {ticker}. Attempting yfinance fallback for Skew (Date: {target_date})...")
+        hybrid_df = _fetch_yfinance_chain_hybrid(ticker)
+        if hybrid_df.empty and options_df.empty:
+            return {"error": "no_options_data_total_failure"}
+        source_used = "hybrid_yfinance" if not hybrid_df.empty else "massive_partial"
+
+    # 4. Proceed with Calculations
+    pcr_volume = hist_pcr_volume
+    pcr_oi = hist_pcr_oi
+    
+    # Final Fallback for PCR if massive failed but we have hybrid data
+    if (pcr_volume is None) and not hybrid_df.empty:
+        c_hyb = hybrid_df[hybrid_df["type"].str.lower() == "call"]
+        p_hyb = hybrid_df[hybrid_df["type"].str.lower() == "put"]
+        if not c_hyb.empty and not p_hyb.empty:
+            cv, pv = c_hyb["volume"].sum(), p_hyb["volume"].sum()
+            if cv > 0: pcr_volume = float(pv / cv)
+            co, po = c_hyb["oi"].sum(), p_hyb["oi"].sum()
+            if co > 0: pcr_oi = float(po / co)
+
+    # Use the best dataset for Skew
+    calc_df = options_df if (has_greeks or hybrid_df.empty) else hybrid_df
+    if "type" not in calc_df.columns:
+        return {"error": "missing_type_column"}
+    
+    calls = calc_df[calc_df["type"].str.lower() == "call"].copy()
+    puts = calc_df[calc_df["type"].str.lower() == "put"].copy()
+    
+    if calls.empty or puts.empty:
+        return {"error": "missing_call_or_put"}
+    
+    # Already calculated PCR above
+    # ...
+    
+    # ========== Skew Calculation ==========
+    
+    skew_25d = None
+    iv_col = "iv" if ("iv" in calc_df.columns and calc_df["iv"].notna().any()) else (
+        "implied_volatility" if "implied_volatility" in calc_df.columns else None
+    )

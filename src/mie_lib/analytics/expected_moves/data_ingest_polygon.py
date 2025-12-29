@@ -219,6 +219,8 @@ def fetch_option_chain(
             "option_type": otype,
             "prev_close_mid": float(price),
             "iv": greeks.get("implied_volatility"), # Bonus: Snapshot gives IV!
+            "gamma": greeks.get("gamma"),
+            "oi": r.get("open_interest"),
             "contractSymbol": contract_ticker
         })
         

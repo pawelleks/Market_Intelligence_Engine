@@ -14,6 +14,18 @@ logger = logging.getLogger(__name__)
 _GEX_CACHE: Dict[str, Dict] = {}
 CACHE_TTL_MINUTES = 15
 
+def sanitize_floats(obj):
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_floats(x) for x in obj]
+    return obj
+
 @router.get("/latest/{ticker}")
 def get_latest_gex(ticker: str, force_refresh: bool = False):
     """
@@ -47,18 +59,6 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
                      else:
                          logger.info(f"Serving GEX for {ticker} from disk")
                          # Update memory cache
-                         import math
-                         def sanitize_floats(obj):
-                             if isinstance(obj, float):
-                                 if math.isnan(obj) or math.isinf(obj):
-                                     return None
-                                 return obj
-                             if isinstance(obj, dict):
-                                 return {k: sanitize_floats(v) for k, v in obj.items()}
-                             if isinstance(obj, list):
-                                 return [sanitize_floats(x) for x in obj]
-                             return obj
-    
                          sanitized_data = sanitize_floats(disk_data)
                          _GEX_CACHE[ticker] = {"timestamp": datetime.now(), "data": sanitized_data}
                          return sanitized_data

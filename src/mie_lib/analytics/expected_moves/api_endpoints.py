@@ -124,6 +124,15 @@ def get_reliability_history(
     # Pydantic handles this if we convert to dicts, but let's be safe
     # Actually, Pydantic v2 is strict, v1 allows it. 
     # Best to replace NaN with None before converting to dicts
+    # Rename columns to match Pydantic Model
+    rename_map = {
+        "spot_price": "underlying_price",
+        "expected_move": "expected_move_dollars",
+        "vix1d": "vix1d_value",
+        "confidence_score": "confidence_score_percent"
+    }
+    df = df.rename(columns=rename_map)
+    
     # Handle NaN values for JSON serialization
     # Convert to object first to allow None replacement
     df = df.astype(object)

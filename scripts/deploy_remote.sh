@@ -13,10 +13,12 @@ set -e
 # ==============================================================================
 
 # --- Configuration ---
+# --- Configuration ---
 REMOTE_USER="${REMOTE_USER:-}"
 REMOTE_HOST="${REMOTE_HOST:-}"
 IDENTITY_FILE="${IDENTITY_FILE:-}"
 REMOTE_DIR="${REMOTE_DIR:-~/market_intelligence_engine}"
+SSH_PORT="${SSH_PORT:-22}"
 
 # --- Load Local .env ---
 if [ -f ".env" ]; then
@@ -30,7 +32,7 @@ fi
 # --- Validation ---
 if [[ -z "$REMOTE_USER" || -z "$REMOTE_HOST" ]]; then
     echo "Error: REMOTE_USER and REMOTE_HOST environment variables must be set."
-    echo "Usage: REMOTE_USER=user REMOTE_HOST=host ./scripts/deploy_remote.sh"
+    echo "Usage: REMOTE_USER=user REMOTE_HOST=host [SSH_PORT=22] ./scripts/deploy_remote.sh"
     exit 1
 fi
 
@@ -45,9 +47,9 @@ if [[ -n "$IDENTITY_FILE" ]]; then
         echo "Error: Identity file '$IDENTITY_FILE' not found."
         exit 1
     fi
-    SSH_OPTS="-o StrictHostKeyChecking=no -i $IDENTITY_FILE"
+    SSH_OPTS="-o StrictHostKeyChecking=no -i $IDENTITY_FILE -p $SSH_PORT"
 else
-    SSH_OPTS="-o StrictHostKeyChecking=no"
+    SSH_OPTS="-o StrictHostKeyChecking=no -p $SSH_PORT"
 fi
 
 echo "========================================================"

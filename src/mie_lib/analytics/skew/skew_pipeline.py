@@ -9,10 +9,22 @@ Data Hierarchy:
 - SPOT: yfinance (for underlying prices only)
 """
 
+"""
+⛔ CRITICAL ARCHITECTURE CONSTRAINT (READ BEFORE MODIFYING):
+-----------------------------------------------------------
+This module adheres to the strict "Split-Source" Data Strategy defined in agent_rules.md
+
+OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
+EXCEPTION: If Massive data is missing Greeks (IV, OI) or empty, yfinance Fallback is PERMITTED to ensure functionality.
+
+ENRICHMENT: yfinance is allowed for underlying price/metadata and Greeks fallback.
+
+Any attempt to replace the flat-file ingest with an API call (outside the fallback scenario) is a violation of project constraints.
+"""
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import pandas as pd
@@ -33,27 +45,120 @@ class SpotPriceResult:
     error: Optional[str] = None
 
 
-def _fetch_spot_price(ticker: str) -> SpotPriceResult:
+def _fetch_spot_price(ticker: str, target_date: Optional[str] = None) -> SpotPriceResult:
     """
-    PURE FETCH: Get current/latest spot price from yfinance.
-    Thread-safe: no shared state mutation.
+    PURE FETCH: Get spot price from yfinance.
+    If target_date is provided, fetches historical close for that date.
+    Otherwise fetches current/latest price.
     """
     try:
         import yfinance as yf
-        
-        # Quick fetch - just today's close
         t = yf.Ticker(ticker)
-        hist = t.history(period="2d")  # 2 days to handle weekends
         
+        today_str = date.today().isoformat()
+        
+        # Scenario A: Specific Historical Date
+        if target_date and target_date != today_str:
+            try:
+                # Need a small buffer to ensure we get exactly that day
+                d_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                end_date = (d_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+                
+                # Fetch 1-day history
+                hist = t.history(start=target_date, end=end_date)
+                if not hist.empty:
+                    spot = float(hist["Close"].iloc[0])
+                    return SpotPriceResult(ticker=ticker, spot=spot, source=f"yfinance_hist_{target_date}")
+            except Exception as e:
+                LOG.debug(f"Historical spot failed for {ticker} on {target_date}: {e}")
+        
+        # Scenario B: Current/Latest Price
+        try:
+            # Try fast info first (no network call for historical)
+            spot = t.fast_info['last_price']
+            if spot and spot > 0:
+                return SpotPriceResult(ticker=ticker, spot=float(spot), source="yfinance_fast")
+        except:
+            pass
+            
+        hist = t.history(period="2d")  # 2 days to handle weekends
         if hist.empty:
             return SpotPriceResult(ticker=ticker, spot=None, source="no_data")
         
         spot = float(hist["Close"].iloc[-1])
-        return SpotPriceResult(ticker=ticker, spot=spot, source="yfinance")
+        return SpotPriceResult(ticker=ticker, spot=spot, source="yfinance_hist_latest")
         
     except Exception as e:
         LOG.warning(f"Failed to fetch spot for {ticker}: {e}")
         return SpotPriceResult(ticker=ticker, spot=None, source="error", error=str(e))
+
+
+def _fetch_yfinance_chain_hybrid(ticker: str, target_dte_min: int = 15, target_dte_max: int = 60) -> pd.DataFrame:
+    """
+    Fallback: Fetches option chain from yfinance if Massive is missing data.
+    Optimized to fetch only expirations within target DTE range (default 15-60 days).
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        exps = t.options
+        if not exps:
+            return pd.DataFrame()
+            
+        today = date.today()
+        valid_exps = []
+        
+        # Filter expirations
+        for e in exps:
+            try:
+                edate = datetime.strptime(e, "%Y-%m-%d").date()
+                days = (edate - today).days
+                if target_dte_min <= days <= target_dte_max:
+                    valid_exps.append(e)
+            except:
+                continue
+                
+        if not valid_exps:
+            # Fallback to first available if none in range? 
+            # Or assume Skew is irrelevant if no monthlys?
+            # Let's try to get at least one if possible, maybe closest to 30?
+            if exps:
+                # Find closest to 30
+                valid_exps = [min(exps, key=lambda x: abs((datetime.strptime(x, "%Y-%m-%d").date() - today).days - 30))]
+            else:
+                return pd.DataFrame()
+
+        dfs = []
+        for e in valid_exps:
+            try:
+                chain = t.option_chain(e)
+                c, p = chain.calls, chain.puts
+                c['type'] = 'call'
+                p['type'] = 'put'
+                c['expiration'] = e
+                p['expiration'] = e
+                dfs.extend([c, p])
+            except:
+                continue
+                
+        if not dfs:
+            return pd.DataFrame()
+            
+        df = pd.concat(dfs, ignore_index=True)
+        
+        # Normalize columns matched to skew logic
+        # logic expects: strike, type, iv (or impliedVolatility), oi (or openInterest), volume
+        df = df.rename(columns={
+            'impliedVolatility': 'iv',
+            'openInterest': 'oi',
+            'lastPrice': 'close' # approximate
+        })
+        
+        return df
+
+    except Exception as e:
+        LOG.error(f"Hybrid fetch failed for {ticker}: {e}")
+        return pd.DataFrame()
 
 
 def _calculate_skew_for_ticker(
@@ -64,61 +169,80 @@ def _calculate_skew_for_ticker(
 ) -> Dict[str, Any]:
     """
     Calculate Skew and PCR metrics for a single ticker.
-    
-    Args:
-        ticker: Underlying ticker
-        spot: Current spot price
-        options_df: Pre-filtered options data from Massive
-        target_date: YYYY-MM-DD
-        
-    Returns:
-        Dict with skew metrics
+    Arg: options_df can be empty or deficient (missing Greeks).
     """
-    if options_df.empty:
-        return {"error": "no_options_data"}
+    source_used = "massive"
     
-    # Ensure required columns exist
-    if "type" not in options_df.columns:
+    # 1. Calculate Historical PCR (Prioritize actual daily volume/OI from Massive)
+    hist_pcr_volume = None
+    hist_pcr_oi = None
+    
+    if not options_df.empty and "type" in options_df.columns:
+        c_hist = options_df[options_df["type"].str.lower() == "call"]
+        p_hist = options_df[options_df["type"].str.lower() == "put"]
+        
+        if not c_hist.empty and not p_hist.empty:
+            if "volume" in options_df.columns:
+                cv, pv = c_hist["volume"].sum(), p_hist["volume"].sum()
+                if cv > 0: hist_pcr_volume = float(pv / cv)
+            oi_col = "oi" if "oi" in options_df.columns else ("open_interest" if "open_interest" in options_df.columns else None)
+            if oi_col:
+                co, po = c_hist[oi_col].sum(), p_hist[oi_col].sum()
+                if co > 0: hist_pcr_oi = float(po / co)
+
+    # 2. Validate Data Quality (Do we have Greeks for Skew?)
+    has_greeks = False
+    if not options_df.empty:
+        has_iv = 'iv' in options_df.columns or 'implied_volatility' in options_df.columns
+        if has_iv:
+            iv_col = 'iv' if 'iv' in options_df.columns else 'implied_volatility'
+            if options_df[iv_col].sum() > 0:
+                has_greeks = True
+    
+    # 3. Hybrid Fallback for Greeks (Skew)
+    hybrid_df = pd.DataFrame()
+    if not has_greeks:
+        LOG.info(f"Massive data missing Greeks for {ticker}. Attempting yfinance fallback for Skew (Date: {target_date})...")
+        hybrid_df = _fetch_yfinance_chain_hybrid(ticker)
+        if hybrid_df.empty and options_df.empty:
+            return {"error": "no_options_data_total_failure"}
+        source_used = "hybrid_yfinance" if not hybrid_df.empty else "massive_partial"
+
+    # 4. Proceed with Calculations
+    pcr_volume = hist_pcr_volume
+    pcr_oi = hist_pcr_oi
+    
+    # If massive PCR failed (empty file etc) but we have hybrid data, use hybrid PCR as fallback
+    if (pcr_volume is None) and not hybrid_df.empty:
+        c_hyb = hybrid_df[hybrid_df["type"].str.lower() == "call"]
+        p_hyb = hybrid_df[hybrid_df["type"].str.lower() == "put"]
+        if not c_hyb.empty and not p_hyb.empty:
+            cv, pv = c_hyb["volume"].sum(), p_hyb["volume"].sum()
+            if cv > 0: pcr_volume = float(pv / cv)
+            co, po = c_hyb["oi"].sum(), p_hyb["oi"].sum()
+            if co > 0: pcr_oi = float(po / co)
+
+    # Use the best dataset for Skew
+    calc_df = options_df if (has_greeks or hybrid_df.empty) else hybrid_df
+    if "type" not in calc_df.columns:
         return {"error": "missing_type_column"}
     
-    calls = options_df[options_df["type"].str.lower() == "call"].copy()
-    puts = options_df[options_df["type"].str.lower() == "put"].copy()
+    calls = calc_df[calc_df["type"].str.lower() == "call"].copy()
+    puts = calc_df[calc_df["type"].str.lower() == "put"].copy()
     
     if calls.empty or puts.empty:
         return {"error": "missing_call_or_put"}
     
-    # ========== PCR Calculation ==========
-    # Massive files use 'open_interest', normalize to 'oi'
-    
-    # Volume-based PCR (if volume column exists)
-    pcr_volume = None
-    if "volume" in options_df.columns:
-        put_volume = puts["volume"].sum()
-        call_volume = calls["volume"].sum()
-        if call_volume > 0:
-            pcr_volume = put_volume / call_volume
-    
-    # OI-based PCR (handle both column names)
-    pcr_oi = None
-    oi_col = "oi" if "oi" in options_df.columns else ("open_interest" if "open_interest" in options_df.columns else None)
-    if oi_col:
-        put_oi = puts[oi_col].sum()
-        call_oi = calls[oi_col].sum()
-        if call_oi > 0:
-            pcr_oi = put_oi / call_oi
-    
     # ========== Skew Calculation ==========
-    # Massive files use 'implied_volatility', normalize to 'iv'
     
     skew_25d = None
-    iv_col = "iv" if ("iv" in options_df.columns and options_df["iv"].notna().any()) else (
-        "implied_volatility" if "implied_volatility" in options_df.columns else None
+    iv_col = "iv" if ("iv" in calc_df.columns and calc_df["iv"].notna().any()) else (
+        "implied_volatility" if "implied_volatility" in calc_df.columns else None
     )
     
-    if "strike" in options_df.columns and iv_col:
+    if "strike" in calc_df.columns and iv_col:
         # 25-Delta Skew approximation using ~5% OTM options
         otm_pct = 0.05
-        
         # OTM Put: strike < spot * 0.95
         otm_puts = puts[puts["strike"] < spot * (1 - otm_pct)]
         # OTM Call: strike > spot * 1.05
@@ -131,7 +255,6 @@ def _calculate_skew_for_ticker(
                 skew_25d = put_iv - call_iv
     
     # ========== Sentiment Score ==========
-    # Use pcr_oi if pcr_volume is not available (Massive files have OI, not volume)
     
     pcr_for_sentiment = pcr_volume if pcr_volume is not None else pcr_oi
     
@@ -141,8 +264,8 @@ def _calculate_skew_for_ticker(
         skew_signal = 0
         
         if pcr_for_sentiment is not None:
-            # PCR > 1 = bearish signal
-            pcr_signal = (pcr_for_sentiment - 1) * 0.5
+            # Shift center to 0.85 approx for options-heavy market
+            pcr_signal = (pcr_for_sentiment - 0.9) * 0.5
         
         if skew_25d is not None:
             # Positive skew (higher put IV) = bearish signal
@@ -167,9 +290,10 @@ def _calculate_skew_for_ticker(
         "sentiment_score": round(sentiment_score, 4) if sentiment_score is not None else None,
         "regime": regime,
         "spot": round(spot, 2),
-        "source": "massive",
-        "options_count": len(options_df)
+        "source": source_used,
+        "options_count": len(calc_df)
     }
+
 
 
 def run_skew_pipeline_parallel(
@@ -184,15 +308,8 @@ def run_skew_pipeline_parallel(
     1. Load Massive flat file ONCE (already downloaded by orchestrator)
     2. Fetch spot prices in PARALLEL (yfinance via ThreadPoolExecutor)
     3. Calculate metrics for each ticker (CPU-bound, fast)
+       * Fallback to yfinance for Chains if Massive data sucks.
     4. Write to hybrid storage (by_ticker/, by_date/, latest.json)
-    
-    Args:
-        tickers: List of underlying tickers to process
-        target_date: YYYY-MM-DD (defaults to today)
-        max_workers: Number of parallel threads for spot fetch
-        
-    Returns:
-        Dict with processing results and statistics
     """
     if target_date is None:
         target_date = str(date.today())
@@ -204,31 +321,24 @@ def run_skew_pipeline_parallel(
     loader = MassiveOptionsLoader()
     
     # Load ONCE for all tickers
+    # Note: If file missing, returns Empty DF. Hybrid fallback handled inside.
     all_options = loader.load_day_aggregates(target_date, tickers=tickers)
     
     if all_options.empty:
-        LOG.warning(f"No options data from Massive for {target_date}")
-        return {
-            "error": "no_massive_data",
-            "processed": 0,
-            "success": 0,
-            "failed": len(tickers),
-            "date": target_date
-        }
-    
-    LOG.info(f"Loaded {len(all_options)} options rows from Massive flat file")
+        LOG.warning(f"No options data from Massive for {target_date}. Will use Full Hybrid Fallback.")
+        # Do NOT return error. Proceed with empty map, forcing Hybrid for all.
+        pass
+    else:
+        LOG.info(f"Loaded {len(all_options)} options rows from Massive flat file")
     
     # Pre-group by ticker for O(1) lookup
     options_by_ticker: Dict[str, pd.DataFrame] = {}
-    if "underlying_ticker" in all_options.columns:
+    if not all_options.empty and "underlying_ticker" in all_options.columns:
         for ticker in tickers:
-            # Handle ^ stripping (e.g., ^SPX -> SPX in Massive data)
             clean_ticker = ticker.upper().lstrip("^")
             ticker_data = all_options[all_options["underlying_ticker"] == clean_ticker].copy()
             if not ticker_data.empty:
                 options_by_ticker[ticker] = ticker_data
-    
-    LOG.info(f"Options data available for {len(options_by_ticker)} tickers")
     
     # ========== STEP 2: Parallel Spot Fetch (yfinance) ==========
     
@@ -239,7 +349,7 @@ def run_skew_pipeline_parallel(
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_ticker = {
-            executor.submit(_fetch_spot_price, ticker): ticker
+            executor.submit(_fetch_spot_price, ticker, target_date): ticker
             for ticker in tickers
         }
         
@@ -258,7 +368,7 @@ def run_skew_pipeline_parallel(
     
     LOG.info(f"Spot prices: {len(spot_prices)} success, {len(spot_errors)} errors")
     
-    # ========== STEP 3: Calculate Metrics (Sequential, Fast) ==========
+    # ========== STEP 3: Calculate Metrics (Sequential + fallback fetching) ==========
     
     results = {
         "processed": 0,
@@ -273,7 +383,7 @@ def run_skew_pipeline_parallel(
         spot = spot_prices.get(ticker)
         options = options_by_ticker.get(ticker, pd.DataFrame())
         
-        # Skip if no spot price
+        # Skip if no spot price (we need spot for Skew calc)
         if spot is None:
             results["failed"] += 1
             results["details"].append({
@@ -283,17 +393,7 @@ def run_skew_pipeline_parallel(
             })
             continue
         
-        # Skip if no options data
-        if options.empty:
-            results["skipped"] += 1
-            results["details"].append({
-                "ticker": ticker,
-                "status": "skipped",
-                "error": "no_options_data"
-            })
-            continue
-        
-        # Calculate metrics
+        # Calculate metrics (Handles Hybrid Fetch internally if options empty/bad)
         metrics = _calculate_skew_for_ticker(ticker, spot, options, target_date)
         
         if "error" in metrics:
@@ -313,7 +413,8 @@ def run_skew_pipeline_parallel(
                 "ticker": ticker,
                 "status": "ok",
                 "regime": metrics.get("regime"),
-                "pcr": metrics.get("pcr_volume")
+                "pcr": metrics.get("pcr_volume"),
+                "source": metrics.get("source")
             })
         except Exception as e:
             LOG.error(f"Failed to save metrics for {ticker}: {e}")

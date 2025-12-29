@@ -439,19 +439,32 @@ const AdminDataDashboard = () => {
     const renderAiContext = () => {
         if (!aiContextData) return <p style={{ color: '#888' }}>No AI context found. Run "generate-ai-context" via CLI or Pipeline.</p>;
 
-        const { market_regime, volatility_landscape, liquidity_volume_profile, seasonality_forecast_next_5d, technical_summary } = aiContextData;
+        const { meta, price, regime, trend, options, seasonality } = aiContextData;
 
-        const Card = ({ title, children, color = '#222' }) => (
+        // Fallback for old schema if data hasn't refreshed yet
+        if (!meta && aiContextData.ticker) {
+            return (
+                <div style={{ marginTop: '20px' }}>
+                    <p style={{ color: '#f57c00' }}>Warning: Old JSON schema detected. Please regenerate context.</p>
+                    <details open>
+                        <summary>Raw Data</summary>
+                        <pre style={{ backgroundColor: '#111', padding: '15px' }}>{JSON.stringify(aiContextData, null, 2)}</pre>
+                    </details>
+                </div>
+            )
+        }
+
+        const Card = ({ title, children, color = '#1a2639' }) => (
             <div style={{ backgroundColor: color, padding: '15px', borderRadius: '8px', flex: '1 1 300px', border: '1px solid #333' }}>
                 <h4 style={{ margin: '0 0 10px 0', borderBottom: '1px solid #444', paddingBottom: '5px', color: '#ccc' }}>{title}</h4>
                 <div style={{ fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>{children}</div>
             </div>
         );
 
-        const Row = ({ label, value, unit = '' }) => (
+        const Row = ({ label, value, unit = '', color = '#ddd' }) => (
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '4px' }}>
                 <span style={{ color: '#888' }}>{label}:</span>
-                <span style={{ fontWeight: 'bold', color: '#ddd' }}>
+                <span style={{ fontWeight: 'bold', color }}>
                     {value !== null && value !== undefined ? `${value}${unit}` : <span style={{ color: '#555' }}>N/A</span>}
                 </span>
             </div>
@@ -460,51 +473,52 @@ const AdminDataDashboard = () => {
         return (
             <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ margin: 0 }}>AI Context: <span style={{ color: '#2196f3' }}>{aiContextData.ticker}</span></h3>
-                    <span style={{ color: '#888' }}>Date: {aiContextData.analysis_date}</span>
+                    <h3 style={{ margin: 0 }}>AI Context: <span style={{ color: '#2196f3' }}>{meta?.ticker}</span></h3>
+                    <span style={{ color: '#888' }}>Date: {meta?.date}</span>
                 </div>
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
-                    {/* MARKET REGIME */}
-                    <Card title="🏛️ Market Regime">
-                        <Row label="HMM State" value={market_regime?.hmm_description} />
-                        <Row label="Gamma Regime" value={market_regime?.gamma_landscape?.gamma_regime?.split('(')[0]} />
-                        <Row label="Net GEX" value={(market_regime?.gamma_landscape?.net_gamma_exposure_notional / 1e9)?.toFixed(2)} unit="B" />
-                        <Row label="Call Wall" value={market_regime?.gamma_landscape?.call_wall} />
-                        <Row label="Put Wall" value={market_regime?.gamma_landscape?.put_wall} />
+                    {/* PRICE & TREND */}
+                    <Card title="📈 Price & Trend">
+                        <Row label="Close" value={price?.close?.toFixed(2)} />
+                        <Row label="Dist SMA200" value={price?.dist_sma200_pct} color={price?.dist_sma200_pct?.startsWith('-') ? '#f44336' : '#4caf50'} />
+                        <Row label="Dist 52W High" value={price?.dist_52w_high_pct} />
+                        <div style={{ margin: '5px 0', borderTop: '1px dashed #444' }}></div>
+                        <Row label="DCS Status" value={trend?.dcs?.status} color={trend?.dcs?.status === 'Safe' ? '#4caf50' : '#f44336'} />
+                        <Row label="DCS Score" value={trend?.dcs?.score} />
+                        <Row label="EMA Stack" value={trend?.ema_stack?.verdict} />
+                        <Row label="ADX Strength" value={`${trend?.adx?.val?.toFixed(1)} (${trend?.adx?.trend_strength})`} />
+                        <Row label="Ichimoku" value={trend?.ichimoku?.status} />
+                        <Row label="TSMOM" value={trend?.tsmom?.signal} />
                     </Card>
 
-                    {/* VOLATILITY */}
-                    <Card title="⚡ Volatility & Risk">
-                        <Row label="ATR (14)" value={volatility_landscape?.atr_14?.toFixed(2)} />
-                        <Row label="ATR Rank (6M)" value={volatility_landscape?.atr_rank_6m?.toFixed(1)} unit="%" />
-                        <Row label="ATR % Price" value={volatility_landscape?.atr_pct_price?.toFixed(2)} unit="%" />
-                        <Row label="Regime" value={volatility_landscape?.volatility_regime} />
-                        <Row label="Desc" value={volatility_landscape?.volatility_description} />
-                        <h5 style={{ margin: '10px 0 5px 0', color: '#aaa' }}>Expected Moves</h5>
-                        <Row label="Day Move" value={volatility_landscape?.day_iv_em} />
-                        <Row label="Week Move" value={volatility_landscape?.week_iv_em} />
+                    {/* REGIME & VOL */}
+                    <Card title="🏛️ Regime & Volatility">
+                        <Row label="HMM State" value={regime?.hmm?.desc} color={regime?.hmm?.state === '0' ? '#4caf50' : '#f44336'} />
+                        <Row label="Markov Verdict" value={regime?.markov?.verdict} />
+                        <Row label="Next Bull Prob" value={(regime?.markov?.next_prob_bull * 100)?.toFixed(1)} unit="%" />
+                        <div style={{ margin: '5px 0', borderTop: '1px dashed #444' }}></div>
+                        <Row label="Vol Regime" value={regime?.vol?.regime} />
+                        <Row label="ATR (14)" value={regime?.vol?.atr_14?.toFixed(2)} />
+                        <Row label="ATR Rank" value={regime?.vol?.rank_6m} unit="%" />
                     </Card>
 
-                    {/* LIQUIDITY */}
-                    <Card title="💧 Liquidity & Volume">
-                        <Row label="Volume Regime" value={liquidity_volume_profile?.volume_regime} />
-                        <Row label="Rel Vol (10d)" value={liquidity_volume_profile?.relative_volume_10d?.toFixed(2)} />
-                        <Row label="Trend Score" value={liquidity_volume_profile?.volume_trend_score} />
-                        <Row label="Buy Pressure" value={liquidity_volume_profile?.buying_pressure_ratio?.toFixed(2)} />
+                    {/* OPTIONS */}
+                    <Card title="🎲 Options & GEX">
+                        <Row label="Net GEX" value={options?.gex?.net_regime} />
+                        <Row label="Call Wall" value={options?.gex?.call_wall_dist_pct} />
+                        <Row label="Put Wall" value={options?.gex?.put_wall_dist_pct} />
+                        <div style={{ margin: '5px 0', borderTop: '1px dashed #444' }}></div>
+                        <Row label="EM (1W)" value={options?.exp_moves?.['1w_range']?.join(' - ')} />
+                        <Row label="0DTE Range" value={`+/- ${options?.exp_moves?.['0dte_range']?.toFixed(2)}`} />
+                        <Row label="PCR (Vol)" value={options?.sentiment?.pcr_vol?.toFixed(2)} />
+                        <Row label="Skew (24d)" value={options?.sentiment?.skew_24d} />
                     </Card>
 
                     {/* SEASONALITY */}
-                    <Card title="📅 Seasonality (Next 5d)">
-                        {seasonality_forecast_next_5d?.status === 'ok' ? (
-                            <>
-                                <Row label="Win Rate" value={seasonality_forecast_next_5d?.win_rate} unit="%" />
-                                <Row label="Exp Return" value={seasonality_forecast_next_5d?.avg_return} unit="%" />
-                                <Row label="Trajectory" value={seasonality_forecast_next_5d?.trajectory} />
-                            </>
-                        ) : (
-                            <span style={{ color: '#666' }}>No forecast available</span>
-                        )}
+                    <Card title="📅 Seasonality">
+                        <Row label="Next Session" value={seasonality?.next_day} />
+                        <Row label="Next Week" value={seasonality?.next_week} />
                     </Card>
                 </div>
 

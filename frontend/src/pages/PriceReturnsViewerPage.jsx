@@ -157,8 +157,10 @@ const StyledDataTable = ({ data }) => {
 
 
 // --- Main Page Component ---
-const PriceReturnsViewerPage = ({ settings, onSettingsChange, data, loading, error, freshnessStatus }) => {
+import { usePageTitle } from '../hooks/usePageTitle';
 
+const PriceReturnsViewerPage = ({ settings, onSettingsChange, data, loading, error, freshnessStatus }) => {
+    usePageTitle(`Price Analysis: ${settings.ticker}`);
     const summaryText = `Ticker: ${settings.ticker} • Mode: ${settings.stateMode} • Threshold: ${settings.thresholdBPS} BPS (${(settings.thresholdBPS / 100).toFixed(2)}%) • Rows: ${settings.rows}`;
 
     return (

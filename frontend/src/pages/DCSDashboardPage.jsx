@@ -219,7 +219,10 @@ const DCSHistoryChart = ({ ticker }) => {
     );
 };
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const DCSDashboardPage = ({ settings, onSettingsChange, loading, error }) => {
+    usePageTitle('DCS Dashboard');
     const [dcsResults, setDcsResults] = useState(null);
     const [dcsConfig, setDcsConfig] = useState(null);
     const [dcsLoading, setDcsLoading] = useState(false);

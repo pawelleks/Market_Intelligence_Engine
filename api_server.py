@@ -264,6 +264,15 @@ def get_price_returns_viewer_data(
     """Retrieves OHLC data, calculates returns and state classification for display."""
     
     ticker = ticker.upper()
+    
+    # VULN-01FIX: Validate ticker to prevent path traversal
+    import re
+    if not re.match(r"^[A-Z0-9\.]+$", ticker):
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid ticker format. Only alphanumeric characters and dots allowed."
+        )
+
     path = Path(f"data/raw/{ticker}.parquet") # Using raw parquet for full OHLC data
     
     if not path.exists():

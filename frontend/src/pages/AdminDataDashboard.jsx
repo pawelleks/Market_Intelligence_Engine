@@ -21,7 +21,10 @@ const StatusBadge = ({ status }) => {
     return <span style={{ color, fontWeight: 'bold' }}>{s}</span>;
 };
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const AdminDataDashboard = () => {
+    usePageTitle('Admin Dashboard');
     const auth = useAuth() || {};
     const { user, token } = auth;
     console.log("AdminDashboard Mount, User:", user?.email);

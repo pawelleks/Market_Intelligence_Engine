@@ -30,7 +30,10 @@ class ErrorBoundary extends React.Component {
     }
 }
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const ExpectedMovesPage = () => {
+    usePageTitle('Analysis: Expected Moves');
     return (
         <ErrorBoundary>
             <ExpectedMovesPageContent />

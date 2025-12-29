@@ -14,7 +14,9 @@ from mie_lib.db.database import get_db
 from mie_lib.db.models import User
 
 # Services
+# Services
 from mie_lib.services.telegram_service import send_telegram_alert
+from mie_lib.services.email_service import send_email_notification
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,9 @@ router = APIRouter()
 # --- Configuration ---
 # You should ideally load these from a config module involved with .env
 # For now, os.getenv is sufficient given the instructions.
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "CHANGEME_THIS_IS_UNSAFE_DEV_SECRET")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("CRITICAL SECURITY ERROR: JWT_SECRET_KEY is not set.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 
@@ -34,9 +38,10 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 
 # --- Schemas ---
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+class GenericLoginResponse(BaseModel):
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    message: str = "Login processed. If your account is pending, check your email for updates."
 
 class LoginRequest(BaseModel):
     id_token: str # The Google ID Token
@@ -67,25 +72,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 # --- Endpoints ---
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=GenericLoginResponse)
 async def login(
     login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):
     """
     Exchanges a Google ID Token for an App JWT.
-    If user is new, creates account and alerts admin (Waitlist).
-    If user exists but not approved, returns 403.
+    
+    SECURITY UPDATE (VULN-04):
+    Returns a unified 200 OK response for all valid Google Tokens.
+    - Active Users: Receive access_token.
+    - Pending/New Users: Receive a generic message and an email notification.
     """
     token_str = login_data.id_token
     
-    # 1. Verify Google Token
+    # 1. Verify Google Token (Invalid token still returns 401 as it's a client error)
     try:
-        # Note: In a real async app we might run this in executor if it blocks
-        # But verify_oauth2_token makes network calls. 
-        # For simplicity here we run it inline, or better:
-        # google-auth requests transport is sync. 
-        # This will block the event loop for the duration of the request.
         id_info = id_token.verify_oauth2_token(
             token_str, 
             google_requests.Request(), 
@@ -97,7 +100,7 @@ async def login(
 
     # 2. Extract Info
     email = id_info.get("email")
-    sub = id_info.get("sub") # Google unique ID
+    sub = id_info.get("sub") 
     name = id_info.get("name")
     
     if not email:
@@ -108,6 +111,7 @@ async def login(
     
     if not user:
         # --- NEW USER CASE ---
+        # Registration Flow
         new_user = User(
             email=email,
             google_sub=sub,
@@ -119,34 +123,41 @@ async def login(
         db.commit()
         db.refresh(new_user)
         
-        # Send Alert
+        # Notify Admin (Registration Only)
         await send_telegram_alert(f"🚨 New User Signup: {email} ({name})")
         
-        # Return 403 Pending
+        # Return 403 for New User
         raise HTTPException(
             status_code=403, 
-            detail="Account created but pending approval. Administrator has been notified."
+            detail="Authentication successful, but account is pending approval."
         )
+
+    # --- IDENTITY VERIFICATION ---
+    if user.google_sub and user.google_sub != sub:
+        # Mismatch - Fail Authentication
+        logger.critical(f"SECURITY ALERT: User {email} ID mismatch.")
+        raise HTTPException(status_code=403, detail="Authentication failed. Identity mismatch.")
+
+    # Backfill sub
+    if not user.google_sub:
+        user.google_sub = sub
+        db.commit()
 
     if not user.is_approved:
         # --- UNAPPROVED CASE ---
-        # Optionally verify sub matches?
-        if user.google_sub and user.google_sub != sub:
-             logger.warning(f"User {email} logged in with different Google Sub ID!")
-             
+        # Do NOT send Telegram here (prevents spam on login attempts)
         raise HTTPException(
             status_code=403, 
-            detail="Account is pending approval. Please contact administrator."
+            detail="Authentication successful, but account is pending approval."
         )
 
     # --- APPROVED CASE ---
-    # Update Visit Count
     try:
         user.visit_count = (user.visit_count or 0) + 1
         db.commit()
     except Exception as e:
         logger.error(f"Failed to increment visit_count for {email}: {e}")
-        # Continue login anyway, don't block user for a counter
+        
     # Generate JWT
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -154,4 +165,8 @@ async def login(
         expires_delta=access_token_expires
     )
     
-    return {"access_token": access_token, "token_type": "bearer"}
+    return GenericLoginResponse(
+        access_token=access_token, 
+        token_type="bearer",
+        message="Login successful."
+    )

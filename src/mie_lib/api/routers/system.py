@@ -1,13 +1,33 @@
-
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from mie_lib.db.database import get_db
 
 from mie_lib.services.job_runner import job_runner
 from mie_lib.services.job_tracker import JobTracker
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
+
+@router.get("/health")
+@router.head("/health")
+def health_check(db: Session = Depends(get_db)):
+    """
+    Standard health check endpoint for monitoring tools.
+    Verifies API is up and DB is reachable.
+    """
+    try:
+        # Perform a simple query to verify DB connectivity
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Database connection failed: {str(e)}"
+        )
 
 class JobRequest(BaseModel):
     job_name: str

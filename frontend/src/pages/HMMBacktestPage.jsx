@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Loader2, Activity, RefreshCw, Trophy, Info, Filter } from "lucide-react";
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const HMMBacktestPage = () => {
+    usePageTitle('HMM Backtest Analysis');
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);

@@ -3,7 +3,10 @@ import PerformanceTable from '../components/performance/PerformanceTable';
 
 const API_BASE = '/api/v1/performance';
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const PerformancePage = () => {
+    usePageTitle('Market Performance');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);

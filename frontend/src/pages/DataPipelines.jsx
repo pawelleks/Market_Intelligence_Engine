@@ -15,26 +15,32 @@ const LogViewer = ({ logs }) => {
         scrollToBottom();
     }, [logs]);
 
-    // Syntax Highlighting Logic
-    const formatLogOutput = (rawText) => {
-        if (!rawText) return "";
-        let formatted = rawText
-            .replace(/ERROR/g, '<span class="log-error">ERROR</span>')
-            .replace(/FAIL/g, '<span class="log-error">FAIL</span>')
-            .replace(/WARNING/g, '<span class="log-warn">WARNING</span>')
-            .replace(/INFO/g, '<span class="log-info">INFO</span>');
+    // VULN-02FIX: Safe rendering instead of dangerouslySetInnerHTML
+    const renderLogLine = (line, idx) => {
+        if (!line) return <div key={idx} className="h-4" />;
 
-        // Highlight Timestamps (YYYY-MM-DD HH:MM:SS)
-        formatted = formatted.replace(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/g, '<span class="log-timestamp">$1</span>');
-        return formatted;
+        // Tokenize by keywords and timestamp
+        const parts = line.split(/(ERROR|FAIL|WARNING|INFO|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/g);
+
+        return (
+            <div key={idx} className="whitespace-pre-wrap">
+                {parts.map((part, pIdx) => {
+                    if (part === "ERROR" || part === "FAIL") return <span key={pIdx} className="log-error">{part}</span>;
+                    if (part === "WARNING") return <span key={pIdx} className="log-warn">{part}</span>;
+                    if (part === "INFO") return <span key={pIdx} className="log-info">{part}</span>;
+                    if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(part)) return <span key={pIdx} className="log-timestamp">{part}</span>;
+                    return part;
+                })}
+            </div>
+        );
     };
 
     return (
         <div
             id="log-container"
             className="terminal-window"
-            dangerouslySetInnerHTML={{ __html: formatLogOutput(logs || "Waiting for logs...") }}
         >
+            {logs ? logs.split('\n').map(renderLogLine) : "Waiting for logs..."}
         </div>
     );
 };

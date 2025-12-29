@@ -22,3 +22,6 @@ data/logs/
 .idea/
 *.tar.gz
 *.log
+
+# Sensitive Documentation (User Only)
+docs/Security.md

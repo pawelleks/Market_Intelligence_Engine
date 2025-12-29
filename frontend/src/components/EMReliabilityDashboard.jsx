@@ -97,7 +97,6 @@ const EMReliabilityDashboard = () => {
     }, []);
 
     // 2. Fetch Data when Ticker Changes
-    // 2. Fetch Data when Ticker Changes
     useEffect(() => {
         if (!selectedTicker) return;
 
@@ -169,16 +168,72 @@ const EMReliabilityDashboard = () => {
         return (order[a.expiry_type] || 99) - (order[b.expiry_type] || 99);
     });
 
+    // --- STYLES ---
+    const containerStyle = {
+        padding: '20px',
+        color: '#d7e3f3', // Standard Text
+        fontFamily: 'Inter, sans-serif'
+    };
+
+    const cardStyle = {
+        backgroundColor: '#0e1525', // Standard Dark BG
+        borderRadius: '8px',
+        padding: '20px',
+        border: '1px solid #203049', // Standard Border
+        boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+    };
+
+    const tableContainerStyle = {
+        backgroundColor: '#0e1525',
+        borderRadius: '8px',
+        border: '1px solid #203049',
+        overflow: 'hidden'
+    };
+
+    const tableStyle = {
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: '13px',
+        backgroundColor: '#0e1525',
+    };
+
+    const headerStyle = {
+        padding: '10px 8px',
+        textAlign: 'left',
+        borderBottom: '1px solid #203049',
+        color: '#9ec4ff', // Standard Label Color
+        fontSize: '11px',
+        fontWeight: '500',
+        textTransform: 'uppercase',
+    };
+
+    const cellStyle = {
+        padding: '12px 20px', // Matches original padding slightly but keeps it spacious
+        borderBottom: '1px solid #203049',
+        color: '#d7e3f3',
+    };
+
+    const selectStyle = {
+        backgroundColor: '#0e1525',
+        color: '#d7e3f3',
+        border: '1px solid #203049',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        outline: 'none',
+        minWidth: '100px',
+        fontSize: '14px'
+    };
+
     return (
-        <div style={{ padding: '20px', color: '#e0e0e0', fontFamily: 'Inter, sans-serif' }}>
+        <div style={containerStyle}>
 
             {/* --- HEADER & CONTROLS --- */}
-            <div style={{ marginBottom: '30px', borderBottom: '1px solid #333', paddingBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
+            <div style={{ marginBottom: '30px', borderBottom: '1px solid #203049', paddingBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
                 <div>
                     <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '600', color: '#fff' }}>
                         Expected Move Reliability
                     </h1>
-                    <p style={{ margin: '5px 0 0', color: '#888', fontSize: '14px' }}>
+                    <p style={{ margin: '5px 0 0', color: '#9ec4ff', fontSize: '14px' }}>
                         Historical performance tracking and breach analysis.
                     </p>
                 </div>
@@ -187,14 +242,11 @@ const EMReliabilityDashboard = () => {
                 <div style={{ display: 'flex', gap: '15px' }}>
                     {/* Ticker Select */}
                     <div>
-                        <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '4px' }}>Ticker</label>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#9ec4ff', marginBottom: '4px' }}>Ticker</label>
                         <select
                             value={selectedTicker}
                             onChange={(e) => setSelectedTicker(e.target.value)}
-                            style={{
-                                backgroundColor: '#1e1e1e', color: '#fff', border: '1px solid #444',
-                                padding: '8px 12px', borderRadius: '4px', outline: 'none', minWidth: '100px', fontSize: '14px'
-                            }}
+                            style={selectStyle}
                         >
                             {availableTickers.map(t => (
                                 <option key={t} value={t}>{t}</option>
@@ -204,14 +256,11 @@ const EMReliabilityDashboard = () => {
 
                     {/* Period Select */}
                     <div>
-                        <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '4px' }}>Period</label>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#9ec4ff', marginBottom: '4px' }}>Period</label>
                         <select
                             value={selectedPeriod}
                             onChange={(e) => setSelectedPeriod(e.target.value)}
-                            style={{
-                                backgroundColor: '#1e1e1e', color: '#fff', border: '1px solid #444',
-                                padding: '8px 12px', borderRadius: '4px', outline: 'none', minWidth: '100px', fontSize: '14px'
-                            }}
+                            style={selectStyle}
                         >
                             <option value="ALL">All Periods</option>
                             <option value="ODTE">0DTE</option>
@@ -238,19 +287,16 @@ const EMReliabilityDashboard = () => {
                     const color = isHigh ? '#4caf50' : (isLow ? '#f44336' : '#ffeb3b');
 
                     return (
-                        <div key={idx} style={{
-                            backgroundColor: '#1e1e1e', borderRadius: '8px', padding: '20px',
-                            border: '1px solid #333', boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-                        }}>
+                        <div key={idx} style={cardStyle}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#fff' }}>
-                                    {item.ticker} <span style={{ color: '#888', fontSize: '12px' }}>{item.expiry_type}</span>
+                                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#d7e3f3' }}>
+                                    {item.ticker} <span style={{ color: '#9ec4ff', fontSize: '12px' }}>{item.expiry_type}</span>
                                 </span>
-                                <span style={{ fontSize: '12px', color: '#666' }}>N={item.total_records}</span>
+                                <span style={{ fontSize: '12px', color: '#9ec4ff' }}>N={item.total_records}</span>
                             </div>
 
                             <div style={{ marginBottom: '15px' }}>
-                                <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>Hit Rate</div>
+                                <div style={{ fontSize: '12px', color: '#9ec4ff', marginBottom: '4px' }}>Hit Rate</div>
                                 <div style={{ fontSize: '32px', fontWeight: 'bold', color: color }}>
                                     {item.hit_rate_percent.toFixed(1)}%
                                 </div>
@@ -258,18 +304,18 @@ const EMReliabilityDashboard = () => {
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
                                 <div>
-                                    <div style={{ color: '#666', display: 'flex', alignItems: 'center' }}>
+                                    <div style={{ color: '#9ec4ff', display: 'flex', alignItems: 'center' }}>
                                         Avg Excess
                                         <InfoTooltip text="Average dollar amount by which the price missed the expected range (when a breach occurred)." />
                                     </div>
-                                    <div style={{ color: '#ddd' }}>${item.average_high_breach_dollars.toFixed(2)}</div>
+                                    <div style={{ color: '#d7e3f3' }}>${item.average_high_breach_dollars.toFixed(2)}</div>
                                 </div>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ color: '#666', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                    <div style={{ color: '#9ec4ff', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                                         Max Excess
                                         <InfoTooltip text="Largest % by which price exceeded the range. Formula: (Excess $ / Expected Move $) * 100" />
                                     </div>
-                                    <div style={{ color: '#ddd' }}>{item.max_breach_percent.toFixed(1)}%</div>
+                                    <div style={{ color: '#d7e3f3' }}>{item.max_breach_percent.toFixed(1)}%</div>
                                 </div>
                             </div>
                         </div>
@@ -278,11 +324,11 @@ const EMReliabilityDashboard = () => {
             </div>
 
             {/* --- HISTORICAL TABLE --- */}
-            <div style={{ backgroundColor: '#1e1e1e', borderRadius: '8px', border: '1px solid #333', overflow: 'hidden' }}>
+            <div style={tableContainerStyle}>
 
                 {/* Table Header */}
-                <div style={{ padding: '15px 20px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', color: '#fff' }}>
+                <div style={{ padding: '15px 20px', borderBottom: '1px solid #203049', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', color: '#d7e3f3' }}>
                         Historical Records ({selectedTicker} - {selectedPeriod})
                     </h3>
                     {/* Pagination Controls */}
@@ -309,17 +355,17 @@ const EMReliabilityDashboard = () => {
 
                 {/* Table Content */}
                 <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <table style={tableStyle}>
                         <thead>
-                            <tr style={{ backgroundColor: '#252525', color: '#888', textAlign: 'left' }}>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Type</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Calc Date</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Expiry Date</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Expected Move</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Expected Range</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Realized Close</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500' }}>Confidence</th>
-                                <th style={{ padding: '12px 20px', fontWeight: '500', textAlign: 'center' }}>Status</th>
+                            <tr>
+                                <th style={{ ...headerStyle, paddingLeft: '20px' }}>Type</th>
+                                <th style={headerStyle}>Calc Date</th>
+                                <th style={headerStyle}>Expiry Date</th>
+                                <th style={headerStyle}>Expected Move</th>
+                                <th style={headerStyle}>Expected Range</th>
+                                <th style={headerStyle}>Realized Close</th>
+                                <th style={headerStyle}>Confidence</th>
+                                <th style={{ ...headerStyle, textAlign: 'center' }}>Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -335,24 +381,24 @@ const EMReliabilityDashboard = () => {
                                 const isPending = isSuccess === null || isSuccess === undefined;
                                 const emPct = (row.expected_move_dollars / row.underlying_price) * 100;
                                 return (
-                                    <tr key={idx} style={{ borderBottom: '1px solid #2c2c2c' }}>
-                                        <td style={{ padding: '12px 20px' }}>
-                                            <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#333', color: '#aaa' }}>
+                                    <tr key={idx} style={{ borderBottom: '1px solid #203049' }}>
+                                        <td style={{ ...cellStyle, paddingLeft: '20px' }}>
+                                            <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#203049', color: '#9ec4ff' }}>
                                                 {row.expiry_type}
                                             </span>
                                         </td>
-                                        <td style={{ padding: '12px 20px', color: '#ccc' }}>{fmtDate(row.timestamp)}</td>
-                                        <td style={{ padding: '12px 20px', color: '#ccc' }}>{fmtDate(row.expiry_date)}</td>
-                                        <td style={{ padding: '12px 20px', color: '#ccc' }}>
-                                            {fmt(row.expected_move_dollars)} <span style={{ color: '#666', fontSize: '12px' }}>({emPct.toFixed(1)}%)</span>
+                                        <td style={cellStyle}>{fmtDate(row.timestamp)}</td>
+                                        <td style={cellStyle}>{fmtDate(row.expiry_date)}</td>
+                                        <td style={cellStyle}>
+                                            {fmt(row.expected_move_dollars)} <span style={{ color: '#555', fontSize: '12px' }}>({emPct.toFixed(1)}%)</span>
                                         </td>
-                                        <td style={{ padding: '12px 20px', color: '#ccc' }}>
+                                        <td style={cellStyle}>
                                             {fmt(row.lower_range)} - {fmt(row.upper_range)}
                                         </td>
-                                        <td style={{ padding: '12px 20px', color: '#ccc' }}>
+                                        <td style={cellStyle}>
                                             {fmt(row.realized_close || row.realized_ohlc?.close)}
                                         </td>
-                                        <td style={{ padding: '12px 20px' }}>
+                                        <td style={cellStyle}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <div style={{ flex: 1, height: '4px', backgroundColor: '#333', borderRadius: '2px', width: '60px' }}>
                                                     <div style={{
@@ -368,7 +414,7 @@ const EMReliabilityDashboard = () => {
                                                 </span>
                                             </div>
                                         </td>
-                                        <td style={{ padding: '12px 20px', textAlign: 'center' }}>
+                                        <td style={{ ...cellStyle, textAlign: 'center' }}>
                                             {isPending ? (
                                                 <span style={{
                                                     padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600',

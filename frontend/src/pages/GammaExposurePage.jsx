@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import GEXChart from '../components/GEXChart';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 const GammaExposurePage = () => {
+    usePageTitle('Gamma Exposure');
     const [ticker, setTicker] = useState('SPY');
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -242,17 +244,44 @@ const GammaExposurePage = () => {
     });
 
     return (
-        <div style={{ padding: '20px', backgroundColor: '#121212', minHeight: '100vh', color: '#e0e0e0', fontFamily: 'Inter, sans-serif' }}>
-            {/* Top Header Row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                    {/* Big Ticker Name */}
-                    <div style={{ fontSize: '48px', fontWeight: '900', color: '#fff', letterSpacing: '-2px' }}>
-                        {ticker}
+        <div style={{ padding: '20px', backgroundColor: '#0b1220', minHeight: '100vh', color: '#d7e3f3', fontFamily: 'Inter, sans-serif' }}>
+            {/* Standard Header Layout */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #203049', paddingBottom: '15px' }}>
+                <h2 style={{ fontSize: '1.5rem', margin: 0, color: '#d7e3f3' }}>
+                    Gamma Exposure Analysis <span style={{ color: '#9e9e9e', fontSize: '1rem', marginLeft: '10px' }}>{'>'} {ticker}</span>
+                </h2>
+
+                <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                    {/* Horizon Selector (Moved to right with ticker) */}
+                    <div style={{ display: 'flex', backgroundColor: '#0e1525', borderRadius: '6px', padding: '2px', border: '1px solid #203049' }}>
+                        {[
+                            { id: 'eow', label: 'EOW' },
+                            { id: 'eom', label: 'EOM' },
+                            { id: 'eoq', label: 'EOQ' },
+                            { id: 'next5', label: '+5 Days' },
+                            { id: 'next30', label: '+30 Days' }
+                        ].map(h => (
+                            <button
+                                key={h.id}
+                                onClick={() => setHorizon(h.id)}
+                                style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: horizon === h.id ? '#203049' : 'transparent',
+                                    color: horizon === h.id ? '#fff' : '#888',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: horizon === h.id ? 'bold' : 'normal',
+                                    fontSize: '13px'
+                                }}
+                            >
+                                {h.label}
+                            </button>
+                        ))}
                     </div>
 
                     {/* Ticker Selector */}
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '5px' }}>
                         <select
                             value={ticker}
                             onChange={(e) => {
@@ -261,12 +290,13 @@ const GammaExposurePage = () => {
                                 setTimeout(() => setRefreshTrigger(prev => prev + 1), 0);
                             }}
                             style={{
-                                padding: '10px',
+                                padding: '8px',
                                 borderRadius: '4px',
-                                border: '1px solid #333',
-                                backgroundColor: '#1e1e1e',
-                                color: '#fff',
-                                fontSize: '16px'
+                                border: '1px solid #203049',
+                                backgroundColor: '#0e1525',
+                                color: '#d7e3f3',
+                                fontSize: '14px',
+                                cursor: 'pointer'
                             }}
                         >
                             {availableTickers.map(t => (
@@ -275,88 +305,62 @@ const GammaExposurePage = () => {
                         </select>
                         <button
                             onClick={() => setRefreshTrigger(prev => prev + 1)}
-                            style={{ padding: '10px 20px', backgroundColor: '#333', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                            style={{
+                                padding: '8px 12px',
+                                backgroundColor: '#203049',
+                                color: '#d7e3f3',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                            }}
                         >
                             Refresh
                         </button>
                     </div>
                 </div>
-
-                {/* Horizon Selector */}
-                <div style={{ display: 'flex', backgroundColor: '#1e1e1e', borderRadius: '8px', padding: '4px' }}>
-                    {[
-                        { id: 'eow', label: 'EOW' },
-                        { id: 'eom', label: 'EOM' },
-                        { id: 'eoq', label: 'EOQ' },
-                        { id: 'next5', label: '+5 Days' },
-                        { id: 'next30', label: '+30 Days' }
-                    ].map(h => (
-                        <button
-                            key={h.id}
-                            onClick={() => setHorizon(h.id)}
-                            style={{
-                                padding: '8px 16px',
-                                backgroundColor: horizon === h.id ? '#333' : 'transparent',
-                                color: horizon === h.id ? '#fff' : '#888',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: horizon === h.id ? 'bold' : 'normal',
-                                transition: 'all 0.2s',
-                                fontSize: '14px'
-                            }}
-                        >
-                            {h.label}
-                        </button>
-                    ))}
-                </div>
             </div>
 
             {/* Metrics Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', marginBottom: '20px' }}>
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Spot Price</div>
+                <div style={{ backgroundColor: '#0e1525', padding: '15px', borderRadius: '8px', border: '1px solid #203049' }}>
+                    <div style={{ color: '#9e9e9e', fontSize: '12px', marginBottom: '5px', textTransform: 'uppercase' }}>Spot Price</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
                         ${data && data.spot_price ? data.spot_price.toFixed(2) : '---'}
                     </div>
                     {data && data.timestamp && (
-                        <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
                             {new Date(data.timestamp).toLocaleDateString()}
                         </div>
                     )}
                 </div>
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Net GEX ($)</div>
+                <div style={{ backgroundColor: '#0e1525', padding: '15px', borderRadius: '8px', border: '1px solid #203049' }}>
+                    <div style={{ color: '#9e9e9e', fontSize: '12px', marginBottom: '5px', textTransform: 'uppercase' }}>Net GEX ($)</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold', color: activeNetGex >= 0 ? '#4caf50' : '#f44336' }}>
                         ${activeNetGex?.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </div>
                 </div>
 
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Max GEX Strike</div>
+                <div style={{ backgroundColor: '#0e1525', padding: '15px', borderRadius: '8px', border: '1px solid #203049' }}>
+                    <div style={{ color: '#9e9e9e', fontSize: '12px', marginBottom: '5px', textTransform: 'uppercase' }}>Max GEX Strike</div>
                     <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196f3' }}>
                         ${maxGexStrike}
                     </div>
                 </div>
 
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <div style={{ color: '#888', fontSize: '14px', marginBottom: '5px' }}>Last Updated</div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#e0e0e0' }}>
-                        {data && data.timestamp ? new Date(data.timestamp).toLocaleString() : '---'}
-                    </div>
-                </div>
-
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ backgroundColor: '#0e1525', padding: '15px', borderRadius: '8px', border: '1px solid #203049', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '5px', width: '100%' }}>
                         <button
                             onClick={() => setViewMode('split')}
                             style={{
-                                padding: '8px 12px',
+                                flex: 1,
+                                padding: '6px',
                                 borderRadius: '4px',
-                                border: '1px solid #333',
+                                border: '1px solid #203049',
                                 backgroundColor: viewMode === 'split' ? '#2196F3' : 'transparent',
-                                color: '#fff',
-                                cursor: 'pointer'
+                                color: '#d7e3f3',
+                                cursor: 'pointer',
+                                fontSize: '12px'
                             }}
                         >
                             Split
@@ -364,12 +368,14 @@ const GammaExposurePage = () => {
                         <button
                             onClick={() => setViewMode('net')}
                             style={{
-                                padding: '8px 12px',
+                                flex: 1,
+                                padding: '6px',
                                 borderRadius: '4px',
-                                border: '1px solid #333',
+                                border: '1px solid #203049',
                                 backgroundColor: viewMode === 'net' ? '#2196F3' : 'transparent',
-                                color: '#fff',
-                                cursor: 'pointer'
+                                color: '#d7e3f3',
+                                cursor: 'pointer',
+                                fontSize: '12px'
                             }}
                         >
                             Net
@@ -387,7 +393,7 @@ const GammaExposurePage = () => {
 
             {/* LOADING INDICATOR */}
             {loading && (
-                <div style={{ textAlign: 'center', padding: '50px', color: '#aaa' }}>
+                <div style={{ textAlign: 'center', padding: '50px', color: '#9e9e9e' }}>
                     <h2>{loadingStatus || 'Loading GEX Data...'}</h2>
                 </div>
             )}
@@ -408,7 +414,7 @@ const GammaExposurePage = () => {
                             </p>
                         </div>
                     ) : (
-                        <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333', marginBottom: '20px' }}>
+                        <div style={{ backgroundColor: '#0e1525', padding: '20px', borderRadius: '8px', border: '1px solid #203049', marginBottom: '20px' }}>
                             <GEXChart
                                 data={chartData}
                                 spotPrice={data.spot_price}
@@ -426,13 +432,13 @@ const GammaExposurePage = () => {
 
             {/* GEX WALLS SUMMARY TABLE (Moved to Bottom) */}
             {!loading && data && data.profile && (
-                <div style={{ marginBottom: '20px', backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <h3 style={{ marginTop: 0, marginBottom: '15px', color: '#e0e0e0' }}>Key Gamma Walls by Timeframe</h3>
+                <div style={{ marginBottom: '20px', backgroundColor: '#0e1525', padding: '20px', borderRadius: '8px', border: '1px solid #203049' }}>
+                    <h3 style={{ marginTop: 0, marginBottom: '15px', color: '#d7e3f3', fontSize: '1.1rem' }}>Key Gamma Walls by Timeframe</h3>
                     <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', color: '#e0e0e0' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', color: '#d7e3f3', fontSize: '13px' }}>
                             <thead>
-                                <tr style={{ borderBottom: '1px solid #333' }}>
-                                    <th style={{ padding: '10px', textAlign: 'left', color: '#888' }}>Timeframe</th>
+                                <tr style={{ borderBottom: '1px solid #203049' }}>
+                                    <th style={{ padding: '10px', textAlign: 'left', color: '#9ec4ff' }}>Timeframe</th>
                                     <th style={{ padding: '10px', textAlign: 'right', color: '#4caf50' }}>Call Wall (Strike)</th>
                                     <th style={{ padding: '10px', textAlign: 'right', color: '#4caf50' }}>Call GEX ($)</th>
                                     <th style={{ padding: '10px', textAlign: 'right', color: '#f44336' }}>Put Wall (Strike)</th>
@@ -550,9 +556,9 @@ const GammaExposurePage = () => {
                                         if (maxCallGex === -1 && minPutGex === 1) return null; // No data for this timeframe
 
                                         return (
-                                            <tr key={h.key} style={{ borderBottom: '1px solid #222' }}>
+                                            <tr key={h.key} style={{ borderBottom: '1px solid #203049' }}>
                                                 <td style={{ padding: '10px', fontWeight: 'bold' }}>
-                                                    {h.label}<span style={{ fontSize: '12px', color: '#666', fontWeight: 'normal' }}>{dateLabel}</span>
+                                                    {h.label}<span style={{ fontSize: '11px', color: '#666', fontWeight: 'normal' }}>{dateLabel}</span>
                                                 </td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>${maxCallStrike}</td>
                                                 <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace' }}>${maxCallGex.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
@@ -591,7 +597,7 @@ class ErrorBoundary extends React.Component {
     render() {
         if (this.state.hasError) {
             return (
-                <div style={{ padding: '20px', color: '#f44336', backgroundColor: '#0e1525', minHeight: '100vh' }}>
+                <div style={{ padding: '20px', color: '#f44336', backgroundColor: '#0b1220', minHeight: '100vh' }}>
                     <h2>Something went wrong displaying GEX.</h2>
                     <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error && this.state.error.toString()}</pre>
                 </div>

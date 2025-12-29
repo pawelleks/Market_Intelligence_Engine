@@ -32,16 +32,21 @@ export const AuthProvider = ({ children }) => {
     const login = async (googleToken) => {
         try {
             const res = await axios.post('/api/v1/auth/login', { id_token: googleToken });
-            const { access_token } = res.data;
+            const { access_token, message } = res.data;
 
-            localStorage.setItem('access_token', access_token);
-            setToken(access_token);
-            const decoded = jwtDecode(access_token);
-            setUser(decoded);
-            return { success: true };
+            if (access_token) {
+                localStorage.setItem('access_token', access_token);
+                setToken(access_token);
+                const decoded = jwtDecode(access_token);
+                setUser(decoded);
+                return { success: true };
+            } else {
+                // Pending/New/Unapproved User (Generic 200 OK Response)
+                return { success: false, message: message || "Login processed. Check your email." };
+            }
         } catch (err) {
             console.error(err);
-            if (err.response && err.response.status === 403) {
+            if (err.response && err.response.data && err.response.data.detail) {
                 return { success: false, message: err.response.data.detail };
             }
             return { success: false, message: "Login failed" };

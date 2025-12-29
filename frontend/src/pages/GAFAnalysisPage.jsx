@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import ReactMarkdown from 'react-markdown';
 
+import { usePageTitle } from '../hooks/usePageTitle';
+
 const GAFAnalysisPage = () => {
+    usePageTitle('Global Asset Flow Analysis');
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);

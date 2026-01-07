@@ -798,125 +798,51 @@ def handle_build_gex_daily(args):
             "failed": result.get("failed", 0),
             "skipped": result.get("skipped", 0)
         })
-        
+
         return 0
-        
+
     except Exception as e:
-        logger.error(f"Error in build-gex-daily: {e}")
-        import traceback
-        traceback.print_exc()
+        status = "FAILED"
+        LOG.error(f"GEX Daily Build Failed: {e}")
         get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
         return 1
 
+def handle_update_dcs(args):
+    """
+    Handle update-dcs command.
+    Generates static parquet/json files for Downtrend Confirmation Score.
+    """
+    from mie_lib.services.audit_logger import get_audit_logger
+    from mie_lib.analytics.downtrend_engine import calculate_and_save_dcs
+    
+    get_audit_logger().update_stage("DCS", "RUNNING", {})
+    tickers = getattr(args, "tickers", "@config")
 
-
-
-        df_all = loader.load_day_aggregates(target_date, tickers)
+    target_list = []
+    if tickers == "@config":
+        # Load from config or scope
+        # Usually DCS is run for SPY, but user might want more.
+        # Let's default to user-configured list or just SPY if not found.
+        loaded = _load_yaml_tickers()
+        if loaded:
+            target_list = loaded
+        else:
+            target_list = ["SPY"]
+    else:
+        target_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
         
-        if df_all.empty:
-            logger.warning(f"No CSV data found for {target_date}. Switching to ONLINE mode if possible, otherwise this is a failure.")
-            # Optional: Automatic fallback? For now, fail unless --online is explicitly requested, or maybe imply it?
-            # User request: "pls check...". Better to fail clearly if not asked.
-            # But here I am fixing it for the user. I'll make it fail if not --online, to avoid accidental API spam.
-            if not args.online:
-                 logger.error("FATAL: No CSV data. Use --online to fetch from Yahoo Finance.")
-                 get_audit_logger().update_stage("GEX", "FAILED", {"error": "No CSV data found in offline mode"})
-                 return 1
-        
-    # 2. Process Each Ticker
-    for ticker in tickers:
+    LOG.info(f"Running update-dcs for {len(target_list)} tickers...")
+    
+    for t in target_list:
         try:
-            candidate_data = {}
-            
-            # ONLINE MODE
-            if args.online:
-                logger.info(f"Fetching GEX for {ticker} (Online)...")
-                candidate_data = engine.fetch_and_calculate_gex(ticker)
-                
-            # OFFLINE MODE
-            else:
-                # Filter from CSV
-                df_ticker = pd.DataFrame()
-                if not df_all.empty:
-                     df_ticker = df_all[df_all['underlying_ticker'] == ticker]
-                
-                if df_ticker.empty:
-                    logger.warning(f"Skipping {ticker}: No data in CSV.")
-                    continue
-
-                # Determine Spot
-                spot = None
-                try:
-                    if getattr(args, "spot", None) is not None:
-                         spot = float(args.spot)
-                    else:
-                        # Only fetch spot if we have data to process
-                        yf_t = yf.Ticker(ticker)
-                        try:
-                            spot = yf_t.fast_info['last_price']
-                        except:
-                            hist = yf_t.history(period="1d")
-                            if not hist.empty:
-                                spot = hist['Close'].iloc[-1]
-                except Exception as e:
-                    logger.warning(f"Could not fetch spot for {ticker}: {e}")
-                    continue
-
-                # Convert target_date string (YYYY-MM-DD) to date object to pass as 'as_of'
-                t_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
-                
-                # ENRICHMENT PRE-PROCESSING (Iterative per Expiration)
-                if 'expiration' in df_ticker.columns:
-                     enriched_chunks = []
-                     unique_exps = df_ticker['expiration'].dropna().unique()
-                     
-                     for exp_str in unique_exps:
-                         subset = df_ticker[df_ticker['expiration'] == exp_str].copy()
-                         
-                         # Parse Expiry
-                         try:
-                             exp_date = datetime.strptime(str(exp_str), "%Y-%m-%d").date()
-                         except ValueError:
-                             enriched_chunks.append(subset)
-                             continue
-                             
-                         # 1. Map 'type' (call/put) to 'option_type' (C/P)
-                         if 'type' in subset.columns and 'option_type' not in subset.columns:
-                              subset['option_type'] = subset['type'].apply(lambda x: 'C' if str(x).strip().lower() == 'call' else 'P')
-                         
-                         # 2. Ensure 'oi'/'iv' columns exist
-                         if 'oi' not in subset.columns:
-                              subset['oi'] = None
-                         if 'iv' not in subset.columns:
-                              subset['iv'] = None
-                              
-                         # 3. Enrich (Returns new DF)
-                         enriched_subset = enrich_with_yf_data(subset, ticker, exp_date)
-                         enriched_chunks.append(enriched_subset)
-                         
-                     if enriched_chunks:
-                         df_ticker = pd.concat(enriched_chunks, ignore_index=True)
-                
-                # 3. Calculate GEX Profile
-                # Spot is gathered via yfinance above if not provided
-                if spot:
-                    candidate_data = engine.calculate_gex_from_frame(ticker, df_ticker, spot, as_of=t_date_obj)
-                else:
-                     logger.warning(f"Skipping {ticker}: No Spot Price available.")
-
-            # SAVE RESULT
-            if candidate_data:
-                save_gex_profile(ticker, candidate_data)
-                logger.info(f"Saved GEX for {ticker}.")
-            else:
-                logger.warning(f"Failed to calculate GEX for {ticker}.")
-            
+            calculate_and_save_dcs(t)
         except Exception as e:
-            logger.error(f"Failed to build GEX for {ticker}: {e}")
-            
-    logger.info("Daily GEX Build Completed.")
-    get_audit_logger().update_stage("GEX", "COMPLETED", {})
+             LOG.error(f"Failed to update DCS for {t}: {e}")
+             
+    LOG.info("update-dcs completed.")
+    get_audit_logger().update_stage("DCS", "COMPLETED", {"processed": len(target_list)})
     return 0
+
 
 
 def _format_osi(ticker, expiry_str, otype, strike):
@@ -1488,6 +1414,11 @@ def build_parser():
     # --- Volume Regime (New) ---
     p_vol_regime = sub.add_parser("update-volume-regime", help="Calculate and save daily Volume Regime status")
     p_vol_regime.set_defaults(func=handle_update_volume_regime)
+
+    # --- Downtrend Score (New) ---
+    p_dcs = sub.add_parser("update-dcs", help="Update Downtrend Confirmation Score (DCS) data")
+    p_dcs.add_argument("--tickers", default="@config", help="Tickers to process")
+    p_dcs.set_defaults(func=handle_update_dcs)
     
     # --- PSAR (New) ---
     p_psar = sub.add_parser("update-psar", help="Calculate and save daily PSAR metrics")
@@ -1627,6 +1558,10 @@ def build_parser():
 
     # Smoke check command
     sub.add_parser("smoke-update", help="Lightweight smoke check after FULL+UPDATE: verifies sorted dates and ret_1d continuity for first ticker")
+
+    # Macro Data Builder
+    sub.add_parser("build-macro-data", help="Download macro economic series from FRED")
+
 
     # Markov builder command
     p_mk = sub.add_parser("build-markov", help="Build offline Markov analytics for a ticker")
@@ -2706,28 +2641,63 @@ def main(argv=None):
             sys.exit(1)
         df = pd.read_parquet(feat_path)
         
-        # HMM
-        hmm_path = Path("data") / "analytics" / "hmm" / ticker / "hmm_states.parquet"
-        if hmm_path.exists():
-            df_hmm = pd.read_parquet(hmm_path)
-            # Ensure dates match for merge
-            df['date'] = pd.to_datetime(df['date'])
-            df_hmm['date'] = pd.to_datetime(df_hmm['date'])
-            df = pd.merge(df, df_hmm[['date', 'hmm_state']], on='date', how='left')
+        # HMM - Robust Search
+        hmm_root = Path("data") / "analytics" / "hmm" / ticker
+        df_hmm = None
+        
+        # Priority: state_sequence.parquet (new) or hmm_states.parquet (current)
+        possible_paths = list(hmm_root.glob("**/state_sequence.parquet"))
+        if not possible_paths:
+             possible_paths = list(hmm_root.glob("**/hmm_states.parquet"))
+        if not possible_paths:
+             # Fallback to any parquet but EXCLUDE probs and metrics
+             all_parquets = list(hmm_root.glob("**/*.parquet"))
+             possible_paths = [p for p in all_parquets if "probs" not in p.name and "metrics" not in p.name]
+
+        if possible_paths:
+            # Pick the best model (e.g., 10Y or Max, 3 States)
+            best_path = possible_paths[0]
+            for p in possible_paths:
+                if "win10y" in str(p) and "states3" in str(p):
+                    best_path = p
+                    break
+            
+            print(f"Loading HMM from: {best_path}")
+            try:
+                df_hmm = pd.read_parquet(best_path)
+                # Ensure dates match for merge
+                if 'date' in df_hmm.columns:
+                    df_hmm['date'] = pd.to_datetime(df_hmm['date'])
+                    df['date'] = pd.to_datetime(df['date'])
+                    
+                    # Unify state column name
+                    if 'state' in df_hmm.columns:
+                        df_hmm.rename(columns={'state': 'hmm_state'}, inplace=True)
+                    
+                    if 'hmm_state' in df_hmm.columns:
+                        # Merge logic
+                        df = pd.merge(df, df_hmm[['date', 'hmm_state']], on='date', how='left')
+                        print("HMM Data Merged.")
+                    else:
+                        print(f"Warning: No state column found in HMM file {best_path.name}")
+            except Exception as e:
+                print(f"Warning: Failed to load HMM data: {e}")
         else:
-             print("Warning: HMM States not found. Proceeding with nulls.")
-             
+             print("Warning: HMM States not found (checked recursive). Proceeding without HMM.")
+
         # GEX (Profile)
-        gex_path = Path("data") / "analytics" / "gex" / f"{ticker}_profile.parquet"
+        gex_path = Path("data") / "analytics" / "gex" / f"{ticker}_gex.json"
         if gex_path.exists():
-             # GEX profile usually has history? discovery said "Date range: 2023...".
-             # So we merge on date.
-             df_gex = pd.read_parquet(gex_path)
-             if 'date' in df_gex.columns:
-                 df_gex['date'] = pd.to_datetime(df_gex['date'])
-                 # Merge available GEX columns
-                 gex_cols = [c for c in df_gex.columns if c not in df.columns and c != 'date']
-                 df = pd.merge(df, df_gex[['date'] + gex_cols], on='date', how='left')
+             try:
+                 with open(gex_path) as f:
+                     gex_data = json.load(f)
+                 # Attach as static feature for latest row or similar? 
+                 # Actualy AI usually wants time series. 
+                 # If we don't have GEX history, we skip merging history and just pass latest GEX in payload construction later?
+                 # For now, let's skip merging GEX history if we only have current JSON.
+                 print(f"Found latest GEX profile for {ticker} (JSON).")
+             except:
+                 pass
         
         # 2. Load Optional External Data (Expected Moves)
         expected_moves = None
@@ -2785,7 +2755,7 @@ def main(argv=None):
             # Update Audit Log (Service)
             from mie_lib.services.audit_logger import get_audit_logger
             # Determine status based on data
-            status = "COMPLETED" if expected_moves and hmm_path.exists() else "PARTIAL"
+            status = "COMPLETED" if expected_moves and df_hmm is not None else "PARTIAL"
             # Fix: log_job_event does not exist, use update_stage
             get_audit_logger().update_stage("AI Context Generation", status, {"artifact": str(active_path)})
         except Exception as e:
@@ -2800,14 +2770,19 @@ def main(argv=None):
         sys.exit(0)
     elif args.command == "generate-ai-report":
         print("Starting AI Report Generation...")
+        from mie_lib.services.audit_logger import get_audit_logger
+        get_audit_logger().update_stage("Daily Intelligence Report", "RUNNING", {})
+        
         from mie_lib.services.llm_analyst import generate_daily_report
-        # No separate audit stage logic here, maybe add later or rely on service return
         res = generate_daily_report(ticker=args.ticker, model=args.model)
+        
         if res.get("status") == "ok":
             print(f"Report generated: {res.get('path')}")
+            get_audit_logger().update_stage("Daily Intelligence Report", "COMPLETED", {"path": res.get('path')})
             sys.exit(0)
         else:
             print(f"Report generation failed: {res.get('message')}")
+            get_audit_logger().update_stage("Daily Intelligence Report", "FAILED", {"error": res.get('message')})
             sys.exit(1)
     elif args.command == "update-stage":
         stage = args.stage
@@ -2913,6 +2888,20 @@ def handle_build_skew_daily(args):
         import traceback
         traceback.print_exc()
         get_audit_logger().update_stage("Skew & PCR", "FAILED", {"error": str(e)})
+
+def handle_build_macro_data(args):
+    """Handle build-macro-data command."""
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("Macro Data", "RUNNING", {})
+    LOG.info("Running build-macro-data...")
+    try:
+        from mie_lib.data_ingest.macro.providers.fred import update_fred_data
+        update_fred_data()
+        LOG.info("build-macro-data completed.")
+        get_audit_logger().update_stage("Macro Data", "COMPLETED", {})
+    except Exception as e:
+        LOG.error(f"Error in build-macro-data: {e}")
+        get_audit_logger().update_stage("Macro Data", "FAILED", {"error": str(e)})
 
 if __name__ == "__main__":
     # Execute CLI when run as a script

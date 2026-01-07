@@ -162,8 +162,7 @@ def make_gradcam_heatmap(model, img_array, last_conv_layer_name, pred_index=None
 def run_inference_latest(ticker="SPY", window_size=20):
     """Runs inference on the LATEST window relative to TODAY (predicting tomorrow)."""
     if not MODEL_PATH.exists():
-        print("Model not found. Please run train-gaf first.")
-        return
+        raise FileNotFoundError(f"Model not found at {MODEL_PATH}. Please run train-gaf first.")
 
     model = tf.keras.models.load_model(MODEL_PATH)
     

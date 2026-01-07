@@ -116,8 +116,8 @@ def fetch_and_align_dcs_assets(ticker: str, end_date: Optional[date] = None, loo
     # 5. Fetch HMM Bear Probability (New Integration)
     try:
         from mie_lib.utils.paths import hmm_std_out_dir
-        # Assume default settings: 5 years, 2 states
-        hmm_dir = hmm_std_out_dir(ticker, window_years=5, n_states=2)
+        # FIX: Align with Dashboard/Assistant defaults (10y / 3-State)
+        hmm_dir = hmm_std_out_dir(ticker, window_years=10, n_states=3)
         hmm_probs_path = hmm_dir / "hmm_probs.parquet"
         
         if hmm_probs_path.exists():

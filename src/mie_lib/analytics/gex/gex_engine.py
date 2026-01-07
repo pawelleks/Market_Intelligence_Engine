@@ -144,16 +144,20 @@ class GEXEngine:
             # 3. Provider Strategy (YFinance -> Polygon Fallback)
             use_polygon = False
             
-            # Check data quality on first expiry
+            # Check data quality on first expiry (and assume it represents the rest)
             check_expiry = expirations[0]
             try:
                 check_chain = yf_ticker.option_chain(check_expiry)
-                # Check total OI
-                total_oi = check_chain.calls['openInterest'].sum() + check_chain.puts['openInterest'].sum()
-                if total_oi == 0:
-                    logger.warning(f"YFinance returned 0 Open Interest/Volume for {ticker} ({check_expiry}). Switching to Polygon/Massive API.")
-                    use_polygon = True
-            except Exception:
+                call_oi = check_chain.calls['openInterest'].sum() if not check_chain.calls.empty else 0
+                put_oi = check_chain.puts['openInterest'].sum() if not check_chain.puts.empty else 0
+                
+                # If either Calls or Puts are missing, YFinance is likely broken/blocked for this IP
+                if call_oi == 0 or put_oi == 0:
+                     logger.warning(f"YFinance returned incomplete chain for {ticker} ({check_expiry}). Calls: {call_oi}, Puts: {put_oi}. Switching to Polygon.")
+                     use_polygon = True
+                     
+            except Exception as e:
+                logger.warning(f"YFinance check failed: {e}. Switching to Polygon.")
                 use_polygon = True
 
             if use_polygon:
@@ -333,6 +337,7 @@ class GEXEngine:
                 "net_gex": sum(d['gex'] for d in all_gex_data),
                 "profile": profile,
                 "group_dates": group_dates,
+                "date": today.strftime("%Y-%m-%d"),
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -343,17 +348,31 @@ class GEXEngine:
             return {}
 
     def _get_horizon_targets(self, as_of: date) -> Dict[str, date]:
-        """Calculates target dates for the requested horizons."""
-        # 1. EOW (Friday of current week)
-        # weekday: Mon=0, Sun=6. Friday=4.
-        days_to_fri = (4 - as_of.weekday() + 7) % 7
-        if days_to_fri == 0:
-            days_to_fri = 7
-        eow = as_of + timedelta(days=days_to_fri)
+        """Calculates target dates for the requested horizons using trading calendar."""
+        from mie_lib.utils.trading_calendar import (
+            last_trading_day_of_week, 
+            last_trading_day_of_month,
+            get_trading_days_ahead
+        )
+        
+        # 1. EOW (Friday of current week or next if today is Friday)
+        # Use a helper if possible, or calculate:
+        eow = last_trading_day_of_week(as_of)
+        if eow <= as_of:
+            # If today is Friday (or later), target next week's Friday
+            from datetime import timedelta
+            eow = last_trading_day_of_week(as_of + timedelta(days=7))
 
         # 2. EOM (Last day of month)
-        next_month = as_of.replace(day=28) + timedelta(days=4)
-        eom = next_month - timedelta(days=next_month.day)
+        eom = last_trading_day_of_month(as_of.year, as_of.month)
+        if eom <= as_of:
+            # Target next month's end
+            nm = as_of.month + 1
+            ny = as_of.year
+            if nm > 12:
+                nm = 1
+                ny += 1
+            eom = last_trading_day_of_month(ny, nm)
 
         # 3. EOQ (End of current quarter: Mar, Jun, Sep, Dec)
         quarter_months = [3, 6, 9, 12]
@@ -363,17 +382,19 @@ class GEXEngine:
         except StopIteration:
              q_month = 3 # fallback
         
-        if q_month == 12:
-            eoq = date(as_of.year, 12, 31)
-        else:
-            tgt = date(as_of.year, q_month, 1) + timedelta(days=32)
-            eoq = tgt.replace(day=1) - timedelta(days=1)
+        eoq = last_trading_day_of_month(as_of.year, q_month)
+        if eoq <= as_of:
+            # Next quarter
+            q_idx = quarter_months.index(q_month)
+            next_q_month = quarter_months[(q_idx + 1) % 4]
+            next_q_year = as_of.year + (1 if next_q_month == 3 else 0)
+            eoq = last_trading_day_of_month(next_q_year, next_q_month)
         
-        # 4. Next 5
-        next5 = as_of + timedelta(days=5)
+        # 4. Next 5 Trading Days (Strict 5 days from as_of)
+        next5 = get_trading_days_ahead(as_of, 5)
 
-        # 5. Next 30
-        next30 = as_of + timedelta(days=30)
+        # 5. Next 30 Trading Days
+        next30 = get_trading_days_ahead(as_of, 20) # 20 trading days ~ 1 month
         
         return {
             "eow": eow,
@@ -518,6 +539,7 @@ class GEXEngine:
                 "net_gex": sum(d['gex'] for d in all_gex_data), # Total Net
                 "profile": profile,
                 "group_dates": group_dates,
+                "date": today.strftime("%Y-%m-%d"),
                 "timestamp": datetime.now().isoformat()
             }
                 

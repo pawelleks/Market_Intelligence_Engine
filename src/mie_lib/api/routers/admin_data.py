@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from mie_lib.api.dependencies import verify_admin
+from mie_lib.db.models import User
 from mie_lib.utils.paths import META_DIR, FEATURES_DIR, OPTIONS_DIR, HMM_DIR
 # Using relative imports or known paths for GEX as it's not in paths.py yet
 GEX_DIR = Path("data/analytics/gex")
@@ -37,11 +38,19 @@ def get_ohlc_status() -> Dict[str, Any]:
     # 2. Add fallback for tickers present in RAW_DIR but not in registry
     # Scan raw dir for *.parquet (OHLC data only)
     try:
-         for p in Path("data/raw").glob("*.parquet"):
              ticker = p.stem.upper()
              if ticker not in data:
+                 rows = -1
+                 try:
+                     df_scan = pd.read_parquet(p, columns=[]) # Metadata scan only if supported, or read index
+                     # Actually PyArrow/FastParquet might optimize columns=[]
+                     # If that fails, read one column.
+                     rows = pd.read_parquet(p).shape[0] # Fallback to standard read
+                 except:
+                     pass
+                 
                  data[ticker] = {
-                     "rows": -1, # Unknown without opening
+                     "rows": rows, # Now calculated
                      "data_range": ["?", "?"],
                      "last_update_timestamp": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat(),
                      "source": "raw_scan"
@@ -257,3 +266,155 @@ def get_pipeline_history(limit: int = 10) -> Dict[str, Any]:
         
     except Exception as e:
         return {"status": "error", "error": str(e), "data": []}
+
+# -----------------------------------------------------------------
+# FRED / Macro Data Endpoints
+# -----------------------------------------------------------------
+import yaml
+
+@router.get("/fred")
+def get_fred_status() -> Dict[str, Any]:
+    """Returns status of FRED data series."""
+    config_path = Path("config") / "macro_series.yml"
+    fred_dir = Path("data/raw/macro/fred")
+    
+    if not config_path.exists():
+        return {"status": "error", "message": "FRED config missing", "data": []}
+        
+    try:
+        with open(config_path, "r") as f:
+            cfg = yaml.safe_load(f)
+        series_map = cfg.get("series", {})
+        
+        results = []
+        for series_id, description in series_map.items():
+            file_path = fred_dir / f"{series_id}.parquet"
+            if file_path.exists():
+                stat = file_path.stat()
+                status = "ok"
+                try:
+                    # Read date column to find range
+                    # Should be fast for macro data
+                    df = pd.read_parquet(file_path, columns=["date"])
+                    if not df.empty:
+                        min_date = df["date"].min().strftime("%Y-%m-%d")
+                        max_date = df["date"].max().strftime("%Y-%m-%d")
+                        date_range = f"{min_date} to {max_date}"
+                    else:
+                        date_range = "empty"
+                except Exception:
+                    date_range = "error"
+
+                last_updated = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                size = stat.st_size
+            else:
+                status = "missing"
+                last_updated = None
+                size = 0
+                date_range = "-"
+                
+            results.append({
+                "series_id": series_id,
+                "description": description,
+                "status": status,
+                "last_updated": last_updated,
+                "size_bytes": size,
+                "date_range": date_range
+            })
+            
+        return {"status": "ok", "data": sorted(results, key=lambda x: x['series_id'])}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "data": []}
+
+def _run_fred_update_task():
+    """Background task for FRED update."""
+    logger = logging.getLogger("uvicorn")
+    logger.info("API: Triggering FRED update...")
+    try:
+        from mie_lib.data_ingest.macro.providers.fred import update_fred_data
+        update_fred_data()
+        logger.info("FRED update completed.")
+    except Exception as e:
+        logger.error(f"FRED update failed: {e}")
+
+@router.post("/fred/start")
+def trigger_fred_update(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(verify_admin)
+):
+    """Triggers the FRED data update pipeline in the background."""
+    background_tasks.add_task(_run_fred_update_task)
+    return {"status": "ok", "message": "FRED pipeline triggered in background"}
+
+@router.get("/ai-context")
+def get_ai_context() -> Dict[str, Any]:
+    """Returns the latest AI context JSON."""
+    context_path = Path("data/audit/latest_llm_context.json")
+    if not context_path.exists():
+        return {"status": "error", "message": "No context found"}
+        
+    try:
+        data = json.loads(context_path.read_text())
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# -----------------------------------------------------------------
+# Computed Content / Reports
+# -----------------------------------------------------------------
+
+@router.get("/reports")
+def list_reports() -> Dict[str, Any]:
+    """List available AI reports (latest and archive)."""
+    reports_dir = Path("data/reports")
+    archive_dir = reports_dir / "archive"
+    
+    results = []
+    
+    # Latest
+    latest_file = reports_dir / "daily_report_latest.json"
+    if latest_file.exists():
+        stat = latest_file.stat()
+        results.append({
+            "filename": latest_file.name,
+            "path": "latest", # Logical path
+            "size_bytes": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "type": "latest"
+        })
+        
+    # Archive
+    if archive_dir.exists():
+        for f in archive_dir.glob("*.json"):
+            stat = f.stat()
+            results.append({
+                "filename": f.name,
+                "path": f"archive/{f.name}",
+                "size_bytes": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "type": "archive"
+            })
+            
+    return {"status": "ok", "data": sorted(results, key=lambda x: x['modified'], reverse=True)}
+
+@router.get("/reports/{filename}")
+def download_report(filename: str, current_user: User = Depends(verify_admin)):
+    """Download a report file."""
+    reports_dir = Path("data/reports")
+    archive_dir = reports_dir / "archive"
+    
+    # Security check: filename should be just the name, no slashes (except 'archive/' prefix if we handle it that way?)
+    # Actually, let's look for file in both places.
+    
+    # Try latest
+    if filename == "daily_report_latest.json":
+        file_path = reports_dir / filename
+    else:
+        # Check archive
+        file_path = archive_dir / filename
+        
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+        
+    from fastapi.responses import FileResponse
+    return FileResponse(file_path, media_type="application/json", filename=filename)

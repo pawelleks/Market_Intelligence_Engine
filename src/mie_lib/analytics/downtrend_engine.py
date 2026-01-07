@@ -265,3 +265,47 @@ def compute_downtrend_score_latest(
         "confidence": confidence,
         "breakdown": breakdown
     }
+
+def calculate_and_save_dcs(ticker: str = "SPY"):
+    """
+    Batch job: Calculates full history and latest snapshot for DCS.
+    Saves to:
+      - data/analytics/dcs/{ticker}_history.parquet
+      - data/analytics/dcs/{ticker}_latest.json
+    """
+    from mie_lib.utils.paths import DATA_DIR
+    from mie_lib.utils.io import atomic_write_parquet, atomic_write_json
+    from mie_lib.data_ingest.data_aligner import fetch_and_align_dcs_assets
+    import pandas as pd
+    
+    dcs_dir = DATA_DIR / "analytics" / "dcs"
+    dcs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 1. Fetch & Align
+    # Use long lookback for history (e.g. 50 years to catch everything)
+    df_aligned, weights = fetch_and_align_dcs_assets(ticker, lookback_days=50*365)
+    
+    if df_aligned.empty:
+        print(f"DCS: No data aligned for {ticker}. Skipping.")
+        return
+
+    # 2. Compute History
+    # This returns List[Dict]
+    history_records = compute_downtrend_signals_historical(df_aligned, weights=weights, ticker=ticker)
+    if not history_records:
+        print(f"DCS: No metrics computed for {ticker}.")
+        return
+
+    # Convert history back to DF for Parquet storage
+    # history_records has 'date' as string, 'score', and boolean signals
+    df_hist = pd.DataFrame(history_records)
+    
+    atomic_write_parquet(df_hist, dcs_dir / f"{ticker}_history.parquet")
+    
+    # 3. Compute Latest
+    # Calling latest ensures we get the 'breakdown' format required by the UI
+    latest_data = compute_downtrend_score_latest(df_aligned, weights=weights, ticker=ticker)
+    
+    atomic_write_json(latest_data, dcs_dir / f"{ticker}_latest.json")
+    
+    print(f"DCS: Saved {ticker} history ({len(df_hist)} rows) and latest score ({latest_data.get('latest_score_100')})")

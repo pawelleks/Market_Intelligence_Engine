@@ -47,7 +47,8 @@ log "Logs will be written to ${LOG_FILE}"
 # 1.5. Initialize Audit Log (Reset for new run)
 RUN_TYPE=${1:-"MANUAL"} # Default to MANUAL if not provided
 log "Initializing Audit Log (Type: ${RUN_TYPE})..."
-${MIE_CMD} start-pipeline-job --name "Daily Pipeline ${TODAY}" --type "${RUN_TYPE}" >> "${LOG_FILE}" 2>&1
+JOB_TIME=$(date +%H:%M:%S)
+${MIE_CMD} start-pipeline-job --name "Daily Pipeline ${TODAY} ${JOB_TIME}" --type "${RUN_TYPE}" >> "${LOG_FILE}" 2>&1
 log "Audit Log Initialized."
 
 # 2. Ingestion Phase ("Fetch")
@@ -110,6 +111,10 @@ ${MIE_CMD} update-expected-moves --ticker @config --lookback 5 --include-weekly-
 ${MIE_CMD} build-expected-moves-snapshots --tickers @config >> "${LOG_FILE}" 2>&1
 log "update-expected-moves completed."
 
+log "Running analyze-expected-moves-reliability..."
+${MIE_CMD} analyze-expected-moves-reliability >> "${LOG_FILE}" 2>&1
+log "analyze-expected-moves-reliability completed."
+
 # 8. Update Seasonality Data
 log "Running update-seasonality..."
 ${MIE_CMD} update-seasonality >> "${LOG_FILE}" 2>&1
@@ -118,6 +123,8 @@ log "update-seasonality completed."
 # 9. New Analytics (SMA Stack, ADX, PSAR)
 log "Running update-sma-stack..."
 ${MIE_CMD} update-sma-stack >> "${LOG_FILE}" 2>&1
+log "Running update-dcs..."
+${MIE_CMD} update-dcs >> "${LOG_FILE}" 2>&1
 log "Running update-adx..."
 ${MIE_CMD} update-adx >> "${LOG_FILE}" 2>&1
 log "Running update-psar..."
@@ -149,12 +156,29 @@ log "Running update-volume-regime..."
 ${MIE_CMD} update-volume-regime >> "${LOG_FILE}" 2>&1
 log "update-volume-regime completed."
 
-# 9. AI Context Generation
+# 12. AI Context Generation
 log "Running generate-ai-context..."
+${MIE_CMD} update-stage --stage "AI Context Generation" --status "RUNNING"
 # Generate logic needs a ticker, let's stick to SPY for now or iterate config
 # For now, default to SPY as the primary context
-${MIE_CMD} generate-ai-context --ticker SPY >> "${LOG_FILE}" 2>&1
-log "generate-ai-context completed."
+if ${MIE_CMD} generate-ai-context --ticker SPY >> "${LOG_FILE}" 2>&1; then
+    ${MIE_CMD} update-stage --stage "AI Context Generation" --status "COMPLETED"
+    log "generate-ai-context completed."
+else
+    ${MIE_CMD} update-stage --stage "AI Context Generation" --status "FAILED"
+    log "generate-ai-context FAILED."
+fi
+
+# 12b. AI Report Generation
+log "Running generate-ai-report..."
+${MIE_CMD} update-stage --stage "Daily Intelligence Report" --status "RUNNING"
+if ${MIE_CMD} generate-ai-report --ticker SPY >> "${LOG_FILE}" 2>&1; then
+    ${MIE_CMD} update-stage --stage "Daily Intelligence Report" --status "COMPLETED"
+    log "generate-ai-report completed."
+else
+    ${MIE_CMD} update-stage --stage "Daily Intelligence Report" --status "FAILED"
+    log "generate-ai-report FAILED."
+fi
 
 # 13. Finalize Status
 log "Finalizing Audit Status..."

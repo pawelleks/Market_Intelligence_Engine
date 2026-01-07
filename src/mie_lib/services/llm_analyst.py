@@ -27,12 +27,15 @@ def _load_env_fallback():
                      os.environ["OPENAI_API_KEY"] = v
         except Exception: pass
 
-def generate_daily_report(ticker: str = "SPY", model: str = "gpt-4-turbo-preview") -> dict:
+def generate_daily_report(ticker: str = "SPY", model: str = None) -> dict:
     """
     Reads the latest AI Context JSON and the System Prompt,
     generates a daily market analysis report via LLM,
     and saves it to the reports directory.
     """
+    # Default to env var or standard model
+    if not model:
+        model = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
     # 0. Load Env Var Fallback
     if not os.environ.get("OPENAI_API_KEY"):
          _load_env_fallback()

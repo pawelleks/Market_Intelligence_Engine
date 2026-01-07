@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from datetime import date
 
 from mie_lib.utils.config import load_named_config
-from mie_lib.analytics.performance.engine import calculate_performance_snapshot
+from mie_lib.analytics.performance.engine import calculate_performance_snapshot, calculate_sector_history, calculate_sector_correlations
 
 router = APIRouter()
 LOG = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class PerformanceRow(BaseModel):
     ret_3m: Optional[float]
     ret_6m: Optional[float]
     ret_1y: Optional[float]
+    ret_ytd: Optional[float]
     high_52w: Optional[float]
     low_52w: Optional[float]
     pct_52w: Optional[float]
@@ -79,3 +80,46 @@ def get_performance_snapshot():
         response.append(row)
         
     return response
+
+@router.get("/history", response_model=Dict[str, Any])
+def get_performance_history():
+    """
+    Returns historical cumulative performance (1Y and 12M Rolling) for Sector ETFs + SPY.
+    """
+    try:
+        # Load Config to get Sector ETFs
+        group_config = load_named_config("ticker_groups")
+        target_tickers = []
+        if "groups" in group_config and "Sector_ETFs" in group_config["groups"]:
+            target_tickers = group_config["groups"]["Sector_ETFs"]
+            
+        # Ensure SPY is included for reference
+        if "SPY" not in target_tickers:
+            target_tickers.append("SPY")
+            
+        # Defensive copy/cast
+        target_tickers = [str(t).upper() for t in target_tickers]
+        
+        return calculate_sector_history(target_tickers)
+        
+    except Exception as e:
+        LOG.error(f"Failed to calculate history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+        
+@router.get("/correlation", response_model=Dict[str, Any])
+def get_sector_correlations():
+    """
+    Returns 2 correlation matrices (Calendar Year, Rolling 12M).
+    """
+    try:
+        group_config = load_named_config("ticker_groups")
+        target_tickers = []
+        if "groups" in group_config and "Sector_ETFs" in group_config["groups"]:
+            target_tickers = group_config["groups"]["Sector_ETFs"]
+            
+        target_tickers = [str(t).upper() for t in target_tickers]
+        return calculate_sector_correlations(target_tickers)
+        
+    except Exception as e:
+        LOG.error(f"Failed to calculate correlations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

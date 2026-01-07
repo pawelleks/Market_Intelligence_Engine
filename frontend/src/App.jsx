@@ -40,12 +40,15 @@ import IchimokuReport from './components/IchimokuReport';
 import TrendMatrix from './components/TrendMatrix';
 import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
 import SkewAnalysisPage from './pages/SkewAnalysisPage';
+import SectorAnalysisPage from './pages/SectorAnalysisPage';
+import EconomyDataViewer from './pages/EconomyDataViewer';
+import DataReleasesCalendar from './pages/DataReleasesCalendar';
+import EmaRespectCalculator from './pages/EmaRespectCalculator';
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
-import AdminPage from './pages/AdminPage';
-
-import AdminDataDashboard from './pages/AdminDataDashboard';
+import UserManagementPage from './pages/admin/UserManagementPage';
+import DataManagementPage from './pages/admin/DataManagementPage';
 import DailyAnalysisPage from './pages/DailyAnalysisPage';
 import VolumeRegimeReport from './pages/VolumeRegimeReport';
 import VolatilityPage from './pages/VolatilityPage';
@@ -101,7 +104,7 @@ const useAnalyticalData = (settings) => {
   const MARK_MULTISTEP_URL = `${API_BASE}/markov/multistep/${settings.ticker}/${markovStateMode}?threshold_bps=${settings.thresholdBPS}`;
   const PRICE_URL = `${API_BASE}/features/price/${settings.ticker}`;
   const FRESHNESS_URL = `${API_BASE}/data/freshness/${settings.ticker}`;
-  const PRICE_VIEWER_URL = `${API_BASE}/data/prices/${settings.ticker}?rows=${settings.rows}&state_mode=${settings.stateMode}&threshold_bps=${settings.thresholdBPS}`;
+  const PRICE_VIEWER_URL = `${API_BASE}/data/prices/${settings.ticker}?table_rows=${settings.rows}&state_mode=${settings.stateMode}&threshold_bps=${settings.thresholdBPS}`;
 
 
   useEffect(() => {
@@ -173,7 +176,12 @@ const useAnalyticalData = (settings) => {
       try {
         const response = await fetch(PRICE_VIEWER_URL);
         const json = await response.json();
-        if (response.ok) { setPriceViewerData(json.data); } else { throw new Error(json.detail); }
+        if (response.ok) {
+          // API now returns chart_data (full) and table_data (limited)
+          setPriceViewerData({ chartData: json.chart_data, tableData: json.table_data });
+        } else {
+          throw new Error(json.detail);
+        }
       } catch (err) { console.warn("Price Viewer Data Failed:", err.message); setPriceViewerData(null); }
 
       setLoading(false);
@@ -182,6 +190,59 @@ const useAnalyticalData = (settings) => {
 
     fetchData();
   }, [settings]); // Depend on settings change
+
+  // FIX: Calculate Latest Markov State on frontend
+  useEffect(() => {
+    if (!priceData || priceData.length < 2) {
+      setLatestMarkovState(null);
+      return;
+    }
+
+    // Sort Descending
+    const sorted = [...priceData].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const order = settings.markovOrder || 1;
+
+    // Need order + 1 days to calculate 'order' returns
+    if (sorted.length < order + 1) return;
+
+    const states = [];
+    // We walk backwards from the most recent day (index 0 is latest)
+    // For Order 1: We need state of Day 0.
+    for (let i = 0; i < order; i++) {
+      const today = sorted[i];
+
+      // Use pre-calc return or calc it
+      let ret = 0;
+      // FIX: Backend sends 'ret_1d' or 'return'
+      if (today.ret_1d !== undefined && today.ret_1d !== null) {
+        ret = today.ret_1d;
+      } else if (today.return !== undefined && today.return !== null) {
+        ret = today.return;
+      } else {
+        // Fallback calc
+        const nextDay = sorted[i + 1]; // Older
+        const pToday = today.adj_close || today.close;
+        const pPrev = nextDay.adj_close || nextDay.close;
+        if (pPrev) ret = (pToday - pPrev) / pPrev;
+      }
+
+      // Classify
+      const valBps = parseFloat(settings.thresholdBPS) || 10;
+      const thr = valBps / 10000;
+      let s = 'N';
+      if (settings.stateMode === 'binary') {
+        s = ret > 0 ? 'U' : 'D';
+      } else {
+        if (ret > thr) s = 'U';
+        else if (ret < -thr) s = 'D';
+        else s = 'N';
+      }
+      states.unshift(s); // [Oldest ... Newest]
+    }
+
+    setLatestMarkovState(states.join('-'));
+
+  }, [priceData, settings.markovOrder, settings.stateMode, settings.thresholdBPS]);
 
   // Updated return signature
   return { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error };
@@ -245,6 +306,101 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
           {summaryText}
         </p>
 
+        {/* NEW: Current Regime Statistics Card */}
+        {hmmData && hmmData.length > 0 && (
+          <div style={{
+            backgroundColor: '#1b2a40',
+            border: '1px solid #4caf50',
+            borderRadius: '8px',
+            padding: '20px',
+            marginBottom: '30px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+          }}>
+            {(() => {
+              // 1. Get Current State
+              const currentRecord = hmmData[hmmData.length - 1];
+              const currentState = currentRecord.hmm_state; // 0, 1, or 2
+
+              // Map ID to Name/Color
+              let stateName = "Unknown";
+              let stateColor = "#9e9e9e";
+
+              // 1. Try Authentic Name (from API/Parquet merge)
+              if (currentRecord.hmm_state_name) {
+                stateName = currentRecord.hmm_state_name;
+                if (stateName.toLowerCase().includes('bull')) stateColor = '#4caf50';
+                else if (stateName.toLowerCase().includes('bear')) stateColor = '#f44336';
+                else if (stateName.toLowerCase().includes('neut')) stateColor = '#ffc107';
+              }
+              // 2. Fallback to Stats Lookup
+              else {
+                const stats = hmmStats ? hmmStats.find(s => s.state_id === currentState) : null;
+                if (stats) {
+                  stateName = stats.label || `State ${currentState}`;
+                  if (stateName.toLowerCase().includes('bull')) stateColor = '#4caf50';
+                  else if (stateName.toLowerCase().includes('bear')) stateColor = '#f44336';
+                  else stateColor = '#ffc107';
+                }
+              }
+
+              // 3. Calculate Duration
+              let consecutiveDays = 0;
+              let lastChangeDate = currentRecord.date;
+
+              for (let i = hmmData.length - 1; i >= 0; i--) {
+                if (hmmData[i].hmm_state === currentState) {
+                  consecutiveDays++;
+                  lastChangeDate = hmmData[i].date;
+                } else {
+                  break;
+                }
+              }
+
+              // 4. Probability of Change (from Matrix)
+              let probStay = 0;
+              // FIX: hmmMetrics is an array of {metric, value}
+              if (hmmMetrics && Array.isArray(hmmMetrics)) {
+                const key = `trans_${currentState}_${currentState}`;
+                const item = hmmMetrics.find(x => x.metric === key);
+                if (item) probStay = item.value;
+              }
+              const probChange = 1.0 - probStay;
+
+              return (
+                <>
+                  {/* Left: Ticker & State */}
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      Current Regime ({settings.ticker}) <span style={{ fontSize: '0.8em', textTransform: 'none', color: '#666' }}>(Debug: ID={currentState}, Name={currentRecord.hmm_state_name || 'null'})</span>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: stateColor, marginTop: '5px' }}>
+                      {stateName}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#d7e3f3', marginTop: '5px' }}>
+                      Probability of Change: <span style={{ color: probChange > 0.5 ? '#ff9800' : '#4caf50', fontWeight: 'bold' }}>{(probChange * 100).toFixed(1)}%</span>
+                    </div>
+                  </div>
+
+                  {/* Right: Duration Stats */}
+                  <div style={{ textAlign: 'right', borderLeft: '1px solid #203049', paddingLeft: '30px' }}>
+                    <div style={{ marginBottom: '10px' }}>
+                      <div style={{ fontSize: '12px', color: '#9e9e9e' }}>DAYS IN STATE</div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'white' }}>{consecutiveDays}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '12px', color: '#9e9e9e' }}>LAST MINOR CHANGE</div>
+                      <div style={{ fontSize: '16px', color: 'white' }}>{lastChangeDate.slice(0, 10)}</div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
         {/* Per-State Statistics Table */}
         <h3 style={{ marginTop: '0px', marginBottom: '15px', fontSize: '1.2rem', color: '#d7e3f3', fontWeight: 'bold' }}>
           Per-State Performance Statistics
@@ -285,7 +441,7 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
 };
 
 
-const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStepData, freshnessStatus, loading, error }) => {
+const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStepData, freshnessStatus, latestMarkovState, loading, error }) => {
   // Determine the state display for the title
   const stateDisplay = settings.nStates === 2 ? 'Binary (Bull/Bear)' : 'Ternary (Bull/Neutral/Red)';
 
@@ -347,7 +503,7 @@ const MarkovAnalysisPage = ({ settings, setSettings, markovData, markovMultiStep
               data={markovData}
               settings={settings} // Pass all settings for filtering
             />
-            <MarkovConclusion markovData={markovData} settings={settings} />
+            <MarkovConclusion markovData={markovData} settings={settings} latestMarkovState={latestMarkovState} />
 
             {/* NEW ONE-STEP SECTION */}
             <MarkovOneStepMatrix markovData={markovData} settings={settings} />
@@ -526,6 +682,10 @@ function AppContent() {
             <Route path="/hmm-signals" element={<ProtectedLayout><HmmSignalsPage /></ProtectedLayout>} />
             <Route path="/analysis/tsmom" element={<ProtectedLayout><TsmomDashboardPage /></ProtectedLayout>} />
             <Route path="/analysis/performance" element={<ProtectedLayout><PerformancePage /></ProtectedLayout>} />
+            <Route path="/analysis/sector" element={<ProtectedLayout><SectorAnalysisPage /></ProtectedLayout>} />
+            <Route path="/economy/data-viewer" element={<ProtectedLayout><EconomyDataViewer /></ProtectedLayout>} />
+            <Route path="/economy/calendar" element={<ProtectedLayout><DataReleasesCalendar /></ProtectedLayout>} />
+            <Route path="/system/pipelines" element={<ProtectedLayout><DataPipelines /></ProtectedLayout>} />
             <Route path="/analysis/ema-stack/:ticker" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
             <Route path="/analysis/ema-stack" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
             <Route path="/analysis/adx/:ticker" element={<ProtectedLayout><AdxReport /></ProtectedLayout>} />
@@ -538,11 +698,17 @@ function AppContent() {
             <Route path="/investing/ichimoku" element={<ProtectedLayout><IchimokuReport /></ProtectedLayout>} />
             <Route path="/system/pipelines" element={<ProtectedLayout><DataPipelines /></ProtectedLayout>} />
 
+            {/* Tools */}
+            <Route path="/tools/ema-respect" element={<ProtectedLayout><EmaRespectCalculator /></ProtectedLayout>} />
+
             {/* Auth Routes */}
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/admin" element={<AdminLayout><AdminPage /></AdminLayout>} />
 
-            <Route path="/admin/data" element={<AdminLayout><AdminDataDashboard /></AdminLayout>} />
+            {/* Admin Routes */}
+            <Route path="/admin/users" element={<AdminLayout><UserManagementPage /></AdminLayout>} />
+            <Route path="/admin/data" element={<AdminLayout><DataManagementPage /></AdminLayout>} />
+            {/* Redirect old admin base to users */}
+            <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
           </Routes>
         </main>
       </div>

@@ -11,6 +11,8 @@ from pathlib import Path
 ROOT: Path = Path(".")  # keep relative to project working dir
 DATA_DIR: Path = Path("data")
 RAW_DIR: Path = DATA_DIR / "raw"
+# Alias for backward compatibility or clarity if used elsewhere
+RAW_DATA_DIR = RAW_DIR
 FEATURES_DIR: Path = DATA_DIR / "features"
 META_DIR: Path = DATA_DIR / "meta"
 

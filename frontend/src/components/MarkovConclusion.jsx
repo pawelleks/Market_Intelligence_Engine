@@ -61,17 +61,31 @@ const getPredictionDetails = (contextRow, settings) => {
     };
 };
 
-const MarkovConclusion = ({ markovData, settings }) => {
-    // NOTE: In a robust system, the current context must be fetched from the backend.
-    // For this prototype, we assume the last context in the matrix is the one we want to highlight.
+const MarkovConclusion = ({ markovData, settings, latestMarkovState }) => {
+    // NOTE: We prefer the calculated latestMarkovState from recent price data
+    // because the matrix file might be slightly stale or the last row might not represent "today".
+
     if (!markovData || markovData.length === 0) {
         return null;
     }
-    const lastContextRow = markovData[markovData.length - 1];
 
-    if (!lastContextRow) {
+    let contextRow = null;
+    if (latestMarkovState) {
+        // Find row matching current calculated state
+        contextRow = markovData.find(d => d.context === latestMarkovState);
+    }
+
+    // Fallback: Use last row (old behavior) if state calculation failed
+    if (!contextRow) {
+        contextRow = markovData[markovData.length - 1];
+    }
+
+    if (!contextRow) {
         return <p style={{ fontSize: '13px', color: '#9e9e9e', paddingTop: '10px' }}>Current context data unavailable.</p>;
     }
+
+    // Use the found row
+    const lastContextRow = contextRow;
 
     const { maxProb, nextStateName, continuationProb, continuationStateName } = getPredictionDetails(lastContextRow, settings);
 

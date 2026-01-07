@@ -49,10 +49,30 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
         max_age_hours = 24 # Daily builds
         disk_data = load_gex_profile(ticker)
         if disk_data:
-            # Check timestamp age
+            from mie_lib.utils.trading_calendar import get_previous_trading_day, coerce_to_date
+            
+            # Check timestamp age AND target date freshness
             try:
+                # 2.1 Check JSON timestamp (TTL)
                 ts = datetime.fromisoformat(disk_data.get("timestamp"))
-                if (datetime.now() - ts).total_seconds() < (max_age_hours * 3600):
+                is_recent = (datetime.now() - ts).total_seconds() < (max_age_hours * 3600)
+                
+                # 2.2 Check Data Target Date (Business Logic Freshness)
+                # If today is Tuesday, and data is from Friday, it's stale (Monday is missing).
+                target_date_str = disk_data.get("date") # We added 'date' to results in engine
+                if not target_date_str:
+                    # Fallback for legacy data without 'date' key
+                    # Force refresh if older than 12 hours
+                    is_recent = (datetime.now() - ts).total_seconds() < (12 * 3600)
+                else:
+                    target_date = coerce_to_date(target_date_str)
+                    prev_trading_day = get_previous_trading_day(date.today())
+                    
+                    if target_date < prev_trading_day:
+                        logger.warning(f"GEX disk data for {ticker} is stale (Data: {target_date}, Required: {prev_trading_day}). Forcing refresh.")
+                        is_recent = False
+                
+                if is_recent:
                      # Validate Profile Data exists
                      if not disk_data.get("profile"):
                          logger.warning(f"GEX disk data for {ticker} missing profile. Ignoring.")

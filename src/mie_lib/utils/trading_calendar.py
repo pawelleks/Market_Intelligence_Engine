@@ -72,6 +72,18 @@ def get_previous_trading_day(dt: date) -> date:
         dt -= timedelta(days=1)
     return dt
 
+def get_trading_days_ahead(dt: date, days: int) -> date:
+    """Finds the date that is N trading days in the future."""
+    count = 0
+    curr = dt
+    # If today is not a trading day, don't count it. 
+    # But usually dt is a trading day or today.
+    while count < days:
+        curr += timedelta(days=1)
+        if is_trading_day(curr):
+            count += 1
+    return curr
+
 # Aliases for compatibility
 next_trading_day = get_next_trading_day
 previous_trading_day = get_previous_trading_day

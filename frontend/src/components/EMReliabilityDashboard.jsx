@@ -138,8 +138,8 @@ const EMReliabilityDashboard = () => {
         return matchTicker && matchPeriod;
     });
 
-    // 2. Sort by Date Descending (Newest First)
-    filteredHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    // 2. Sort by Expiry Date Descending (Newest First)
+    filteredHistory.sort((a, b) => new Date(b.expiry_date) - new Date(a.expiry_date));
 
     // 3. Pagination
     const [currentPage, setCurrentPage] = useState(1);

@@ -82,19 +82,39 @@ const VolatilityChart = ({ data, ticker }) => {
 
         // Shapes for Regimes (Optional visual candy)
         // Highlighting Squeezes?
-        shapes: validData.map((d, i) => {
-            if (d.regime === 'Squeeze') {
-                return {
-                    type: 'rect',
-                    xref: 'x',
-                    yref: 'paper',
-                    x0: d.date,
-                    x1: d.date, // Single day width needs careful handling or bar chart. 
-                    // Shapes for single points are tricky. Let's skip for simple chart first.
+        // Shapes: Group contiguous regimes into single rectangles
+        shapes: (() => {
+            const shapes = [];
+            let start = null;
+
+            validData.forEach((d, i) => {
+                const isSqueeze = d.regime === 'Squeeze';
+                const nextIsSqueeze = validData[i + 1]?.regime === 'Squeeze';
+
+                // Start of a new block
+                if (isSqueeze && !start) {
+                    start = d.date;
                 }
-            }
-            return null;
-        }).filter(s => s)
+
+                // End of a block (current is squeeze, next is NOT or end of array)
+                if (isSqueeze && start && !nextIsSqueeze) {
+                    shapes.push({
+                        type: 'rect',
+                        xref: 'x',
+                        yref: 'paper',
+                        x0: start,
+                        x1: d.date, // End date covers this day
+                        y0: 0,
+                        y1: 1,
+                        fillcolor: 'rgba(255, 171, 64, 0.15)', // Orange Squeeze transparent
+                        line: { width: 0 },
+                        layer: 'below'
+                    });
+                    start = null; // Reset
+                }
+            });
+            return shapes;
+        })()
     };
 
     return (

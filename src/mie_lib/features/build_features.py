@@ -56,6 +56,13 @@ OUTPUT_COLUMNS = [
     "ma_ratio_20_200",
     "dist_from_50dma",
     "dist_from_200dma",
+    "rolling_max_252",
+    "rolling_min_252",
+    "ret_5d",
+    "ret_21d",
+    "ret_63d",
+    "ret_126d",
+    "ret_252d",
     "dow",
     "month",
     "as_of",
@@ -240,6 +247,17 @@ def _compute_features_from_raw(raw_df):
         df["dist_from_200dma"] = (price / df["sma_200"]) - 1
     else:
         df["dist_from_200dma"] = np.nan
+
+    # 52W Range (Authoritative)
+    df["rolling_max_252"] = price.rolling(window=252, min_periods=1).max()
+    df["rolling_min_252"] = price.rolling(window=252, min_periods=1).min()
+
+    # Performance Returns
+    df["ret_5d"] = price.pct_change(periods=5)
+    df["ret_21d"] = price.pct_change(periods=21)
+    df["ret_63d"] = price.pct_change(periods=63)
+    df["ret_126d"] = price.pct_change(periods=126)
+    df["ret_252d"] = price.pct_change(periods=252)
 
     # Calendar features
     df["dow"] = df["date"].dt.weekday

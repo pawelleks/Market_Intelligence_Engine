@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List, Union
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 # Assume the project root is on the path or FastAPI is run from root.
 from mie_lib.utils.paths import markov_matrix_path_flat, markov_out_dir
@@ -94,6 +95,10 @@ from mie_lib.api.routers.admin import router as admin_router
 app.include_router(admin_router, prefix="/api/v1")
 from mie_lib.api.routers.admin_data import router as admin_data_router
 app.include_router(admin_data_router, prefix="/api/v1")
+from mie_lib.api.routers.economy import router as economy_router
+app.include_router(economy_router, prefix="/api/v1")
+from mie_lib.api.routers.tools import router as tools_router
+app.include_router(tools_router, prefix="/api/v1")
 
 # Configure CORS
 origins = [
@@ -146,8 +151,12 @@ def _read_parquet_and_format(path: Path) -> Optional[List[Dict[str, Any]]]:
         print(f"Error reading {path}: {e}")
         return None
 
-def _process_price_data(df_raw: pd.DataFrame, state_mode: str, threshold_bps: int, rows: int) -> List[Dict[str, Any]]:
-    """Performs normalization, return calculation, state classification, and styling."""
+def _process_price_data(df_raw: pd.DataFrame, state_mode: str, threshold_bps: int, rows: int = None) -> List[Dict[str, Any]]:
+    """Performs normalization, return calculation, state classification, and styling.
+    
+    Args:
+        rows: Number of most recent rows to return. If None, returns all data.
+    """
     
     if df_raw.empty:
         return []
@@ -185,7 +194,13 @@ def _process_price_data(df_raw: pd.DataFrame, state_mode: str, threshold_bps: in
     out["State"] = out["daily_return_pct"].apply(classify_state_wrapper)
 
     # 3. Final Formatting and Selection
-    out = out.sort_values("date", ascending=False).head(rows).reset_index(drop=True)
+    out = out.sort_values("date", ascending=False)
+    
+    # Apply row limit only if specified
+    if rows is not None:
+        out = out.head(rows)
+    
+    out = out.reset_index(drop=True)
     
     # Format the required columns for display
     out["Date"] = out["date"].dt.strftime("%Y-%m-%d")
@@ -257,17 +272,20 @@ def get_available_tickers_for_analysis(analysis_key: str) -> JSONResponse:
 @app.get("/api/v1/data/prices/{ticker}")
 def get_price_returns_viewer_data(
     ticker: str, 
-    rows: int = 50,
+    table_rows: int = 50,
     state_mode: str = "tri",
     threshold_bps: int = 10,
 ) -> JSONResponse:
-    """Retrieves OHLC data, calculates returns and state classification for display."""
+    """Retrieves OHLC data, calculates returns and state classification for display.
+    
+    Returns full dataset for chart (to enable zoom) and limited dataset for table display.
+    """
     
     ticker = ticker.upper()
     
     # VULN-01FIX: Validate ticker to prevent path traversal
     import re
-    if not re.match(r"^[A-Z0-9\.]+$", ticker):
+    if not re.match(r"^[A-Z0-9\\.]+$", ticker):
         raise HTTPException(
             status_code=400, 
             detail="Invalid ticker format. Only alphanumeric characters and dots allowed."
@@ -289,13 +307,19 @@ def get_price_returns_viewer_data(
         if not all(c.lower() in [col.lower() for col in df_raw.columns] for c in required):
             raise ValueError("Raw data missing required OHLC columns.")
 
-        processed_data = _process_price_data(df_raw, state_mode, threshold_bps, rows)
+        # Process FULL data for chart (no row limit)
+        chart_data = _process_price_data(df_raw, state_mode, threshold_bps, rows=None)
+        
+        # Process LIMITED data for table
+        table_data = _process_price_data(df_raw, state_mode, threshold_bps, rows=table_rows)
         
         return JSONResponse(content={
             "ticker": ticker,
-            "data": processed_data,
+            "chart_data": chart_data,
+            "table_data": table_data,
             "metadata": {
-                "rows_displayed": len(processed_data)
+                "total_records": len(chart_data),
+                "table_rows_displayed": len(table_data)
             }
         })
     except Exception as e:
@@ -422,19 +446,35 @@ def get_hmm_probabilities(
     
     # 1. Determine the standardized path 
     out_dir = hmm_std_out_dir(ticker, window_years, n_states)
-    path = out_dir / "hmm_probs.parquet"
+    probs_path = out_dir / "hmm_probs.parquet"
+    states_path = out_dir / "hmm_states.parquet"
     
-    # 2. Read and format the data
-    data = _read_parquet_and_format(path)
+    # 2. Read and merge data
+    import pandas as pd
     
-    if data is None:
-        raise HTTPException(
-            status_code=404, 
-            detail=(
-                f"HMM Probabilities not found for {ticker} (States={n_states}, Window={window_years}y). "
-                f"Run the CLI job (e.g., build-hmm) first."
-            )
-        )
+    if not probs_path.exists():
+         raise HTTPException(status_code=404, detail=f"HMM Probs not found for {ticker}")
+         
+    df_probs = pd.read_parquet(probs_path)
+    
+    if states_path.exists():
+        df_states = pd.read_parquet(states_path)
+        # Merge on date
+        # Ensure 'date' is datetime in both
+        if 'date' in df_probs.columns and 'date' in df_states.columns:
+            df = pd.merge(df_probs, df_states, on='date', how='left')
+        else:
+            df = df_probs # Fallback
+    else:
+         df = df_probs
+
+    # Format dates to string
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+        
+    data = df.to_dict(orient='records')
     
     return JSONResponse(content={
         "ticker": ticker,
@@ -678,50 +718,74 @@ def api_get_day_drilldown(ticker: str, month: int, day: int, lookback: int = 50)
 
 @app.get("/api/v1/dcs/latest/{ticker}")
 def get_dcs_latest_status(ticker: str) -> JSONResponse:
-    """Returns the latest Downtrend Confirmation Score (DCS) and signal breakdown."""
+    """
+    Get LATEST DCS. Tries pre-computed JSON, falls back to on-the-fly.
+    """
     try:
-        # 1. Fetch and align all assets
+        from mie_lib.utils.paths import DATA_DIR
+        import json
+        
+        # 1. Try Pre-computed
+        latest_path = DATA_DIR / "analytics" / "dcs" / f"{ticker}_latest.json"
+        if latest_path.exists():
+            with open(latest_path, "r") as f:
+                data = json.load(f)
+            return JSONResponse(content={"ticker": ticker, "results": data})
+
+        # 2. Fallback
         df_aligned, weights = fetch_and_align_dcs_assets(ticker, lookback_days=500)
         
         if df_aligned.empty:
-            raise HTTPException(status_code=404, detail="Multi-asset data alignment failed.")
-
-        # 2. Run the core scoring engine
+             return JSONResponse(content={
+                 "ticker": ticker,
+                 "results": {
+                    "latest_score_100": 0.0,
+                    "confidence": "Low (No Data)",
+                    "breakdown": []
+                 }
+             })
+             
         score_data = compute_downtrend_score_latest(df_aligned, weights=weights, ticker=ticker)
+        return JSONResponse(content={"ticker": ticker, "results": score_data})
         
-        return JSONResponse(content={
-            "ticker": ticker,
-            "results": score_data,
-            "config_summary": {
-                "weights": weights, 
-                "thresholds": {"Warning": 40, "Alert": 60, "Crisis": 80}
-            }
-        })
-        
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=f"Data required for DCS missing: {e}")
     except Exception as e:
-        print(f"FATAL ERROR IN DCS ENDPOINT: {e}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error running DCS analysis: {e}")
+        print(f"DCS Latest Error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/v1/dcs/history/{ticker}")
 def get_dcs_history(ticker: str) -> JSONResponse:
+    """
+    Get HISTORICAL DCS. Tries pre-computed Parquet, falls back to on-the-fly.
+    """
     try:
-        # Fetch data aligned over 30 years for a long-term chart window
+        from mie_lib.utils.paths import DATA_DIR
+        import pandas as pd
+        
+        # 1. Try Pre-computed
+        hist_path = DATA_DIR / "analytics" / "dcs" / f"{ticker}_history.parquet"
+        if hist_path.exists():
+            df_hist = pd.read_parquet(hist_path)
+            # Ensure dates are strings for JSON
+            if 'date' in df_hist.columns:
+                df_hist['date'] = df_hist['date'].astype(str)
+            
+            # Sanitize NaNs for JSON
+            df_hist = df_hist.replace({np.nan: None})
+            
+            return JSONResponse(content={"ticker": ticker, "data": df_hist.to_dict(orient="records")})
+
+        # 2. Fallback
         df_aligned, weights = fetch_and_align_dcs_assets(ticker, lookback_days=30*365)
         
         if df_aligned.empty:
-            raise HTTPException(status_code=404, detail="Multi-asset data alignment failed for history.")
-
-        # Compute historical scores AND signals
+            return JSONResponse(content={"ticker": ticker, "data": []})
+            
         history_records = compute_downtrend_signals_historical(df_aligned, weights=weights, ticker=ticker)
-        
         return JSONResponse(content={"ticker": ticker, "data": history_records})
         
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=f"Data required for DCS missing: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error running DCS analysis: {e}")
+        print(f"DCS History Error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 # -----------------------------------------------------------------
 # Expected Moves Endpoints
@@ -781,11 +845,20 @@ def get_expected_moves_history(ticker: str) -> JSONResponse:
         if "expiry_date" in df.columns:
             df["expiry_date"] = df["expiry_date"].astype(str)
             
+        # FIX: Robustly Handle NaNs (Nuclear Option v2)
+        import numpy as np
+        # 1. Replace all Infs with NaN
+        df = df.replace([np.inf, -np.inf], np.nan)
+        # 2. Cast to object so we can store None (float cols turn None back to NaN)
+        df = df.astype(object)
+        # 3. Replace all NaNs with None (JSON null)
+        df = df.where(pd.notnull(df), None)
+
         data = df.to_dict(orient="records")
         return JSONResponse(content=data)
     except Exception as e:
         print(f"Error reading EM history for {ticker}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reading history: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/v1/market/candles/{ticker}")
 def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") -> JSONResponse:
@@ -1244,14 +1317,26 @@ def get_ai_context() -> Dict[str, Any]:
 @app.get("/api/v1/ai-report")
 def get_ai_report() -> Dict[str, Any]:
     """
-    Returns the latest AI Analysis Report.
+    Returns the latest AI Analysis Report and its underlying context.
     """
-    path = Path("data/reports/daily_report_latest.json")
-    if not path.exists():
-        return {"status": "no_file", "data": None, "message": "No AI report generated yet."}
+    report_path = Path("data/reports/daily_report_latest.json")
+    context_path = Path("data/ai_context/spy_latest.json")
+    
+    res = {"status": "ok", "data": None, "context": None}
+
+    if report_path.exists():
+        try:
+            res["data"] = json.loads(report_path.read_text())
+        except Exception as e:
+            print(f"Error loading report: {e}")
+
+    if context_path.exists():
+        try:
+            res["context"] = json.loads(context_path.read_text())
+        except Exception as e:
+            print(f"Error loading context: {e}")
+
+    if not res["data"]:
+        return {"status": "no_file", "message": "No AI report generated yet."}
         
-    try:
-        content = json.loads(path.read_text())
-        return {"status": "ok", "data": content}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    return res

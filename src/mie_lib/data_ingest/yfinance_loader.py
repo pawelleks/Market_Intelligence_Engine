@@ -261,11 +261,12 @@ def fetch_full_history(ticker: str) -> Dict[str, any]:
 # Gap detection & intraday safety helpers
 
 def _detect_missing_weekdays(last_date: _date, new_dates: list[_date]) -> list[_date]:
-    """Return list of missing *weekday* dates between last_date and the first new date.
-    Only checks the gap between last_date+1 and min(new_dates)-1. Weekends are ignored.
-    Holidays are not modeled; this is intentionally simple per task spec.
-    Pure helper: no IO, no logging.
+    """Return list of missing *trading* dates between last_date and the first new date.
+    Only checks the gap between last_date+1 and min(new_dates)-1.
+    Uses market calendar to ignore holidays/weekends.
     """
+    from mie_lib.utils.trading_calendar import is_trading_day
+    
     if last_date is None or not new_dates:
         return []
     start_expected = last_date + timedelta(days=1)
@@ -275,7 +276,7 @@ def _detect_missing_weekdays(last_date: _date, new_dates: list[_date]) -> list[_
     missing: list[_date] = []
     cursor = start_expected
     while cursor < first_new:
-        if cursor.weekday() < 5:  # Mon-Fri only
+        if is_trading_day(cursor):
             missing.append(cursor)
         cursor += timedelta(days=1)
     return missing
@@ -289,11 +290,20 @@ def _filter_intraday_rows(df):
         return df, 0
     if df is None or df.empty or "date" not in df.columns:
         return df, 0
-    today = datetime.now().date()
+    
+    now = datetime.now()
+    cutoff_date = now.date()
+    
+    # RELAXATION FOR NIGHTLY RUNS:
+    # If running late (>= 22:00 local time, which is post-market close in CET), 
+    # allow "today's" data by shifting cutoff to tomorrow.
+    if now.hour >= 22:
+        cutoff_date += timedelta(days=1)
+        
     f = df.copy()
     f["date"] = pd.to_datetime(f["date"]).dt.tz_localize(None)
     before = len(f)
-    f = f[f["date"].dt.date < today].reset_index(drop=True)
+    f = f[f["date"].dt.date < cutoff_date].reset_index(drop=True)
     skipped = before - len(f)
     return f, skipped
 

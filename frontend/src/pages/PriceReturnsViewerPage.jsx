@@ -1,78 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import Plot from 'react-plotly.js';
+import TradingViewCandleChart from '../components/TradingViewCandleChart';
 import PriceViewerSettings from '../components/PriceViewerSettings';
-
-// Component to render the Candlestick and Volume Chart
-const CandlestickChart = ({ data, settings }) => {
-    if (!data || data.length === 0) return null;
-
-    // Sort data ascending for charting
-    const chartData = [...data].reverse();
-    const dates = chartData.map(d => d.Date);
-
-    // Candle colors: White/Light Gray for up, Dark Gray for down (matching traditional style)
-    const candleTrace = {
-        x: dates,
-        open: chartData.map(d => parseFloat(d.Open)),
-        high: chartData.map(d => parseFloat(d.High)),
-        low: chartData.map(d => parseFloat(d.Low)),
-        close: chartData.map(d => parseFloat(d.Close)),
-        type: 'candlestick',
-        xaxis: 'x',
-        yaxis: 'y',
-        name: settings.ticker,
-        increasing: { line: { color: '#d7e3f3', width: 1 }, fillcolor: '#d7e3f3' }, // White/Light Gray for up
-        decreasing: { line: { color: '#9e9e9e', width: 1 }, fillcolor: '#0b1220' }  // Dark Gray/Black for down
-    };
-
-    // Volume colors: Green for up day, Red for down day
-    const volumeTrace = {
-        x: dates,
-        y: chartData.map(d => d.Volume),
-        type: 'bar',
-        xaxis: 'x',
-        yaxis: 'y2', // Secondary Y-axis for Volume
-        name: 'Volume',
-        marker: {
-            // Match candlestick colors: Light Gray for up, Dark Gray for down
-            color: chartData.map(d => parseFloat(d['Daily Change (%)'].replace('%', '')) > 0 ? '#d7e3f3' : '#9e9e9e'),
-            opacity: 0.5
-        },
-    };
-
-    const layout = {
-        title: { text: `OHLC & Volume: ${settings.ticker}`, font: { color: '#d7e3f3', size: 16 } },
-        height: 500,
-        autosize: true,
-        margin: { t: 50, b: 50, l: 50, r: 20 },
-        plot_bgcolor: '#0e1525',
-        paper_bgcolor: '#0b1220',
-        font: { color: '#d7e3f3' },
-        xaxis: {
-            rangeslider: { visible: false },
-            type: 'date',
-            domain: [0, 1],
-            gridcolor: '#203049',
-            rangebreaks: [
-                { bounds: ["sat", "mon"] } // Hide weekends
-            ]
-        },
-        yaxis: { title: 'Price (USD)', domain: [0.3, 1], gridcolor: '#203049' }, // Main Price Axis
-        yaxis2: { title: 'Volume', domain: [0, 0.25], showgrid: false, gridcolor: '#203049' }, // Volume Axis
-        legend: { orientation: 'h', y: 1.05, x: 0.1, bgcolor: 'rgba(0,0,0,0)' }
-    };
-
-    return (
-        <div style={{ marginTop: '20px', border: '1px solid #203049', borderRadius: '8px', overflow: 'hidden' }}>
-            <Plot
-                data={[candleTrace, volumeTrace]}
-                layout={layout}
-                config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
-                style={{ width: '100%', height: '100%' }}
-            />
-        </div>
-    );
-};
 
 const formatPrice = (value) => {
     if (value === null || value === undefined) return 'N/A';
@@ -84,8 +12,10 @@ const formatPrice = (value) => {
 const StyledDataTable = ({ data }) => {
     // Define styles for color coding
     const getChangeColor = (value) => {
-        if (!value || value === "") return '#d7e3f3';
-        const num = parseFloat(value.replace('%', ''));
+        if (value === null || value === undefined) return '#d7e3f3';
+        const strVal = String(value);
+        if (strVal === "") return '#d7e3f3';
+        const num = parseFloat(strVal.replace('%', ''));
         if (num > 0) return '#4caf50'; // Green
         if (num < 0) return '#f44336'; // Red
         return '#d7e3f3';
@@ -159,9 +89,62 @@ const StyledDataTable = ({ data }) => {
 // --- Main Page Component ---
 import { usePageTitle } from '../hooks/usePageTitle';
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        console.error("PriceViewer Error:", error, errorInfo);
+        this.state.errorInfo = errorInfo;
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: '20px', color: '#f44336', backgroundColor: '#0e1525', minHeight: '100vh' }}>
+                    <h2>Something went wrong in Price Viewer.</h2>
+                    <pre style={{ whiteSpace: 'pre-wrap', backgroundColor: '#000', padding: '10px' }}>
+                        {this.state.error && this.state.error.toString()}
+                        <br />
+                        {this.state.errorInfo && this.state.errorInfo.componentStack}
+                    </pre>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 const PriceReturnsViewerPage = ({ settings, onSettingsChange, data, loading, error, freshnessStatus }) => {
     usePageTitle(`Price Analysis: ${settings.ticker}`);
-    const summaryText = `Ticker: ${settings.ticker} • Mode: ${settings.stateMode} • Threshold: ${settings.thresholdBPS} BPS (${(settings.thresholdBPS / 100).toFixed(2)}%) • Rows: ${settings.rows}`;
+
+    return (
+        <ErrorBoundary>
+            <PriceReturnsViewerPageContent
+                settings={settings}
+                onSettingsChange={onSettingsChange}
+                data={data}
+                loading={loading}
+                error={error}
+                freshnessStatus={freshnessStatus}
+            />
+        </ErrorBoundary>
+    );
+};
+
+const PriceReturnsViewerPageContent = ({ settings, onSettingsChange, data, loading, error, freshnessStatus }) => {
+    const summaryText = `Ticker: ${settings.ticker} • Mode: ${settings.stateMode} • Threshold: ${settings.thresholdBPS} BPS (${(settings.thresholdBPS / 100).toFixed(2)}%) • Table Rows: ${settings.rows}`;
+
+    // Extract chart and table data from the new API structure
+    const chartData = data?.chartData || [];
+    const tableData = data?.tableData || [];
 
     return (
         <div style={{ display: 'flex', gap: '20px', padding: '20px', minHeight: '100vh', width: '100%' }}>
@@ -195,7 +178,8 @@ const PriceReturnsViewerPage = ({ settings, onSettingsChange, data, loading, err
                     )}
                     {/* END NEW FRESHNESS DISPLAY */}
 
-                    <p style={{ fontSize: '14px', color: '#9ec4ff' }}>Records: {data ? data.length : 'N/A'}</p>
+                    <p style={{ fontSize: '14px', color: '#9ec4ff' }}>Chart Records: {chartData.length}</p>
+                    <p style={{ fontSize: '14px', color: '#9ec4ff' }}>Table Records: {tableData.length}</p>
                     <p style={{ fontSize: '13px', color: error ? '#f44336' : 'inherit' }}>{error ? `API Error: ${error}` : ''}</p>
                 </div>
             </div>
@@ -207,10 +191,10 @@ const PriceReturnsViewerPage = ({ settings, onSettingsChange, data, loading, err
                     {summaryText}
                 </p>
 
-                {loading ? <p>Loading chart data...</p> : <CandlestickChart data={data} settings={settings} />}
+                {loading ? <p>Loading chart data...</p> : <TradingViewCandleChart data={chartData} />}
 
                 <h3 style={{ fontSize: '1.2rem', marginTop: '30px', marginBottom: '10px', color: '#9ec4ff' }}>Recent Price Data Table</h3>
-                {loading ? <p>Loading table data...</p> : <StyledDataTable data={data} />}
+                {loading ? <p>Loading table data...</p> : <StyledDataTable data={tableData} />}
             </div>
         </div>
     );

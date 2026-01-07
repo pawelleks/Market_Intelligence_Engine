@@ -106,8 +106,11 @@ async def login(
     if not email:
         raise HTTPException(status_code=400, detail="Token missing email")
 
-    # 3. Check DB
-    user = db.query(User).filter(User.email == email).first()
+    logger.info(f"Login attempt for email: '{email}'")
+
+    # 3. Check DB - Case Insensitive
+    from sqlalchemy import func
+    user = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     
     if not user:
         # --- NEW USER CASE ---

@@ -15,7 +15,7 @@ CRON_MARKER="# MIE_NIGHTLY_UPDATE"
 
 # Build new cron entry: run daily at 00:00 local time
 # Wrapper manages lock/logs; we just call it.
-NEW_LINE="0 0 * * * cd ${REPO_ROOT} && ${WRAPPER} >> ${LOGDIR}/cron_\$(date +\\%F).log 2>&1 ${CRON_MARKER}"
+NEW_LINE="0 23 * * * cd ${REPO_ROOT} && ${WRAPPER} >> ${LOGDIR}/cron_\$(date +\\%F).log 2>&1 ${CRON_MARKER}"
 
 # Install or update crontab idempotently
 TMP="$(mktemp)"

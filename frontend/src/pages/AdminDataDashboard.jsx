@@ -139,7 +139,7 @@ const AdminDataDashboard = () => {
                 // Wait a sec for the process to spin up then refresh
                 setTimeout(fetchAllData, 2000);
             } else {
-                alert("Error: " + (json.error || json.message));
+                alert("Error: " + (json.error || json.message || json.detail || "Unknown error"));
             }
         } catch (e) {
             console.error(e);

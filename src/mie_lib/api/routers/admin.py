@@ -30,6 +30,23 @@ def approve_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
         
     user.is_approved = True
+    # Reset status if it was revoked
+    if user.subscription_status == 'revoked':
+        user.subscription_status = 'free'
+        
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.put("/users/{user_id}/revoke", response_model=UserResponse)
+def revoke_user(user_id: int, db: Session = Depends(get_db)):
+    """Revoke access for a user."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.is_approved = False
+    user.subscription_status = 'revoked'
     db.commit()
     db.refresh(user)
     return user

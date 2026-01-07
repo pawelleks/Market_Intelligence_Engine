@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import EMCard from '../components/EMCard';
 import EMTradingViewChart from '../components/EMTradingViewChart';
+import TrendTickerSelector from '../components/TrendTickerSelector';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
@@ -46,6 +47,7 @@ const ExpectedMovesPageContent = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [selectedTicker, setSelectedTicker] = useState(null);
+    const [isStraddleCollapsed, setIsStraddleCollapsed] = useState(true);
 
     const [liveData, setLiveData] = useState(null);
     const [liveLoading, setLiveLoading] = useState(true);
@@ -244,24 +246,12 @@ const ExpectedMovesPageContent = () => {
 
                     {/* Ticker Selector */}
                     {sortedTickers.length > 0 && (
-                        <select
+                        <TrendTickerSelector
                             value={selectedTicker || sortedTickers[0]}
-                            onChange={(e) => setSelectedTicker(e.target.value)}
-                            style={{
-                                backgroundColor: '#1e293b',
-                                color: '#fff',
-                                border: '1px solid #334155',
-                                padding: '8px 12px',
-                                borderRadius: '4px',
-                                fontSize: '14px',
-                                outline: 'none',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            {sortedTickers.map(t => (
-                                <option key={t} value={t}>{t}</option>
-                            ))}
-                        </select>
+                            onChange={setSelectedTicker}
+                            tickers={sortedTickers}
+                            placeholder="Select Ticker"
+                        />
                     )}
                 </div>
 
@@ -281,7 +271,7 @@ const ExpectedMovesPageContent = () => {
                     )}
                 </div>
 
-                {/* Debug Info Section */}
+                {/* Straddle Contracts Section (Collapsible) */}
                 {selectedTicker && tickers[selectedTicker] && (
                     <div style={{
                         marginTop: '20px',
@@ -294,25 +284,44 @@ const ExpectedMovesPageContent = () => {
                         color: '#9e9e9e',
                         fontFamily: 'monospace'
                     }}>
-                        <div style={{ fontWeight: 'bold', color: '#d7e3f3', marginBottom: '5px' }}>Debug Details (Polygon EOD) - {selectedTicker}</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
-                            {['ODTE', 'WEEKLY', 'MONTHLY'].map(type => {
-                                const exp = tickers[selectedTicker]?.expirations?.[type];
-                                const debug = exp?.debug;
-                                if (!debug) return null;
-                                return (
-                                    <div key={type}>
-                                        <div style={{ color: '#4caf50', fontWeight: 'bold' }}>{type} ({exp.expiry_date})</div>
-                                        {debug.atm_strike !== undefined && <div>ATM Strike: {debug.atm_strike}</div>}
-                                        {debug.call_price !== undefined && <div>Call: {debug.call_ticker || 'N/A'} (${debug.call_price?.toFixed(2)})</div>}
-                                        {debug.put_price !== undefined && <div>Put:  {debug.put_ticker || 'N/A'} (${debug.put_price?.toFixed(2)})</div>}
-                                        {debug.call_price !== undefined && debug.put_price !== undefined &&
-                                            <div>Sum:  ${(debug.call_price + debug.put_price).toFixed(2)}</div>
-                                        }
-                                    </div>
-                                );
-                            })}
+                        <div
+                            onClick={() => setIsStraddleCollapsed(!isStraddleCollapsed)}
+                            style={{
+                                fontWeight: 'bold',
+                                color: '#d7e3f3',
+                                marginBottom: isStraddleCollapsed ? '0' : '15px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                            }}
+                        >
+                            <span>Straddle Contracts: {selectedTicker}</span>
+                            <span style={{ fontSize: '0.8rem', color: '#666' }}>
+                                {isStraddleCollapsed ? '▼ Show' : '▲ Hide'}
+                            </span>
                         </div>
+
+                        {!isStraddleCollapsed && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
+                                {['ODTE', 'WEEKLY', 'MONTHLY'].map(type => {
+                                    const exp = tickers[selectedTicker]?.expirations?.[type];
+                                    const debug = exp?.debug;
+                                    if (!debug) return null;
+                                    return (
+                                        <div key={type}>
+                                            <div style={{ color: '#4caf50', fontWeight: 'bold' }}>{type} ({exp.expiry_date})</div>
+                                            {debug.atm_strike !== undefined && <div>ATM Strike: {debug.atm_strike}</div>}
+                                            {debug.call_price !== undefined && <div>Call: {debug.call_ticker || 'N/A'} (${debug.call_price?.toFixed(2)})</div>}
+                                            {debug.put_price !== undefined && <div>Put:  {debug.put_ticker || 'N/A'} (${debug.put_price?.toFixed(2)})</div>}
+                                            {debug.call_price !== undefined && debug.put_price !== undefined &&
+                                                <div>Sum:  ${(debug.call_price + debug.put_price).toFixed(2)}</div>
+                                            }
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
 

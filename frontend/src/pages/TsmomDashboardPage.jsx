@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import SignalBox from '../components/tsmom/SignalBox';
 import TsmomTable from '../components/tsmom/TsmomTable';
 import TsmomChart from '../components/tsmom/TsmomChart';
+import TsmomSignalOverlay from '../components/tsmom/TsmomSignalOverlay';
 
 const API_BASE = "/api/v1/tsmom";
 
@@ -124,6 +125,16 @@ const TsmomDashboardPage = () => {
                 </div>
             </div>
 
+            {/* Overlay for Selected Ticker */}
+            {selectedTicker && (
+                <TsmomSignalOverlay
+                    ticker={selectedTicker}
+                    row={snapshotData.find(r => r.ticker === selectedTicker)}
+                    chartData={chartData}
+                    onClose={() => setSelectedTicker(null)}
+                />
+            )}
+
             {loading ? (
                 <div style={{ color: '#d7e3f3' }}>Loading Data...</div>
             ) : (
@@ -161,73 +172,6 @@ const TsmomDashboardPage = () => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '20px', marginTop: '10px', flexDirection: 'column' }}>
-                        {/* Chart Section */}
-                        {/* Chart Section */}
-                        {selectedTicker && (
-                            <div style={{ flex: 1 }}>
-                                {loadingChart ? (
-                                    <div style={{ color: '#68778d' }}>Loading Chart for {selectedTicker}...</div>
-                                ) : (
-                                    <>
-                                        {/* Ticker Status Card */}
-                                        {(() => {
-                                            const row = snapshotData.find(r => r.ticker === selectedTicker);
-                                            if (!row) return null;
-
-                                            const isDivergent = row.theoretical_signal !== 0 && row.theoretical_signal !== row.tsmom_dir;
-                                            const posColor = row.tsmom_dir === 1 ? '#4caf50' : (row.tsmom_dir === -1 ? '#f44336' : '#9e9e9e');
-                                            const posText = row.tsmom_dir === 1 ? 'LONG' : (row.tsmom_dir === -1 ? 'SHORT' : 'NEUTRAL');
-
-                                            return (
-                                                <div style={{
-                                                    backgroundColor: '#1b263b',
-                                                    padding: '15px',
-                                                    borderRadius: '8px',
-                                                    marginBottom: '15px',
-                                                    border: '1px solid #203049',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '20px',
-                                                    flexWrap: 'wrap'
-                                                }}>
-                                                    <div>
-                                                        <div style={{ color: '#68778d', fontSize: '0.8rem', textTransform: 'uppercase' }}>Current Position</div>
-                                                        <div style={{ color: posColor, fontWeight: 'bold', fontSize: '1.2rem' }}>{posText}</div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div style={{ color: '#68778d', fontSize: '0.8rem', textTransform: 'uppercase' }}>Next Rebalance</div>
-                                                        <div style={{ color: '#d7e3f3', fontWeight: 'bold' }}>{row.next_rebalance_date || "Month End"}</div>
-                                                    </div>
-
-                                                    {isDivergent && (
-                                                        <div style={{
-                                                            backgroundColor: '#ff980022',
-                                                            border: '1px solid #ff9800',
-                                                            padding: '8px 12px',
-                                                            borderRadius: '4px',
-                                                            color: '#ff9800',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '8px'
-                                                        }}>
-                                                            <span>⚠️ Intra-month divergence - Holding until month-end</span>
-                                                        </div>
-                                                    )}
-
-                                                    <div style={{ marginLeft: 'auto', color: '#68778d', fontSize: '0.8rem', maxWidth: '300px', textAlign: 'right' }}>
-                                                        ℹ️ Signals are evaluated only on the last trading day of the month to reduce noise.
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        <TsmomChart ticker={selectedTicker} chartData={chartData} />
-                                    </>
-                                )}
-                            </div>
-                        )}
-
                         {/* Table Section */}
                         <div style={{ flex: 1 }}>
                             <TsmomTable data={filteredData} onTickerSelect={handleTickerSelect} />

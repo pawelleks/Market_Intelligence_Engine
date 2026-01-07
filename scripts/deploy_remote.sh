@@ -105,6 +105,46 @@ rsync -avz --delete \
 # echoing "Skipping .env sync to protect production secrets. Manually copy if needed."
 
 # --- Step 3: Remote Build & Restart ---
+# --- Step 2.5: Prepare Environment Updates (Local Execution) ---
+echo "[2.5/3] Verifying and packing environment variables..."
+ENV_UPDATES=""
+REQUIRED_KEYS=("POLYGON_API_KEY" "MASSIVE_API_KEY" "GOOGLE_CLIENT_ID" "JWT_SECRET_KEY" "OPENAI_API_KEY" "LLM_MODEL_NAME" "FRED_API_KEY")
+
+for KEY in "${REQUIRED_KEYS[@]}"; do
+    VAL="${!KEY}"
+    
+    if [ -z "$VAL" ]; then
+        echo "ERROR: $KEY is missing in the LOCAL environment or .env file."
+        echo "Please ensure all required keys are set before deploying."
+        exit 1
+    fi
+    
+    # Safe quote the value for remote shell execution
+    SAFE_VAL=$(printf %q "$VAL")
+    
+    # Append the update command to the script we will send
+    ENV_UPDATES+="
+    if grep -q \"^$KEY=\" .env; then sed -i \"/^$KEY=/d\" .env; fi
+    echo \"$KEY=$SAFE_VAL\" >> .env
+    echo \"Synced $KEY...\"
+    "
+done
+
+# --- Step 2.7: Database Integrity Guard ---
+echo "[2.7/3] Verifying remote database integrity..."
+ssh $SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" << EOF
+    # Check current user count if python3 and sqlite3 available
+    DB_FILE="${REMOTE_DIR}/data/users.db"
+    if [ -f "\$DB_FILE" ]; then
+        COUNT=\$(docker exec mie-api python3 -c "import sqlite3; c=sqlite3.connect('data/users.db'); print(c.execute('SELECT COUNT(*) FROM users').fetchone()[0]); c.close()" 2>/dev/null || echo "unknown")
+        echo "Current User Count: \$COUNT"
+        if [[ "\$COUNT" != "unknown" && "\$COUNT" -lt 10 ]]; then
+            echo "WARNING: User count is suspiciously low (\$COUNT). Please verify data/users.db is correctly mounted."
+        fi
+    fi
+EOF
+
+# --- Step 3: Remote Build & Restart ---
 echo "[3/3] Rebuilding & Restarting Remote Containers..."
 ssh $SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" << EOF
     set -e
@@ -116,32 +156,9 @@ ssh $SSH_OPTS "${REMOTE_USER}@${REMOTE_HOST}" << EOF
         touch .env
     fi
 
-    # Ensure POLYGON_API_KEY exists
-    if ! grep -q "POLYGON_API_KEY" .env; then
-        echo "Injecting POLYGON_API_KEY..."
-        echo "POLYGON_API_KEY=keXDhBdz5zuofjHkeiYMznzUiyDerXgu" >> .env
-    fi
-    
-    # Ensure MASSIVE_API_KEY exists (Same as Polygon)
-    if ! grep -q "MASSIVE_API_KEY" .env; then
-        echo "Injecting MASSIVE_API_KEY..."
-        echo "MASSIVE_API_KEY=keXDhBdz5zuofjHkeiYMznzUiyDerXgu" >> .env
-    fi
-
-    # Ensure GOOGLE_CLIENT_ID exists (for OAuth)
-    # We try to grep it from the local environment passed via SSH or just manual injection here?
-    # Ideally script captures it from local execution context.
-    # But shell variable expansion happens on CLIENT side inside the HERE-DOC unless escaped.
-    # Wait, we want the VALUE from the CLIENT environment.
-    # So we should pass it.
-    
-    # Ensure GOOGLE_CLIENT_ID exists (force update)
-    if grep -q "GOOGLE_CLIENT_ID" .env; then
-        # Remove existing line to prevent duplicates or empty values
-        sed -i '/GOOGLE_CLIENT_ID/d' .env
-    fi
-    echo "Injecting GOOGLE_CLIENT_ID..."
-    echo "GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}" >> .env
+    # --- Apply Injected Environment Updates ---
+    $ENV_UPDATES
+    # ------------------------------------------
 
     # Check for docker-compose or docker compose
     if command -v docker-compose &> /dev/null; then

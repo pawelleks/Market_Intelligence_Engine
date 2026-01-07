@@ -11,6 +11,7 @@ import {
     ArrowUpRight,
     ArrowDownRight
 } from 'lucide-react';
+import TrendTickerSelector from './TrendTickerSelector';
 
 const TrendMatrix = () => {
     const [trendData, setTrendData] = useState<any[]>([]);
@@ -239,37 +240,13 @@ const TrendMatrix = () => {
                 </div>
 
                 <div style={{ position: 'relative' }}>
-                    <Search size={14} color="#64748b" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
-                    <select
+                    <TrendTickerSelector
                         value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        style={{
-                            appearance: 'none',
-                            padding: '4px 30px 4px 30px',
-                            backgroundColor: '#0f172a',
-                            border: '1px solid #334155',
-                            borderRadius: '4px',
-                            color: '#e2e8f0',
-                            fontSize: '0.8rem',
-                            width: '200px',
-                            outline: 'none',
-                            backgroundImage: 'none' // Remove default arrow if needed, but keeping simple
-                        }}
-                    >
-                        <option value="">All Tickers</option>
-                        {/* Populate options from Groups first, then others */}
-                        {groups && Object.keys(groups).map(g => (
-                            <optgroup key={g} label={g.replace(/_/g, ' ')}>
-                                {groups[g].map((t: string) => (
-                                    <option key={t} value={t}>{t}</option>
-                                ))}
-                            </optgroup>
-                        ))}
-                    </select>
-                    {/* Custom Arrow for select */}
-                    <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-                        <ArrowDownRight size={14} color="#64748b" />
-                    </div>
+                        onChange={setSearchTerm}
+                        groups={groups}
+                        tickers={[]} // When groups are present, flat list is unused within optgroups logic in component
+                        placeholder="All Tickers"
+                    />
                 </div>
             </div>
 

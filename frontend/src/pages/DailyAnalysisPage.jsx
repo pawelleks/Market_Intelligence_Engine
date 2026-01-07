@@ -3,8 +3,10 @@ import ReactMarkdown from 'react-markdown';
 
 const DailyAnalysisPage = () => {
     const [report, setReport] = useState(null);
+    const [context, setContext] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [showContext, setShowContext] = useState(true);
 
     useEffect(() => {
         fetch('/api/v1/ai-report')
@@ -12,6 +14,7 @@ const DailyAnalysisPage = () => {
             .then(data => {
                 if (data.status === 'ok') {
                     setReport(data.data);
+                    setContext(data.context);
                 } else {
                     setError(data.message || data.error || 'Failed to load report');
                 }
@@ -62,6 +65,92 @@ const DailyAnalysisPage = () => {
                 </div>
             </div>
 
+            {/* Collapsible Market State Vector (Context) */}
+            {context && (
+                <div style={{ marginBottom: '30px' }}>
+                    <button
+                        onClick={() => setShowContext(!showContext)}
+                        style={{
+                            background: '#1e293b',
+                            color: '#94a3b8',
+                            border: '1px solid #334155',
+                            padding: '10px 20px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            transition: 'all 0.2s',
+                            width: '100%',
+                            justifyContent: 'space-between'
+                        }}
+                    >
+                        <span style={{ fontWeight: 600, color: '#e2e8f0' }}>🔍 Market State Vector (AI Input Data)</span>
+                        <span>{showContext ? '▲ Hide' : '▼ Show Details'}</span>
+                    </button>
+
+                    {showContext && (
+                        <div style={{
+                            marginTop: '10px',
+                            background: '#0f172a',
+                            borderRadius: '12px',
+                            border: '1px solid #1e293b',
+                            padding: '24px',
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                            gap: '20px'
+                        }}>
+                            {/* Technicals */}
+                            <ContextGroup title="Price & Trend">
+                                <DataRow label="Close" value={`$${context.price?.close}`} />
+                                <DataRow label="EMA Stack" value={context.trend?.ema_stack?.verdict} />
+                                <DataRow label="ADX" value={`${context.trend?.adx?.val} (${context.trend?.adx?.trend_strength})`} />
+                                <DataRow label="Ichimoku" value={context.trend?.ichimoku?.status} />
+                                <DataRow label="vs 52W High" value={context.price?.dist_52w_high_label} color={context.price?.dist_52w_high_pct?.startsWith('-') ? '#f44336' : '#4caf50'} />
+                                <DataRow label="52W Range" value={`$${context.price?.['52w_low']} - $${context.price?.['52w_high']}`} />
+                            </ContextGroup>
+
+                            {/* Regime & Vol */}
+                            <ContextGroup title="Regime & Volatility">
+                                <DataRow label="HMM State" value={context.regime?.hmm?.desc} color="#fbbf24" />
+                                <DataRow label="Vol Regime" value={context.regime?.vol?.regime} />
+                                <DataRow label="ATR (14)" value={context.regime?.vol?.atr_14} />
+                                <DataRow label="ATR Rank" value={context.regime?.vol?.rank_6m} />
+                                <DataRow label="DCS Status" value={context.trend?.dcs?.status} color={context.trend?.dcs?.score > 50 ? '#f44336' : '#4caf50'} />
+                            </ContextGroup>
+
+                            {/* Options & Sentiment */}
+                            <ContextGroup title="Options & Sentiment">
+                                <DataRow label="Net GEX" value={context.options?.gex?.net_regime} />
+                                <DataRow label="Call Wall" value={context.options?.gex?.call_wall_dist} />
+                                <DataRow label="Put Wall" value={context.options?.gex?.put_wall_dist} />
+                                <DataRow label="PCR (Vol)" value={context.options?.sentiment?.pcr_vol} />
+                                <DataRow label="0DTE Expected" value={context.options?.exp_moves?.['0dte_range']} />
+                            </ContextGroup>
+
+                            {/* Seasonality */}
+                            <ContextGroup title="Seasonality">
+                                <DataRow label="Next Day" value={context.seasonality?.next_day} />
+                                <DataRow label="Next Week" value={context.seasonality?.next_week} />
+                                <DataRow label="TSMOM Signal" value={context.trend?.tsmom?.signal} />
+                                <DataRow label="TSMOM 12M" value={context.trend?.tsmom?.['12m_return']} />
+                            </ContextGroup>
+
+                            {/* Performance */}
+                            <ContextGroup title="Market Performance">
+                                <DataRow label="1 Day" value={context.performance?.['1d']} color={context.performance?.['1d']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Week" value={context.performance?.['1w']} color={context.performance?.['1w']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Month" value={context.performance?.['1m']} color={context.performance?.['1m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="3 Months" value={context.performance?.['3m']} color={context.performance?.['3m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="6 Months" value={context.performance?.['6m']} color={context.performance?.['6m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Year" value={context.performance?.['1y']} color={context.performance?.['1y']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                            </ContextGroup>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Main Content Area */}
             <div className="report-markdown" style={{ background: '#0f172a', padding: '40px', borderRadius: '16px', border: '1px solid #1e293b', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
                 <ReactMarkdown>{content}</ReactMarkdown>
@@ -82,7 +171,23 @@ const DailyAnalysisPage = () => {
     );
 };
 
-const StatusCard = ({ label, value, color, subColor }) => (
+const ContextGroup = ({ title, children }) => (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <h4 style={{ margin: '0 0 12px 0', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{title}</h4>
+        <div style={{ background: '#0a0f1d', padding: '12px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+            {children}
+        </div>
+    </div>
+);
+
+const DataRow = ({ label, value, color }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #1e293b', fontSize: '13px' }}>
+        <span style={{ color: '#94a3b8' }}>{label}</span>
+        <span style={{ color: color || '#f8fafc', fontWeight: 500 }}>{value}</span>
+    </div>
+);
+
+const StatusCard = ({ label, value, color }) => (
     <div style={{ background: '#1e293b', padding: '12px 24px', borderRadius: '12px', textAlign: 'center', minWidth: '120px', border: '1px solid #334155' }}>
         <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>{label}</div>
         <div style={{ color: color, fontWeight: '700', fontSize: '18px' }}>{value}</div>

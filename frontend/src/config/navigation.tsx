@@ -17,7 +17,9 @@ import {
     LineChart,
     Eye,
     Database,
-    Cloud
+    Cloud,
+    PieChart,
+    Globe
 } from 'lucide-react';
 
 export const NAV_DATA = {
@@ -74,7 +76,23 @@ export const NAV_DATA = {
             id: 'market',
             items: [
                 { label: 'Market Performance', to: '/analysis/performance', icon: LineChart },
+                { label: 'Sector Analysis', to: '/analysis/sector', icon: PieChart },
                 { label: 'Price & Returns Viewer', to: '/utility/price-viewer', icon: Eye },
+            ]
+        },
+        {
+            title: 'Economy',
+            id: 'economy',
+            items: [
+                { label: 'Data Viewer', to: '/economy/data-viewer', icon: Globe },
+                { label: 'Data Releases Calendar', to: '/economy/calendar', icon: Calendar },
+            ]
+        },
+        {
+            title: 'Tools',
+            id: 'tools',
+            items: [
+                { label: 'EMA Respect Calculator', to: '/tools/ema-respect', icon: Target },
             ]
         },
         {

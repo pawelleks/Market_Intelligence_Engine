@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { NAV_DATA } from '../config/navigation';
 
+import Logo from './Logo';
+
 const Sidebar = ({ user, logout }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const location = useLocation();
@@ -22,6 +24,7 @@ const Sidebar = ({ user, logout }) => {
         trading: true,
         pure_quant: true,
         market: true,
+        economy: true,
         settings: true
     });
 
@@ -121,10 +124,18 @@ const Sidebar = ({ user, logout }) => {
             <div style={{
                 padding: isCollapsed ? '16px 0' : '16px 20px',
                 display: 'flex',
-                justifyContent: isCollapsed ? 'center' : 'flex-end',
+                justifyContent: isCollapsed ? 'center' : 'space-between',
+                alignItems: 'center',
                 borderBottom: `1px solid ${colors.border}`,
                 flexShrink: 0 // Prevent shrinking
             }}>
+                {/* LOGO */}
+                {!isCollapsed && (
+                    <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
+                        <Logo fontSize="1.25rem" />
+                    </Link>
+                )}
+
                 <button
                     onClick={() => setIsCollapsed(!isCollapsed)}
                     style={{
@@ -157,22 +168,17 @@ const Sidebar = ({ user, logout }) => {
             }}>
                 {/* Admin Link Special Case */}
                 {user && user.is_admin && !isCollapsed && (
-                    <div style={{ marginBottom: '8px', padding: '0 12px' }}>
+                    <div style={{ marginBottom: '8px', padding: '0 12px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
                         <Link
-                            to="/admin"
+                            to="/admin/users"
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '12px', padding: '6px 10px',
                                 borderRadius: '6px', textDecoration: 'none', color: '#ef4444', fontWeight: 'bold', fontSize: '0.85rem'
                             }}
                         >
-                            <Shield size={16} />
-                            <span>Admin Panel</span>
+                            <User size={16} />
+                            <span>User Management</span>
                         </Link>
-                    </div>
-                )}
-                {/* Admin Data Dashboard Link */}
-                {user && user.is_admin && !isCollapsed && (
-                    <div style={{ marginBottom: '8px', padding: '0 12px' }}>
                         <Link
                             to="/admin/data"
                             style={{
@@ -181,17 +187,18 @@ const Sidebar = ({ user, logout }) => {
                             }}
                         >
                             <Database size={16} />
-                            <span>Data Dashboard</span>
+                            <span>Data Management</span>
                         </Link>
                     </div>
                 )}
+
                 {/* Admin Icon Only */}
                 {user && user.is_admin && isCollapsed && (
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}>
-                        <Link to="/admin" title="Admin Panel" style={{ color: '#ef4444' }}>
-                            <Shield size={18} />
+                    <div style={{ display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center', marginBottom: '10px', gap: '10px' }}>
+                        <Link to="/admin/users" title="User Management" style={{ color: '#ef4444' }}>
+                            <User size={18} />
                         </Link>
-                        <Link to="/admin/data" title="Data Dashboard" style={{ color: '#ef4444', marginTop: '10px' }}>
+                        <Link to="/admin/data" title="Data Management" style={{ color: '#ef4444' }}>
                             <Database size={18} />
                         </Link>
                     </div>
@@ -203,6 +210,12 @@ const Sidebar = ({ user, logout }) => {
                 {/* Sections */}
                 {NAV_DATA.sections.map((section) => {
                     const isOpen = expandedSections[section.id];
+
+                    // SECURITY CHECK:
+                    // Hide "Settings & Utilities" for non-admins
+                    if (section.title === 'Settings & Utilities') {
+                        if (!user || !user.is_admin) return null;
+                    }
 
                     // If collapsed, we just show the items flat (without headers) or with a spacer
                     if (isCollapsed) {
@@ -255,11 +268,6 @@ const Sidebar = ({ user, logout }) => {
                                 display: isOpen ? 'block' : 'none'
                             }}>
                                 {section.items.map(item => {
-                                    // SECURITY CHECK:
-                                    // Only Admin can see "Data Pipelines"
-                                    if (item.label === 'Data Pipelines') {
-                                        if (!user || !user.is_admin) return null;
-                                    }
                                     return renderNavLink(item);
                                 })}
                             </div>

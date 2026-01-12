@@ -31,6 +31,8 @@ COPY prompts/ ./prompts/
 COPY cli/ ./cli/
 # Orchestrator script is now in cli/orchestrator.sh
 RUN chmod +x cli/orchestrator.sh
+# Copy scripts folder
+COPY scripts/ ./scripts/
 
 # Create crontab
 # 17:00 EST = 22:00 UTC (Standard)

@@ -97,8 +97,36 @@ from mie_lib.api.routers.admin_data import router as admin_data_router
 app.include_router(admin_data_router, prefix="/api/v1")
 from mie_lib.api.routers.economy import router as economy_router
 app.include_router(economy_router, prefix="/api/v1")
+from mie_lib.api.routers.prediction_analysis import router as prediction_router
+app.include_router(prediction_router, prefix="/api/v1")
 from mie_lib.api.routers.tools import router as tools_router
 app.include_router(tools_router, prefix="/api/v1")
+from mie_lib.api.routers.minsky import router as minsky_router
+app.include_router(minsky_router) # Routes are defined as /api/minsky-data in the router itself
+from mie_lib.api.routers.abct import router as abct_router
+app.include_router(abct_router)
+from mie_lib.api.routers.business_cycle import router as business_cycle_router
+app.include_router(business_cycle_router, prefix="/api/macro")
+from mie_lib.api.routers.hp_filter import router as hp_filter_router
+app.include_router(hp_filter_router)
+from mie_lib.api.routers.hamilton_filter import router as hamilton_filter_router
+app.include_router(hamilton_filter_router)
+from mie_lib.api.routers.liquidity_impulse import router as liquidity_impulse_router
+app.include_router(liquidity_impulse_router)
+from mie_lib.api.routers.recession_momentum import router as recession_momentum_router
+app.include_router(recession_momentum_router)
+from mie_lib.api.routers.lei_index import router as lei_index_router
+app.include_router(lei_index_router)
+from mie_lib.api.routers.coi_index import router as coi_index_router
+app.include_router(coi_index_router)
+from mie_lib.api.routers.lag_index import router as lag_index_router
+app.include_router(lag_index_router)
+from mie_lib.api.routers.macro_lab import router as macro_lab_router
+app.include_router(macro_lab_router)
+from mie_lib.api.routers.economic_pipeline import router as economic_pipeline_router
+app.include_router(economic_pipeline_router, prefix="/api/v1")
+from mie_lib.api.routers.economic_calendar import router as economic_calendar_router
+app.include_router(economic_calendar_router)
 
 # Configure CORS
 origins = [

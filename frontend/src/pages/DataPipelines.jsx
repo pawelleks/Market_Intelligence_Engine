@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import EconomicPipeline from '../components/EconomicPipeline';
 
 // --- STRICT Log Viewer Component (User Requested) ---
 const LogViewer = ({ logs }) => {
@@ -103,8 +104,8 @@ const SystemProgressBar = () => {
 };
 
 const DataPipelines = () => {
+    const [activeTab, setActiveTab] = useState('market'); // 'market' or 'economic'
     const [status, setStatus] = useState({ running: false, logs: '', available_jobs: [] });
-    // ... (rest of existing state)
     const [loadingJob, setLoadingJob] = useState(null);
     const [selectedJob, setSelectedJob] = useState("");
     const [error, setError] = useState(null);
@@ -166,66 +167,87 @@ const DataPipelines = () => {
 
     return (
         <div className="h-screen w-full flex flex-col bg-[#0b0c10] text-gray-200 font-sans overflow-hidden">
-            {/* Top Bar */}
-            <div className="bg-[#1f2833] border-b border-[#1f2833] px-8 py-4 flex justify-between items-center shadow-lg z-10 shrink-0">
-                <div className="flex items-center gap-4">
+            {/* Top Bar with Tabs */}
+            <div className="bg-[#1f2833] border-b border-[#1f2833] px-8 py-4 shadow-lg z-10 shrink-0">
+                <div className="flex justify-between items-center mb-4">
                     <h1 className="text-2xl font-bold text-[#66fcf1] tracking-wide">
-                        System Pipelines
+                        Data Pipelines
                     </h1>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${status.running ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-700/50 text-gray-400 border border-gray-600/30'}`}>
-                        {status.running ? "Running" : "Idle"}
-                    </div>
+                    {error && <span className="text-red-400 text-sm font-semibold">{error}</span>}
                 </div>
-                {error && <span className="text-red-400 text-sm font-semibold">{error}</span>}
+                {/* Tabs */}
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setActiveTab('market')}
+                        className={`px-4 py-2 rounded-t font-medium transition-all ${activeTab === 'market'
+                                ? 'bg-[#0b0c10] text-[#66fcf1] border-b-2 border-[#66fcf1]'
+                                : 'bg-transparent text-gray-400 hover:text-gray-200'
+                            }`}
+                    >
+                        Market Data Pipeline
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('economic')}
+                        className={`px-4 py-2 rounded-t font-medium transition-all ${activeTab === 'economic'
+                                ? 'bg-[#0b0c10] text-[#66fcf1] border-b-2 border-[#66fcf1]'
+                                : 'bg-transparent text-gray-400 hover:text-gray-200'
+                            }`}
+                    >
+                        Economic Pipeline
+                    </button>
+                </div>
             </div>
 
             {/* Main Content Area */}
-            <div className="flex-1 flex flex-col min-h-0 p-6 gap-6 relative">
+            <div className="flex-1 flex flex-col min-h-0 bg-[#0b0c10] overflow-hidden">
+                {activeTab === 'market' ? (
+                    <div className="flex-1 flex flex-col min-h-0 p-6 gap-6 relative">
+                        {/* --- PROGRESS BAR --- */}
+                        <SystemProgressBar />
 
-                {/* --- PROGRESS BAR --- */}
-                <SystemProgressBar />
+                        {/* Job Controls Toolbar */}
+                        <div className="shrink-0 flex flex-col items-center gap-4 mx-auto w-full max-w-lg">
+                            <div className="flex w-full gap-4">
+                                <select
+                                    className="flex-1 bg-[#1f2833] text-gray-200 border border-gray-600 rounded px-4 py-2 focus:outline-none focus:border-[#66fcf1]"
+                                    value={selectedJob}
+                                    onChange={(e) => setSelectedJob(e.target.value)}
+                                    disabled={status.running || loadingJob}
+                                >
+                                    <option value="" disabled>Select Action...</option>
+                                    {jobs.map(job => (
+                                        <option key={job} value={job}>{getJobLabel(job)}</option>
+                                    ))}
+                                </select>
 
-                {/* Job Controls Toolbar */}
-                <div className="shrink-0 flex flex-col items-center gap-4 mx-auto w-full max-w-lg">
+                                <button
+                                    onClick={() => triggerJob(selectedJob)}
+                                    disabled={status.running || loadingJob || !selectedJob}
+                                    className={`
+                                        px-6 py-2 rounded font-bold uppercase tracking-wider transition-all
+                                        ${status.running || !selectedJob
+                                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                            : 'bg-[#66fcf1] text-[#0b0c10] hover:bg-[#45a29e] hover:shadow-[0_0_10px_rgba(102,252,241,0.5)]'
+                                        }
+                                    `}
+                                >
+                                    {status.running ? "Running..." : "Run Script"}
+                                </button>
+                            </div>
 
-                    <div className="flex w-full gap-4">
-                        <select
-                            className="flex-1 bg-[#1f2833] text-gray-200 border border-gray-600 rounded px-4 py-2 focus:outline-none focus:border-[#66fcf1]"
-                            value={selectedJob}
-                            onChange={(e) => setSelectedJob(e.target.value)}
-                            disabled={status.running || loadingJob}
-                        >
-                            <option value="" disabled>Select Action...</option>
-                            {jobs.map(job => (
-                                <option key={job} value={job}>{getJobLabel(job)}</option>
-                            ))}
-                        </select>
+                            <div className={`px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${status.running ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-700/50 text-gray-400 border border-gray-600/30'}`}>
+                                {status.running ? "Status: Running" : "Status: Idle"}
+                            </div>
+                        </div>
 
-                        <button
-                            onClick={() => triggerJob(selectedJob)}
-                            disabled={status.running || loadingJob || !selectedJob}
-                            className={`
-                                px-6 py-2 rounded font-bold uppercase tracking-wider transition-all
-                                ${status.running || !selectedJob
-                                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                                    : 'bg-[#66fcf1] text-[#0b0c10] hover:bg-[#45a29e] hover:shadow-[0_0_10px_rgba(102,252,241,0.5)]'
-                                }
-                            `}
-                        >
-                            {status.running ? "Running..." : "Run Script"}
-                        </button>
+                        {/* Log Viewer Container */}
+                        <div className="flex justify-center w-full flex-1 min-h-0">
+                            <LogViewer logs={status.logs} running={status.running} />
+                        </div>
                     </div>
-
-                    <div className={`px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${status.running ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-gray-700/50 text-gray-400 border border-gray-600/30'}`}>
-                        {status.running ? "Status: Running" : "Status: Idle"}
-                    </div>
-                </div>
-
-                {/* Log Viewer Container */}
-                <div className="flex justify-center w-full flex-1 min-h-0">
-                    <LogViewer logs={status.logs} running={status.running} />
-                </div>
-
+                ) : (
+                    <EconomicPipeline />
+                )}
             </div>
         </div>
     );

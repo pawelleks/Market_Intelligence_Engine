@@ -1,0 +1,15 @@
+# ==============================================================================
+# Quick Deployment Commands - Run from LOCAL machine
+# ==============================================================================
+
+# Close your SSH session first, then run from local terminal:
+
+# 1. Deploy code changes (frontend + scripts)
+REMOTE_USER=deploy REMOTE_HOST=digitalocean bash scripts/deploy_remote.sh
+
+# 2. Sync analysis data files (run after deploy script completes)
+rsync -avz -e "ssh" data/analysis/ deploy@digitalocean:~/market_intelligence_engine/data/analysis/
+rsync -avz -e "ssh" data/outcomes/ deploy@digitalocean:~/market_intelligence_engine/data/outcomes/
+rsync -avz -e "ssh" docs/analysis/ deploy@digitalocean:~/market_intelligence_engine/docs/analysis/
+
+# Done! Navigate to: http://your-server/analysis/prediction

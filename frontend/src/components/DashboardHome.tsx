@@ -11,7 +11,16 @@ import {
     LineChart,
     ArrowRight,
     Cloud,
-    TrendingUp
+    TrendingUp,
+    Gauge,
+    AlertTriangle,
+    Droplets,
+    Briefcase,
+    History,
+    Globe,
+    BarChart3,
+    Sparkles,
+    Zap
 } from 'lucide-react';
 
 const DashboardHome = () => {
@@ -21,26 +30,111 @@ const DashboardHome = () => {
             {/* Header Section */}
             <div style={{ textAlign: 'center', marginBottom: '20px' }}>
                 <h1 style={{ fontSize: '36px', fontWeight: 'bold', color: '#fff', marginBottom: '10px' }}>
-                    Welcome to the Quant Terminal
+                    Welcome to the Market Intelligence Engine
                 </h1>
                 <p style={{ fontSize: '18px', color: '#94a3b8' }}>
-                    Select a module below to begin your analysis.
+                    Comprehensive analysis tools for long-term investing, trading, and economic forecasting.
                 </p>
             </div>
 
             {/* Grid Layout */}
             <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
                 gap: '30px',
-                maxWidth: '1400px',
+                maxWidth: '1600px',
                 margin: '0 auto',
                 width: '100%'
             }}>
-                {/* Column 1: Long Term Investing */}
+                {/* Column 1: Economy & Macro */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#f59e0b', borderBottom: '1px solid #1e293b', paddingBottom: '10px' }}>
+                        📊 Economy & Macro
+                    </h2>
+
+                    <InfoCard
+                        title="Prediction Analysis"
+                        description="Comprehensive forecasting framework comparing 9 recession models with SPX returns."
+                        to="/analysis/prediction"
+                        icon={Sparkles}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="LEI Index"
+                        description="Leading Economic Indicators - early warning signals for economic turning points."
+                        to="/analysis/lei"
+                        icon={Gauge}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="COI Index"
+                        description="Coincident Indicators - real-time snapshot of current economic conditions."
+                        to="/analysis/coi"
+                        icon={Activity}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="LAG Index"
+                        description="Lagging Indicators - confirms cycle peaks and validates recession signals."
+                        to="/analysis/lag"
+                        icon={History}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="Minsky Model"
+                        description="Financial instability hypothesis tracking credit cycles and systemic risk."
+                        to="/analysis/minsky"
+                        icon={Brain}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="Austrian Cycle (ABCT)"
+                        description="Austrian Business Cycle Theory monitoring credit-driven boom-bust patterns."
+                        to="/analysis/abct"
+                        icon={TrendingUp}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="HP Filter (Cycles)"
+                        description="Hodrick-Prescott filter isolating business cycle components from trend."
+                        to="/analysis/hp-filter"
+                        icon={LineChart}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="Hamilton (Recession)"
+                        description="Markov-switching model for recession probability forecasting."
+                        to="/analysis/hamilton"
+                        icon={AlertTriangle}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="Global Liquidity"
+                        description="Central bank balance sheets and global liquidity impulse tracking."
+                        to="/analysis/liquidity"
+                        icon={Droplets}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="NFP Momentum"
+                        description="Nonfarm payrolls momentum and labor market cycle analysis."
+                        to="/analysis/nfp-momentum"
+                        icon={Briefcase}
+                        color="#f59e0b"
+                    />
+                    <InfoCard
+                        title="Economic Data"
+                        description="Browse weekly releases, FRED data, and economic calendar."
+                        to="/economy/weekly"
+                        icon={Globe}
+                        color="#f59e0b"
+                    />
+                </div>
+
+                {/* Column 2: Long Term Investing */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#4ade80', borderBottom: '1px solid #1e293b', paddingBottom: '10px' }}>
-                        Long Term Investing
+                        📈 Long Term Investing
                     </h2>
 
                     <InfoCard
@@ -51,17 +145,24 @@ const DashboardHome = () => {
                         color="#4ade80"
                     />
                     <InfoCard
-                        title="Ichimoku Cloud Report"
-                        description="Comprehensive trend confirmation using the Ichimoku Kinko Hyo system."
-                        to="/investing/ichimoku"
-                        icon={Cloud}
+                        title="HMM Regimes"
+                        description="Hidden Markov Model detecting latent market states (Bull/Bear/Neutral)."
+                        to="/analysis/hmm"
+                        icon={Activity}
                         color="#4ade80"
                     />
                     <InfoCard
-                        title="HMM Regimes"
-                        description="Hidden Markov Model analysis to detect latent market regimes (Bull/Bear)."
-                        to="/analysis/hmm"
-                        icon={Activity}
+                        title="HMM Signals"
+                        description="Real-time HMM regime signals and backtested performance metrics."
+                        to="/analysis/hmm-signals"
+                        icon={Zap}
+                        color="#4ade80"
+                    />
+                    <InfoCard
+                        title="HMM Backtest"
+                        description="Strategy performance analysis across different HMM configurations."
+                        to="/analysis/hmm-backtest"
+                        icon={BarChart3}
                         color="#4ade80"
                     />
                     <InfoCard
@@ -73,17 +174,45 @@ const DashboardHome = () => {
                     />
                     <InfoCard
                         title="EMA Stack Report"
-                        description="Verify trend strength by analyzing exponential moving average alignment."
+                        description="Verify trend strength through exponential moving average alignment."
                         to="/analysis/ema-stack"
                         icon={Layers}
                         color="#4ade80"
                     />
+                    <InfoCard
+                        title="Ichimoku Cloud"
+                        description="Comprehensive trend confirmation using Ichimoku Kinko Hyo system."
+                        to="/investing/ichimoku"
+                        icon={Cloud}
+                        color="#4ade80"
+                    />
+                    <InfoCard
+                        title="TSMOM Dashboard"
+                        description="Time series momentum strategy across multiple timeframes."
+                        to="/analysis/tsmom"
+                        icon={TrendingUp}
+                        color="#4ade80"
+                    />
+                    <InfoCard
+                        title="Downtrend Score"
+                        description="Multi-factor analysis quantifying downtrend severity and duration."
+                        to="/analysis/downtrend-score"
+                        icon={LineChart}
+                        color="#4ade80"
+                    />
+                    <InfoCard
+                        title="Downtrend History"
+                        description="Historical downtrend patterns and recovery timelines."
+                        to="/analysis/downtrend-history"
+                        icon={History}
+                        color="#4ade80"
+                    />
                 </div>
 
-                {/* Column 2: Trading */}
+                {/* Column 3: Trading & Options */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#60a5fa', borderBottom: '1px solid #1e293b', paddingBottom: '10px' }}>
-                        Trading
+                        🎯 Trading & Options
                     </h2>
 
                     <InfoCard
@@ -108,18 +237,39 @@ const DashboardHome = () => {
                         color="#60a5fa"
                     />
                     <InfoCard
+                        title="Skew Analysis"
+                        description="Options skew patterns revealing market fear and tail risk."
+                        to="/analysis/skew"
+                        icon={BarChart3}
+                        color="#60a5fa"
+                    />
+                    <InfoCard
+                        title="Volatility Term Structure"
+                        description="VIX futures curve analysis for volatility regime forecasting."
+                        to="/analysis/vol-term-structure"
+                        icon={LineChart}
+                        color="#60a5fa"
+                    />
+                    <InfoCard
+                        title="Volume Regime"
+                        description="Detect volume anomalies and accumulation/distribution patterns."
+                        to="/analysis/volume"
+                        icon={BarChart3}
+                        color="#60a5fa"
+                    />
+                    <InfoCard
                         title="Seasonality & Time"
-                        description="Analyze historical returns across monthly and intraday timeframes."
+                        description="Historical returns across monthly and intraday timeframes."
                         to="/market/seasonality"
                         icon={Calendar}
                         color="#60a5fa"
                     />
                 </div>
 
-                {/* Column 3: Advanced Analytics */}
+                {/* Column 4: AI & Advanced */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#a78bfa', borderBottom: '1px solid #1e293b', paddingBottom: '10px' }}>
-                        Advanced Analytics
+                        🤖 AI & Advanced Analytics
                     </h2>
 
                     <InfoCard
@@ -141,6 +291,13 @@ const DashboardHome = () => {
                         description="Real-time heatmap of index and sector returns."
                         to="/analysis/performance"
                         icon={LineChart}
+                        color="#a78bfa"
+                    />
+                    <InfoCard
+                        title="DCS Dashboard"
+                        description="Digital Currency Signal tracking crypto market conditions."
+                        to="/analysis/dcs"
+                        icon={Activity}
                         color="#a78bfa"
                     />
                 </div>

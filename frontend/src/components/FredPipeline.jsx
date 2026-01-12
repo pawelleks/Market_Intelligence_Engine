@@ -75,7 +75,7 @@ const FredPipeline = () => {
                         fontWeight: 'bold'
                     }}
                 >
-                    {updating ? "Running..." : "Run FRED Pipeline"}
+                    {updating ? "Updating..." : "Update FRED Data Only"}
                 </button>
             </div>
 

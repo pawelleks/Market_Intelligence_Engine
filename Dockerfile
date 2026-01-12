@@ -24,6 +24,8 @@ COPY prompts/ ./prompts/
 # Copy CLI scripts for orchestrator execution
 COPY cli/ ./cli/
 RUN chmod +x cli/orchestrator.sh
+# Copy scripts folder for calculation tools
+COPY scripts/ ./scripts/
 
 # Ensure src is in python path
 ENV PYTHONPATH=/app/src

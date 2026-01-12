@@ -18,8 +18,14 @@ series:
   JTSJOL: Job Openings (JOLTS)
   CIVPART: Labor Force Participation Rate
   CES0500000003: Average Hourly Earnings
+  AWHMAN: Average Weekly Hours of Production and Nonsupervisory Employees, Manufacturing
   ECIALLCIV: Employment Cost Index (ECI)
   SAHMREALTIME: Sahm Rule Recession Indicator
+  ULCMFG: Unit Labor Cost (Manufacturing)
+
+  # --- Lagging Indicators ---
+  CUSR0000SASL2RS: CPI Services Less Rent (Lagging Indicator)
+  BUSLOANS: Commercial and Industrial Loans (All Commercial Banks)
 
   # --- Growth & Output ---
   GDPC1: Real GDP
@@ -28,16 +34,23 @@ series:
   RSAFS: Retail Sales
   INDPRO: Industrial Production
   DSPIC96: Real Disposable Personal Income
+  RRSFS: Real Retail and Food Services Sales
+  RSXFS: Retail Sales ex-Food Services
+  NEWORDER: "Durable Goods New Orders"
+  DGORDER: "Manufacturers' New Orders: Durable Goods"
 
   # --- Interest Rates & Bonds ---
   DFF: Federal Funds Effective Rate
   DGS10: 10-Year Treasury Constant Maturity
   DGS2: 2-Year Treasury Constant Maturity
+  TB3MS: 3-Month Treasury Bill Secondary Market Rate
   T10Y2Y: 10-Year Minus 2-Year Treasury Spread
+  T10Y3M: 10-Year Minus 3-Month Treasury Spread
 
   # --- Housing ---
   MORTGAGE30US: 30-Year Fixed Mortgage Average
   HOUST: Housing Starts
+  PERMIT: New Private Housing Units Authorized by Building Permits
   HSN1F: New Home Sales
   CSUSHPINSA: Case-Shiller Home Price Index
 
@@ -45,10 +58,37 @@ series:
   M2SL: M2 Money Supply
   WALCL: Total Assets (Federal Reserve)
   STLFSI: St. Louis Fed Financial Stress Index
+  NFCI: Chicago Fed National Financial Conditions Index
   USREC: NBER Recession Indicator (1=Recession, 0=Expansion)
+  SP500: S&P 500 Index
 
   # --- Sentiment ---
   UMCSENT: UMich Consumer Sentiment
+  UMCSENT1: UMich Consumer Sentiment (Historical)
+
+  # --- Minsky & Corporate Balance Sheets ---
+  BCNSDODNS: Nonfinancial Corporate Debt (Securities & Loans)
+  NCBCMDPMVCE: Corporate Debt to Equity Ratio
+  QUSPAM770A: Total Credit to Private Non-Financial Sector (% of GDP)
+  CPATAX: Corporate Profits After Tax
+  CNCF: Corporate Net Cash Flow (Total)
+  GDP: Gross Domestic Product (Nominal)
+  LABSHPUSA156NRUG: Labor Share of Income (Wage Share)
+  CAPUTLB50001SQ: Capacity Utilization (Total Industry)
+  BAA10Y: Moody's Baa Corporate Bond Yield Relative to 10-Year Treasury (Risk Spread)
+
+  # --- Austrian Business Cycle Theory (ABCT) ---
+  PITGCG01USM661N: PPI Capital Goods (Production Structure - Higher Order)
+  PSAVERT: Personal Savings Rate
+  FEDFUNDS: Effective Federal Funds Rate (Monthly)
+  TOTLL: Total Loans and Leases in Bank Credit (All Commercial Banks)
+  PMSAVE: Personal Saving (Billions of Dollars)
+
+  # --- Central Bank Assets & FX Rates (for Liquidity Impulse) ---
+  ECBASSETS: ECB Total Assets (Millions EUR)
+  JPNASSETS: Bank of Japan Total Assets (100 Million JPY)
+  DEXUSEU: USD per 1 EUR Exchange Rate
+  DEXJPUS: JPY per 1 USD Exchange Rate
 
 frequency:
   GDPC1: q
@@ -62,4 +102,30 @@ frequency:
   MORTGAGE30US: w
   WALCL: w
   STLFSI: w
+  NFCI: w
   GDPNOW: d # technically irregular/daily update
+  BCNSDODNS: q
+  NCBCMDPMVCE: q
+  QUSPAM770A: q
+  CPATAX: q
+  CNCF: q
+  GDP: q
+  LABSHPUSA156NRUG: a
+  CAPUTLB50001SQ: m
+  BAA10Y: d
+  SP500: d
+  USREC: m
+  PITGCG01USM661N: m
+  PSAVERT: m
+  FEDFUNDS: m
+  TOTLL: m
+  PMSAVE: m
+  RSXFS: m
+  NEWORDER: m
+  T10Y3M: d
+  PERMIT: m
+  UMCSENT: m
+  UMCSENT1: m
+  AWHMAN: m
+  TB3MS: m
+  DGORDER: m

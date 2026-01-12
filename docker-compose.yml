@@ -17,6 +17,7 @@ services:
       - ./src:/app/src                 # Live Code Reload (Optional)
       - ./scripts:/app/scripts         # Administrative scripts
       - ./api_server.py:/app/api_server.py # Mount entrypoint for updates
+      - ./public_docs:/app/public_docs # Output for reports
     env_file:
       - .env
     environment:
@@ -38,6 +39,8 @@ services:
     #   - "80:80"
     environment:
       - VITE_API_URL=http://api:8000
+    volumes:
+      - ./public_docs:/usr/share/nginx/html/public_docs
     depends_on:
       - api
     networks:
@@ -71,6 +74,8 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./cli:/app/cli                 # Mount CLI for updates
+      - ./scripts:/app/scripts         # Administrative scripts
+      - ./public_docs:/app/public_docs # Output for reports
     env_file:
       - .env
     environment:

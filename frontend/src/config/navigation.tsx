@@ -19,7 +19,11 @@ import {
     Database,
     Cloud,
     PieChart,
-    Globe
+    Globe,
+    AlertTriangle,
+    Droplets,
+    Briefcase,
+    Gauge
 } from 'lucide-react';
 
 export const NAV_DATA = {
@@ -84,8 +88,20 @@ export const NAV_DATA = {
             title: 'Economy',
             id: 'economy',
             items: [
-                { label: 'Data Viewer', to: '/economy/data-viewer', icon: Globe },
-                { label: 'Data Releases Calendar', to: '/economy/calendar', icon: Calendar },
+                { label: 'Prediction Analysis', to: '/analysis/prediction', icon: Target },
+                { label: 'Weekly Economic data', to: '/economy/weekly', icon: Globe },
+                { label: 'Calendar & Releases', to: '/economy/calendar', icon: Calendar },
+                { label: 'Data Viewer', to: '/economy', icon: Globe },
+                { label: 'Minsky Model', to: '/analysis/minsky', icon: Brain },
+                { label: 'Austrian Cycle (ABCT)', to: '/analysis/abct', icon: Activity },
+                { label: 'HP Filter (Cycles)', to: '/analysis/hp-filter', icon: TrendingUp },
+                { label: 'Hamilton (Recession)', to: '/analysis/hamilton', icon: AlertTriangle },
+                { label: 'Global Liquidity', to: '/analysis/liquidity', icon: Droplets },
+                { label: 'NFP Momentum', to: '/analysis/nfp-momentum', icon: Briefcase },
+                { label: 'LEI Index', to: '/analysis/lei', icon: Gauge },
+                { label: 'COI Index', to: '/analysis/coi', icon: Activity },
+                { label: 'LAG Index', to: '/analysis/lag', icon: History },
+                { label: 'Business Cycle', to: '/analysis/business-cycle', icon: Activity },
             ]
         },
         {

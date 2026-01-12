@@ -38,7 +38,7 @@ class ErrorBoundary extends React.Component {
 }
 
 const EmaRespectCalculator = () => {
-    usePageTitle('EMA Respect Calculator');
+    usePageTitle('Moving Averages Respect Calculator');
     const { token } = useAuth();
 
     // Inputs
@@ -188,7 +188,7 @@ const EmaRespectCalculator = () => {
                     const color = seriesColors[range];
                     // v5 API: addSeries(LineSeries, options)
                     const lineSeries = chart.addSeries(LineSeries, {
-                        color: color, lineWidth: 2, title: `EMA ${p} (${range})`
+                        color: color, lineWidth: 2, title: `${maType} ${p} (${range})`
                     });
 
                     const lineData = processData
@@ -306,7 +306,7 @@ const EmaRespectCalculator = () => {
     return (
         <ErrorBoundary>
             <div style={{ padding: '20px', minHeight: '100vh', color: colors.text }}>
-                <h1 style={{ fontSize: '28px', marginBottom: '20px' }}>EMA Respect Calculator</h1>
+                <h1 style={{ fontSize: '28px', marginBottom: '20px' }}>Moving Averages Respect Calculator</h1>
 
                 {/* Input Card */}
                 <div style={{
@@ -482,7 +482,7 @@ const EmaRespectCalculator = () => {
                                         <div style={{ fontSize: '14px', color: colors.textMuted, textTransform: 'capitalize' }}>
                                             {key} Term Winner ({ranges[key].min}-{ranges[key].max})
                                         </div>
-                                        <div style={{ fontSize: '32px', fontWeight: 'bold', color: color }}>EMA {item.period}</div>
+                                        <div style={{ fontSize: '32px', fontWeight: 'bold', color: color }}>{maType} {item.period}</div>
                                         <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between' }}>
                                             <span>Score:</span>
                                             <span style={{ fontWeight: 'bold' }}>{item.score}</span>

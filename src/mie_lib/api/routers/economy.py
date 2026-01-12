@@ -6,6 +6,10 @@ import json
 import yaml
 from datetime import datetime
 from mie_lib.api.dependencies import get_current_user
+import logging
+import numpy as np
+
+LOG = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/economy",
@@ -15,8 +19,125 @@ router = APIRouter(
 
 MACRO_CONFIG_PATH = Path("config/macro_series.yml")
 FRED_DATA_DIR = Path("data/raw/macro/fred")
+MACRO_ANALYSIS_DIR = Path("data/analytics/macro")
 
-@router.get("/macro/structure")
+def get_recession_periods():
+    """Load and process USREC data into recession periods."""
+    usrec_path = FRED_DATA_DIR / "USREC.parquet"
+    if not usrec_path.exists():
+        return []
+    
+    try:
+        df = pd.read_parquet(usrec_path)
+        df = df.sort_values('date').reset_index(drop=True)
+        df['recession'] = df['value'].fillna(0).astype(int)
+        df['recession_start'] = (df['recession'] == 1) & (df['recession'].shift(1) != 1)
+        df['recession_end'] = (df['recession'] == 1) & (df['recession'].shift(-1) != 1)
+        
+        recessions = []
+        start_rows = df[df['recession_start']]
+        end_rows = df[df['recession_end']]
+        
+        for i, (_, start_row) in enumerate(start_rows.iterrows()):
+            if i < len(end_rows):
+                end_row = end_rows.iloc[i]
+                recessions.append({
+                    "start": pd.to_datetime(start_row['date']).strftime('%Y-%m-%d'),
+                    "end": pd.to_datetime(end_row['date']).strftime('%Y-%m-%d')
+                })
+        return recessions
+    except Exception as e:
+        LOG.warning(f"Error loading recession data: {e}")
+        return []
+
+@router.get("/lei-coi")
+def get_lei_coi_data() -> Dict[str, Any]:
+    """
+    Serve Enhanced LEI/COI data.
+    Returns JSON structure: {"data": [...], "recessions": [...]}
+    Values < -1.0 LEI trigger "WARNING".
+    """
+    file_path = MACRO_ANALYSIS_DIR / "processed_lei_coi_enhanced.parquet"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Enhanced LEI/COI data not found.")
+
+    try:
+        df = pd.read_parquet(file_path)
+        
+        # Ensure required columns (Basic)
+        required = ["date", "LEI_Final", "COI_Final"]
+        if not all(c in df.columns for c in required):
+             raise ValueError("Data file missing required columns.")
+
+        # Logic: status_label
+        # "WARNING" if lei < -1.0, data says "Recession_Signal_Active" True/False
+        # We can use the bool column or re-evaluate. The spec says "status_label" is "WARNING" if lei < -1.0
+        
+        # Prepare output
+        output_records = []
+        
+        # For validation check (most recent)
+        last_lei = None
+        last_coi = None
+        
+        # Iterate to format
+        # Sorting by date ascending usually expected for charts
+        df = df.sort_values("date")
+        
+        for _, row in df.iterrows():
+            lei_val = row["LEI_Final"]
+            coi_val = row["COI_Final"]
+            date_str = row["date"].strftime("%Y-%m-%d") if isinstance(row["date"], pd.Timestamp) else str(row["date"])
+            
+            # Helper to safely float or None
+            def safe_float(val):
+                return round(float(val), 3) if pd.notna(val) else None
+
+            # Handle NaNs for JSON (Main signals required to not be NaN for the main chart generally, but components might miss)
+            if pd.isna(lei_val) or pd.isna(coi_val):
+                continue
+                
+            status = "WARNING" if lei_val < -1.0 else "CLEAR"
+            
+            output_records.append({
+                "date": date_str,
+                "lei": safe_float(lei_val),
+                "coi": safe_float(coi_val),
+                "lei_sma_17": safe_float(row.get("LEI_SMA_17")),
+                "coi_sma_17": safe_float(row.get("COI_SMA_17")),
+                "z_houst": safe_float(row.get("Z_HOUST")),
+                "z_hours": safe_float(row.get("Z_AWHMAN")),
+                "z_nfci": safe_float(row.get("Z_NFCI")),
+                "z_indpro": safe_float(row.get("Z_INDPRO")),
+                "z_payems": safe_float(row.get("Z_PAYEMS")),
+                "status_label": status
+            })
+            
+            last_lei = float(lei_val)
+            last_coi = float(coi_val)
+
+        # Verification: Check most recent data point against validation key
+        # Key: LEI ~ +0.30, COI ~ +0.21
+        if last_lei is not None and last_coi is not None:
+             # Check tolerance
+             if abs(last_lei - 0.30) > 0.05:
+                 LOG.warning(f"LEI Validation Mismatch: Expected ~0.30, Got {last_lei:.3f}")
+             
+             if abs(last_coi - 0.21) > 0.05:
+                 LOG.warning(f"COI Validation Mismatch: Expected ~0.21, Got {last_coi:.3f}")
+        
+        # Load recession data
+        recessions = get_recession_periods()
+        
+        return {
+            "data": output_records,
+            "recessions": recessions
+        }
+
+    except Exception as e:
+        LOG.error(f"Error serving LEI/COI data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 def get_macro_structure() -> Dict[str, Any]:
     """
     Parses macro_series.yml to return series grouped by category (comments).

@@ -1560,7 +1560,11 @@ def build_parser():
     sub.add_parser("smoke-update", help="Lightweight smoke check after FULL+UPDATE: verifies sorted dates and ret_1d continuity for first ticker")
 
     # Macro Data Builder
-    sub.add_parser("build-macro-data", help="Download macro economic series from FRED")
+    p_macro = sub.add_parser("build-macro-data", help="Download macro economic series from FRED")
+    p_macro.set_defaults(func=handle_build_macro_data)
+
+    p_econ = sub.add_parser("update-economic", help="Run full economic pipeline (FRED + All Models)")
+    p_econ.set_defaults(func=handle_update_economic)
 
 
     # Markov builder command
@@ -2518,7 +2522,6 @@ def main(argv=None):
                 print(f"WARN: build-tsmom-daily failed: {e}")
                 get_audit_logger().update_stage("TSMOM", "FAILED", {"error": str(e)})
 
-            # GAF DAILY UPDATE
             try:
                 get_audit_logger().start_stage("GAF")
                 _run([py, mie, "build-gaf-daily", "--ticker", "@config"])
@@ -2526,6 +2529,16 @@ def main(argv=None):
             except Exception as e:
                 print(f"WARN: build-gaf-daily failed: {e}")
                 get_audit_logger().update_stage("GAF", "FAILED", {"error": str(e)})
+
+            # ECONOMIC PIPELINE (FRED + COI/LAG/LEI MODELS)
+            try:
+                tracker.update_progress(11.2, "Updating Economic Models...")
+                get_audit_logger().start_stage("Economic Pipeline")
+                _run([py, mie, "update-economic"])
+                get_audit_logger().update_stage("Economic Pipeline", "COMPLETED", {})
+            except Exception as e:
+                print(f"WARN: update-economic failed: {e}")
+                get_audit_logger().update_stage("Economic Pipeline", "FAILED", {"error": str(e)})
 
             # AI CONTEXT + REPORT
             try:
@@ -2888,6 +2901,26 @@ def handle_build_skew_daily(args):
         import traceback
         traceback.print_exc()
         get_audit_logger().update_stage("Skew & PCR", "FAILED", {"error": str(e)})
+
+def handle_update_economic(args):
+    """Handle update-economic command by running the full orchestrator."""
+    from mie_lib.services.audit_logger import get_audit_logger
+    import subprocess
+    import os
+    
+    get_audit_logger().update_stage("Economic Pipeline", "RUNNING", {})
+    LOG.info("Running update-economic pipeline...")
+    
+    try:
+        script_path = os.path.join(PROJECT_ROOT, "scripts", "economic_pipeline.py")
+        cmd = [sys.executable, script_path]
+        subprocess.run(cmd, check=True)
+        
+        LOG.info("update-economic completed successfully.")
+        get_audit_logger().update_stage("Economic Pipeline", "COMPLETED", {})
+    except Exception as e:
+        LOG.error(f"Error in update-economic: {e}")
+        get_audit_logger().update_stage("Economic Pipeline", "FAILED", {"error": str(e)})
 
 def handle_build_macro_data(args):
     """Handle build-macro-data command."""

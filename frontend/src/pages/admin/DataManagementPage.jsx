@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import FredPipeline from '../../components/FredPipeline';
+import EconomicPipeline from '../../components/EconomicPipeline';
 import { usePageTitle } from '../../hooks/usePageTitle';
 
 // --- Sub-Components (Internal for now due to coupling) ---
@@ -276,7 +277,11 @@ const DataManagementPage = () => {
     const renderAiContext = () => (
         <div>
             <h3>Latest AI Context</h3>
-            <pre style={{ background: '#111', padding: '15px', overflow: 'auto', maxHeight: '600px' }}>{JSON.stringify(aiContextData, null, 2)}</pre>
+            {aiContextData ? (
+                <pre style={{ background: '#111', padding: '15px', overflow: 'auto', maxHeight: '600px' }}>{JSON.stringify(aiContextData, null, 2)}</pre>
+            ) : (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>Null</div>
+            )}
         </div>
     );
 
@@ -309,7 +314,7 @@ const DataManagementPage = () => {
 
             {/* Top Tabs */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid #334155', paddingBottom: '10px' }}>
-                {['pipeline', 'fred', 'viewer', 'content'].map(tab => (
+                {['pipeline', 'economic', 'fred', 'viewer', 'content'].map(tab => (
                     <button key={tab}
                         onClick={() => setActiveTab(tab)}
                         style={{
@@ -319,7 +324,7 @@ const DataManagementPage = () => {
                             border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold',
                             textTransform: 'capitalize'
                         }}>
-                        {tab === 'fred' ? 'FRED Data' : tab === 'viewer' ? 'Data Availability' : tab === 'content' ? 'Computed Content' : 'Market Pipeline'}
+                        {tab === 'economic' ? 'Economic Pipeline' : tab === 'fred' ? 'FRED Data' : tab === 'viewer' ? 'Data Availability' : tab === 'content' ? 'Computed Content' : 'Market Pipeline'}
                     </button>
                 ))}
             </div>
@@ -339,10 +344,13 @@ const DataManagementPage = () => {
                     </div>
                 )}
 
-                {/* 2. FRED */}
+                {/* 2. ECONOMIC PIPELINE */}
+                {activeTab === 'economic' && <EconomicPipeline />}
+
+                {/* 3. FRED */}
                 {activeTab === 'fred' && <FredPipeline />}
 
-                {/* 3. VIEWER */}
+                {/* 4. VIEWER */}
                 {activeTab === 'viewer' && (
                     <div>
                         <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -378,7 +386,7 @@ const DataManagementPage = () => {
                     </div>
                 )}
 
-                {/* 4. CONTENT */}
+                {/* 5. CONTENT */}
                 {activeTab === 'content' && (
                     <div>
                         <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>

@@ -41,9 +41,20 @@ import TrendMatrix from './components/TrendMatrix';
 import VolatilityTermStructurePage from './pages/VolatilityTermStructurePage';
 import SkewAnalysisPage from './pages/SkewAnalysisPage';
 import SectorAnalysisPage from './pages/SectorAnalysisPage';
+import AbctPage from './pages/AbctPage';
+import HPFilterPage from './pages/HPFilterPage';
+import HamiltonPage from './pages/HamiltonPage';
+import LiquidityImpulsePage from './pages/LiquidityImpulsePage';
+import NfpRecessionPage from './pages/NfpRecessionPage';
+import LeiPage from './pages/LeiPage';
+import CoiPage from './pages/CoiPage';
+import LagPage from './pages/LagPage';
+import BusinessCyclePage from './pages/BusinessCyclePage';
+import MinskyPage from './pages/MinskyPage';
 import EconomyDataViewer from './pages/EconomyDataViewer';
 import DataReleasesCalendar from './pages/DataReleasesCalendar';
 import EmaRespectCalculator from './pages/EmaRespectCalculator';
+import PredictionAnalysisDashboard from './pages/PredictionAnalysisDashboard';
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -52,6 +63,9 @@ import DataManagementPage from './pages/admin/DataManagementPage';
 import DailyAnalysisPage from './pages/DailyAnalysisPage';
 import VolumeRegimeReport from './pages/VolumeRegimeReport';
 import VolatilityPage from './pages/VolatilityPage';
+import WeeklyEconomicCalendar from './pages/WeeklyEconomicCalendar';
+import SocialExportExample from './components/SocialExportExample';
+import MarkdownViewer from './components/MarkdownViewer';
 
 // Define API URLs and base settings
 const API_BASE = "/api/v1";
@@ -436,7 +450,7 @@ const HMMRegimePage = ({ settings, setSettings, hmmData, priceData, hmmStats, hm
           />
         }
       </div>
-    </div>
+    </div >
   );
 };
 
@@ -683,8 +697,21 @@ function AppContent() {
             <Route path="/analysis/tsmom" element={<ProtectedLayout><TsmomDashboardPage /></ProtectedLayout>} />
             <Route path="/analysis/performance" element={<ProtectedLayout><PerformancePage /></ProtectedLayout>} />
             <Route path="/analysis/sector" element={<ProtectedLayout><SectorAnalysisPage /></ProtectedLayout>} />
-            <Route path="/economy/data-viewer" element={<ProtectedLayout><EconomyDataViewer /></ProtectedLayout>} />
+            <Route path="/analysis/minsky" element={<ProtectedLayout><MinskyPage /></ProtectedLayout>} />
+            <Route path="/analysis/abct" element={<ProtectedLayout><AbctPage /></ProtectedLayout>} />
+            <Route path="/analysis/hp-filter" element={<ProtectedLayout><HPFilterPage /></ProtectedLayout>} />
+            <Route path="/analysis/hamilton" element={<ProtectedLayout><HamiltonPage /></ProtectedLayout>} />
+            <Route path="/analysis/liquidity" element={<ProtectedLayout><LiquidityImpulsePage /></ProtectedLayout>} />
+            <Route path="/analysis/nfp-momentum" element={<ProtectedLayout><NfpRecessionPage /></ProtectedLayout>} />
+            <Route path="/analysis/lei" element={<ProtectedLayout><LeiPage /></ProtectedLayout>} />
+            <Route path="/analysis/prediction" element={<ProtectedLayout><PredictionAnalysisDashboard /></ProtectedLayout>} />
+            <Route path="/analysis/coi" element={<ProtectedLayout><CoiPage /></ProtectedLayout>} />
+            <Route path="/analysis/lag" element={<ProtectedLayout><LagPage /></ProtectedLayout>} />
+            <Route path="/analysis/business-cycle" element={<ProtectedLayout><BusinessCyclePage /></ProtectedLayout>} />
+            <Route path="/economy" element={<ProtectedLayout><EconomyDataViewer /></ProtectedLayout>} />
             <Route path="/economy/calendar" element={<ProtectedLayout><DataReleasesCalendar /></ProtectedLayout>} />
+            <Route path="/economy/weekly" element={<ProtectedLayout><WeeklyEconomicCalendar /></ProtectedLayout>} />
+            <Route path="/dev/social-export" element={<ProtectedLayout><SocialExportExample /></ProtectedLayout>} />
             <Route path="/system/pipelines" element={<ProtectedLayout><DataPipelines /></ProtectedLayout>} />
             <Route path="/analysis/ema-stack/:ticker" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
             <Route path="/analysis/ema-stack" element={<ProtectedLayout><EmaStackReport /></ProtectedLayout>} />
@@ -700,6 +727,7 @@ function AppContent() {
 
             {/* Tools */}
             <Route path="/tools/ema-respect" element={<ProtectedLayout><EmaRespectCalculator /></ProtectedLayout>} />
+            <Route path="/report-viewer" element={<ProtectedLayout><MarkdownViewer /></ProtectedLayout>} />
 
             {/* Auth Routes */}
             <Route path="/login" element={<LoginPage />} />

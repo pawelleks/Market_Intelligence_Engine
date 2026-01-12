@@ -15,6 +15,8 @@ RAW_DIR: Path = DATA_DIR / "raw"
 RAW_DATA_DIR = RAW_DIR
 FEATURES_DIR: Path = DATA_DIR / "features"
 META_DIR: Path = DATA_DIR / "meta"
+PROCESSED_DATA_DIR: Path = DATA_DIR / "processed"
+FRED_DATA_DIR: Path = DATA_DIR / "raw" / "macro" / "fred"
 
 # Analytics roots
 MARKOV_DIR: Path = DATA_DIR / "analytics" / "markov"
@@ -122,6 +124,7 @@ __all__ = [
     "HMM_DIR",
     "OPTIONS_DIR",
     "SEASONALITY_DIR",
+    "FRED_DATA_DIR",
     # Features
     "features_parquet_path",
     # Markov

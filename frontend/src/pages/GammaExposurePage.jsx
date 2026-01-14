@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import GEXChart from '../components/GEXChart';
+import GexHeatmap from '../components/GexHeatmap';
 import { usePageTitle } from '../hooks/usePageTitle';
 
 const GammaExposurePage = () => {
@@ -427,6 +428,11 @@ const GammaExposurePage = () => {
                             />
                         </div>
                     )}
+
+                    {/* HEATMAP COMPONENT */}
+                    <div style={{ marginBottom: '20px' }}>
+                        <GexHeatmap ticker={ticker} />
+                    </div>
                 </div>
             )}
 

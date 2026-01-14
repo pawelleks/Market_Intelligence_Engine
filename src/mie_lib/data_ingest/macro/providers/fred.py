@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 from typing import Dict, Any, Optional
+import time
 
 from mie_lib.utils.paths import RAW_DATA_DIR
 import yaml
@@ -67,10 +68,15 @@ class FredProvider:
                 LOG.info(f"Applying transformation to {series_id}...")
                 df["value"] = self.TRANSFORMATIONS[series_id](df["value"])
             
+            # Rate limiting: Add 0.5 second delay to avoid hitting FRED API limits
+            time.sleep(0.5)
+            
             return df
         
         except httpx.HTTPStatusError as e:
             LOG.error(f"HTTP error fetching {series_id}: {e}")
+            # Add delay even on errors to avoid hammering the API
+            time.sleep(1.0)
             raise
         except Exception as e:
             LOG.error(f"Error fetching {series_id}: {e}")

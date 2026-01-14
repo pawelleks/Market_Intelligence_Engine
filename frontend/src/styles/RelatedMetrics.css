@@ -1,0 +1,26 @@
+/* Related Metric Card - Enhanced Styles */
+.related-metric-card {
+    /* Base styles handled by Tailwind, these are refinements */
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.related-metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.metric-title {
+    /* Truncation handled by Tailwind */
+}
+
+/* Sparkline container adjustment */
+.metric-chart svg {
+    overflow: visible;
+}
+
+/* Scrollbar for container if needed */
+.related-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}

@@ -33,6 +33,7 @@ const UserTable = ({ users, type, onAction }) => {
                             <th style={{ padding: '12px' }}>Email</th>
                             <th style={{ padding: '12px' }}>Name</th>
                             <th style={{ padding: '12px' }}>Visits</th>
+                            <th style={{ padding: '12px', textAlign: 'center' }}>Terms</th>
                             <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
                         </tr>
                     </thead>
@@ -43,6 +44,17 @@ const UserTable = ({ users, type, onAction }) => {
                                 <td style={{ padding: '12px', fontWeight: 'bold' }}>{user.email}</td>
                                 <td style={{ padding: '12px' }}>{user.full_name || '-'}</td>
                                 <td style={{ padding: '12px' }}>{user.visit_count}</td>
+                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    {user.terms_accepted ? (
+                                        <div title={`v${user.terms_version}`} style={{ color: '#16a34a', display: 'flex', justifyContent: 'center' }}>
+                                            <CheckCircle size={18} />
+                                        </div>
+                                    ) : (
+                                        <div title="Not Accepted" style={{ color: '#64748b', display: 'flex', justifyContent: 'center' }}>
+                                            <XCircle size={18} />
+                                        </div>
+                                    )}
+                                </td>
                                 <td style={{ padding: '12px', textAlign: 'right' }}>
                                     {type === 'pending' && (
                                         <button

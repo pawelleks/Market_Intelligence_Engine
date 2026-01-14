@@ -1,0 +1,99 @@
+{
+    "interest_rates": {
+        "display_name": "Interest Rates",
+        "primary_series": [
+            "FEDFUNDS",
+            "DFF"
+        ],
+        "related_series": [
+            "DGS10",
+            "DGS2",
+            "DGS30",
+            "DGS5",
+            "DGS6MO",
+            "DGS1MO",
+            "T10Y2Y",
+            "T10Y3M",
+            "TB3MS",
+            "MORTGAGE30US"
+        ]
+    },
+    "gdp_growth": {
+        "display_name": "GDP & Growth",
+        "primary_series": [
+            "GDPC1",
+            "GDP"
+        ],
+        "related_series": [
+            "A939RX0Q048SBEA",
+            "PCEC96",
+            "PCE",
+            "GPDI",
+            "GCE"
+        ]
+    },
+    "consumer_spending": {
+        "display_name": "Consumer Spending",
+        "primary_series": [
+            "PCE"
+        ],
+        "related_series": [
+            "RSAFS",
+            "RSXFS",
+            "TOTALSL",
+            "PSAVERT"
+        ]
+    },
+    "labor_market": {
+        "display_name": "Labor Market",
+        "primary_series": [
+            "UNRATE"
+        ],
+        "related_series": [
+            "U6RATE",
+            "ICSA",
+            "CCSA",
+            "PAYEMS",
+            "JTSJOL",
+            "CIVPART",
+            "AWHMAN"
+        ]
+    },
+    "inflation": {
+        "display_name": "Inflation",
+        "primary_series": [
+            "CPIAUCSL"
+        ],
+        "related_series": [
+            "CPILFESL",
+            "PCEPI",
+            "PCEPILFE"
+        ]
+    },
+    "business_confidence": {
+        "display_name": "Business Confidence",
+        "primary_series": [
+            "BSCICP02USM460S"
+        ],
+        "related_series": [
+            "CFNAI",
+            "GACDISA066MSFRBNY",
+            "BUSLOANS",
+            "BAMLC0A4CBBB"
+        ]
+    },
+    "housing_market": {
+        "display_name": "Housing Market",
+        "primary_series": [
+            "HOUST"
+        ],
+        "related_series": []
+    },
+    "trade_balance": {
+        "display_name": "Trade Balance",
+        "primary_series": [
+            "BOPGSTB"
+        ],
+        "related_series": []
+    }
+}

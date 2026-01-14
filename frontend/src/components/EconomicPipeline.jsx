@@ -17,6 +17,7 @@ const EconomicPipeline = () => {
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
     const [triggering, setTriggering] = useState(false);
+    const [debugInfo, setDebugInfo] = useState("Initializing...");
 
     useEffect(() => {
         fetchStatus();
@@ -27,11 +28,16 @@ const EconomicPipeline = () => {
     const fetchStatus = async () => {
         try {
             const res = await axios.get(`${API_BASE}/status`);
+            // setDebugInfo(`Status: ${res.status}. Data: ${JSON.stringify(res.data)}`);
             if (res.data && res.data.data) {
                 setStatus(res.data.data);
+                setDebugInfo(`OK. Last Run: ${res.data.data.last_run}`);
+            } else {
+                setDebugInfo(`Format Mismatch. Keys: ${Object.keys(res.data || {})}`);
             }
         } catch (err) {
             console.error("Failed to fetch economic pipeline status:", err);
+            setDebugInfo(`Error: ${err.message}. Status: ${err.response?.status}`);
         } finally {
             setLoading(false);
         }
@@ -45,6 +51,18 @@ const EconomicPipeline = () => {
             alert("Pipeline started successfully!");
             setTimeout(fetchStatus, 2000);
         } catch (err) {
+            if (err.response && err.response.status === 409) {
+                if (window.confirm("Pipeline is reported as already running/stuck. Do you want to FORCE start it?")) {
+                    try {
+                        await axios.post(`${API_BASE}/start?force=true`);
+                        alert("Pipeline force-started successfully!");
+                        setTimeout(fetchStatus, 2000);
+                    } catch (forceErr) {
+                        alert("Failed to force start pipeline: " + (forceErr.response?.data?.detail || forceErr.message));
+                    }
+                    return;
+                }
+            }
             alert("Failed to start pipeline: " + (err.response?.data?.detail || err.message));
         } finally {
             setTriggering(false);
@@ -79,7 +97,7 @@ const EconomicPipeline = () => {
         {
             id: "ingestion",
             label: "Phase 1: Data Ingestion",
-            steps: ["Fetch FRED Data"]
+            steps: ["Fetch FRED Data", "Aggregate JPM Dashboard"]
         },
         {
             id: "indicators",
@@ -125,18 +143,18 @@ const EconomicPipeline = () => {
                     <StatusBadge status={pipelineStatus} />
                     <button
                         onClick={triggerPipeline}
-                        disabled={isRunning || triggering}
+                        disabled={triggering}
                         style={{
                             padding: '8px 16px',
-                            background: isRunning || triggering ? '#555' : '#2196f3',
+                            background: isRunning ? '#ff9800' : (triggering ? '#555' : '#2196f3'),
                             color: 'white',
                             border: 'none',
                             borderRadius: '4px',
-                            cursor: isRunning || triggering ? 'not-allowed' : 'pointer',
+                            cursor: triggering ? 'not-allowed' : 'pointer',
                             fontWeight: 'bold'
                         }}
                     >
-                        {isRunning ? 'Running...' : triggering ? 'Starting...' : 'Run Pipeline'}
+                        {triggering ? 'Starting...' : (isRunning ? 'Force Restart' : 'Run Pipeline')}
                     </button>
                 </div>
             </div>

@@ -55,6 +55,8 @@ import EconomyDataViewer from './pages/EconomyDataViewer';
 import DataReleasesCalendar from './pages/DataReleasesCalendar';
 import EmaRespectCalculator from './pages/EmaRespectCalculator';
 import PredictionAnalysisDashboard from './pages/PredictionAnalysisDashboard';
+import JpmDashboardOverview from './components/economy/JpmDashboard/Overview';
+import JpmIndicatorDetail from './components/economy/JpmDashboard/IndicatorDetail';
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -62,6 +64,8 @@ import UserManagementPage from './pages/admin/UserManagementPage';
 import DataManagementPage from './pages/admin/DataManagementPage';
 import DailyAnalysisPage from './pages/DailyAnalysisPage';
 import VolumeRegimeReport from './pages/VolumeRegimeReport';
+import { UserProfile } from './pages/UserProfile'; // New Profile Page
+import { TermsModal } from './components/TermsModal'; // New Terms Modal
 import VolatilityPage from './pages/VolatilityPage';
 import WeeklyEconomicCalendar from './pages/WeeklyEconomicCalendar';
 import SocialExportExample from './components/SocialExportExample';
@@ -582,8 +586,57 @@ function AppContent() {
   // FIX 6: Update hook usage to include priceData
   const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error } = useAnalyticalData(settings);
 
+  // --- Terms of Use Logic ---
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const { refreshUser } = useAuth(); // Destructure refreshUser
+
+  useEffect(() => {
+    // Check if user needs to accept terms
+    if (user && (user.needsTermsUpdate || (user.termsAccepted === false))) {
+      setShowTermsModal(true);
+    } else {
+      setShowTermsModal(false);
+    }
+  }, [user]);
+
+  const handleTermsAccept = async (version) => {
+    try {
+      const response = await fetch('/api/users/accept-terms', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify({ terms_version: version }),
+      });
+
+      if (response.ok) {
+        setShowTermsModal(false);
+        // Refresh user to update local state logic
+        if (refreshUser) refreshUser();
+        // Reload page fallback if refreshUser fails to propogate fast enough
+        // window.location.reload(); 
+      } else {
+        alert("Failed to accept terms. Server error.");
+      }
+    } catch (e) {
+      console.error("Terms accept error", e);
+      alert("Failed to accept terms. Connection error.");
+    }
+  };
+
+  const handleTermsDecline = () => {
+    logout();
+    setShowTermsModal(false);
+  };
+
   return (
     <div className="App">
+      <TermsModal
+        isOpen={showTermsModal}
+        onAccept={handleTermsAccept}
+        onDecline={handleTermsDecline}
+      />
       <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#0b1220', color: '#d7e3f3', width: '100%' }}>
 
         {/* Sidebar Navigation (Refactored) */}
@@ -708,6 +761,11 @@ function AppContent() {
             <Route path="/analysis/coi" element={<ProtectedLayout><CoiPage /></ProtectedLayout>} />
             <Route path="/analysis/lag" element={<ProtectedLayout><LagPage /></ProtectedLayout>} />
             <Route path="/analysis/business-cycle" element={<ProtectedLayout><BusinessCyclePage /></ProtectedLayout>} />
+
+            {/* JPM Dashboard Routes */}
+            <Route path="/economy/jpm-dashboard" element={<ProtectedLayout><JpmDashboardOverview /></ProtectedLayout>} />
+            <Route path="/economy/jpm-dashboard/:category" element={<ProtectedLayout><JpmIndicatorDetail /></ProtectedLayout>} />
+
             <Route path="/economy" element={<ProtectedLayout><EconomyDataViewer /></ProtectedLayout>} />
             <Route path="/economy/calendar" element={<ProtectedLayout><DataReleasesCalendar /></ProtectedLayout>} />
             <Route path="/economy/weekly" element={<ProtectedLayout><WeeklyEconomicCalendar /></ProtectedLayout>} />
@@ -727,6 +785,7 @@ function AppContent() {
 
             {/* Tools */}
             <Route path="/tools/ema-respect" element={<ProtectedLayout><EmaRespectCalculator /></ProtectedLayout>} />
+            <Route path="/profile" element={<ProtectedLayout><UserProfile /></ProtectedLayout>} />
             <Route path="/report-viewer" element={<ProtectedLayout><MarkdownViewer /></ProtectedLayout>} />
 
             {/* Auth Routes */}

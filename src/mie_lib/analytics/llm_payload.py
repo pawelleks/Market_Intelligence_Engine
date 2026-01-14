@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 
@@ -18,17 +19,24 @@ def _safe_val(val: Any, default: Any = 0.0, as_type: type = float) -> Any:
         return default
     return val
 
-def _calc_relative_dist(level: float, close: float) -> tuple[str, str]:
-    """Convert absolute levels into % distance from Close and a human label."""
-    if not level or not close or close == 0:
-        return "N/A", "Unknown"
+def _calc_level_rel_to_price(level: float, close: float) -> tuple[float, str]:
+    """
+    Calculate where the LEVEL is relative to the PRICE.
+    Formula: ((Level - Close) / Close) * 100
     
-    # Standard: (Close - Level) / Level
-    # If Close > Level, dist is positive (Above)
-    dist_pct = ((close - level) / level) * 100
+    If Level < Close -> Negative % -> "Below"
+    If Level > Close -> Positive % -> "Above"
+    """
+    if not level or not close or close == 0:
+        return 0.0, "N/A"
+    
+    # ((Level - Close) / Close)
+    dist_pct = ((level - close) / close) * 100
     direction = "above" if dist_pct >= 0 else "below"
     
-    return f"{dist_pct:+.2f}%", f"{abs(dist_pct):.2f}% {direction}"
+    # Label: "2.05% below current price"
+    label = f"{abs(dist_pct):.2f}% {direction} current price"
+    return dist_pct, label
 
 def _get_dcs_status(score: float) -> str:
     """Logic Injection: Downtrend Confirmation Score status."""
@@ -81,6 +89,7 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
                      hmm_authentic_desc = last_hmm['hmm_state_name']
     except Exception as e:
         print(f"LLM Payload HMM Load Error: {e}")
+
     vol_data = {}
     vol_path = DATA_DIR / "analytics" / "volatility_daily.parquet"
     if vol_path.exists():
@@ -97,7 +106,6 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     skew_path = DATA_DIR / "analytics" / "skew" / "latest.json"
     if skew_path.exists():
         try:
-            import json
             with open(skew_path, 'r') as f:
                 full_skew = json.load(f)
             # Structure: keys "tickers" -> { "SPY": ... }
@@ -153,23 +161,20 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     }
 
     # --- 4. Construct "price" ---
-    # Need 52w high and SMA200 if available in df or tech_data
-    # Usually in df features: 'high_52w', 'sma_200'
-    # Or calculate if not present?    # Usually in df features: 'high_52w', 'sma_200'
-    # Standard features usually include rolling max.
     
     high_52w = _safe_val(row.get('rolling_max_252'), 0.0) 
     low_52w = _safe_val(row.get('rolling_min_252'), 0.0)
     sma200 = _safe_val(tech_data.get('sma_200') or row.get('sma_200'), 0.0)
     
-    dist_52w_pct, dist_52w_label = _calc_relative_dist(high_52w, close_price) if high_52w > 0 else ("N/A", "Unknown")
-    dist_sma200_pct, dist_sma200_label = _calc_relative_dist(sma200, close_price) if sma200 > 0 else ("N/A", "Unknown")
+    # Use new Logic
+    dist_52w_pct, dist_52w_label = _calc_level_rel_to_price(high_52w, close_price) if high_52w > 0 else (0.0, "Unknown")
+    dist_sma200_pct, dist_sma200_label = _calc_level_rel_to_price(sma200, close_price) if sma200 > 0 else (0.0, "Unknown")
 
     price_section = {
         "close": round(close_price, 2),
-        "dist_52w_high_pct": dist_52w_pct,
+        "dist_52w_high_pct": round(dist_52w_pct, 2),
         "dist_52w_high_label": dist_52w_label,
-        "dist_sma200_pct": dist_sma200_pct,
+        "dist_sma200_pct": round(dist_sma200_pct, 2),
         "dist_sma200_label": dist_sma200_label,
         "52w_high": round(high_52w, 2),
         "52w_low": round(low_52w, 2)
@@ -177,7 +182,6 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
 
     # --- 5. Construct "regime" ---
     # HMM
-    # FIX: Use authentic loaded state if available, else fallback to row
     if hmm_authentic_state is not None:
         hmm_state = hmm_authentic_state
     else:
@@ -187,8 +191,6 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     if hmm_authentic_desc:
         hmm_desc = hmm_authentic_desc
     else:
-        # Strict Fallback: Use standard mapping aligned with dashboard
-        # 0: Bear, 1: Neutral, 2: Bull (3-State Model 10Y)
         if hmm_state == 2:
             hmm_desc = "Bull"
         elif hmm_state == 1:
@@ -197,13 +199,8 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
             hmm_desc = "Bear"
         else:
             hmm_desc = "Unknown"
-
     
-    # Markov (Placeholder or existing logic)
-    # Usually not in simple row, need separate Markov lookup or passed in. 
-    # Current request didn't strictly ask to load separate Markov file, but said "Markov: verdict".
-    # We will set defaults if not found.
-    markov_verdict = "N/A" # TODO: Load from Markov snapshot if critical
+    markov_verdict = "N/A"
     markov_next_bull = 0.0
 
     # Volatility
@@ -219,42 +216,36 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
 
     # --- 6. Construct "trend" ---
     # DCS
-    # Logic: LOAD from precalculated latest.json (Single Source of Truth)
-    # DO NOT calculate on the fly.
     dcs_score = 0
     dcs_status = "N/A"
-    
     try:
         from mie_lib.utils.paths import DATA_DIR
-        import json
-        
         dcs_latest_path = DATA_DIR / "analytics" / "dcs" / f"{ticker}_latest.json"
         
         if dcs_latest_path.exists():
             with open(dcs_latest_path, "r") as f:
                 dcs_data = json.load(f)
                 dcs_score = int(dcs_data.get("latest_score_100", 0))
-                # Status logic (can be shared or derived)
                 if dcs_score >= 80: dcs_status = "CRISIS"
                 elif dcs_score >= 60: dcs_status = "ALERT"
                 elif dcs_score >= 40: dcs_status = "WARNING"
                 else: dcs_status = "OK"
         else:
              dcs_status = "N/A (Missing Data)"
-             
     except Exception as e:
         dcs_status = f"Error: {str(e)}"
 
-    # EMA Stack
-    # Logic: is_ema_stacked_up (Bullish), is_ema_stacked_down (Bearish)?
-    # tech_data keys: 'is_ema_stacked_up'
+    # EMA Stack & SMA 50
     ema_verdict = "Neutral"
     if _safe_val(tech_data.get('is_ema_stacked_up'), 0) == 1:
-        ema_verdict = "Bullish Stack"
-    elif _safe_val(tech_data.get('is_ema_stacked_down'), 0) == 1: # Assuming down flag exists or inferred
-        ema_verdict = "Bearish Stack"
+        ema_verdict = "Bullish (Price > 20 > 50 > 200)"
+    elif _safe_val(tech_data.get('is_ema_stacked_down'), 0) == 1:
+        ema_verdict = "Bearish (Price < 20 < 50 < 200)"
     elif _safe_val(tech_data.get('is_price_above_stack'), 0) == 1:
-        ema_verdict = "Price Above Stack"
+        ema_verdict = "Price Above Stack (Possible Reversal)"
+    
+    sma50 = _safe_val(tech_data.get('sma_50') or row.get('sma_50'), 0.0)
+    sma50_pct, sma50_label = _calc_level_rel_to_price(sma50, close_price) if sma50 > 0 else (0.0, "Unknown")
         
     # ADX
     adx_val = round(_safe_val(tech_data.get('adx'), 0.0), 2)
@@ -263,7 +254,6 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     if adx_val > 50: adx_str = "Very Strong"
     
     # Ichimoku
-    # is_above_cloud, is_cloud_green
     ichi_status = "Neutral"
     above_cloud = _safe_val(tech_data.get('is_above_cloud'), 0)
     green_cloud = _safe_val(tech_data.get('is_cloud_green'), 0)
@@ -272,9 +262,9 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     elif not above_cloud and not green_cloud:
         ichi_status = "Bearish (Below Red Cloud)"
     elif above_cloud:
-        ichi_status = "Price Above Cloud"
+        ichi_status = "Price Above Cloud (Volatile)"
     elif not above_cloud:
-        ichi_status = "Price Below Cloud"
+        ichi_status = "Price Below Cloud (Volatile)"
 
     # TSMOM
     tsmom_sig = _safe_val(tsmom_data.get('signal_regime') or tsmom_data.get('signal_today'), "Neutral", str)
@@ -284,6 +274,10 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     trend_section = {
         "dcs": { "score": dcs_score, "status": dcs_status },
         "ema_stack": { "verdict": ema_verdict },
+        "sma_50": sma50,
+        "sma_50_distance": round(sma50 - close_price, 2),
+        "sma_50_distance_pct": round(sma50_pct, 2),
+        "sma_50_label": sma50_label,
         "adx": { "val": adx_val, "trend_strength": adx_str },
         "ichimoku": { "status": ichi_status },
         "tsmom": { "signal": tsmom_sig, "12m_return": tsmom_12m }
@@ -294,21 +288,20 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     net_regime = "Neutral"
     put_wall_dist = "N/A"
     call_wall_dist = "N/A"
+    
+    put_wall_pct = 0.0
+    put_wall_label = "N/A"
+    put_wall_level = 0.0
+    
+    call_wall_pct = 0.0
+    call_wall_label = "N/A"
+    call_wall_level = 0.0
 
     if gex_snapshot:
         net_gex = float(gex_snapshot.get('net_gex', 0))
         if net_gex > 0: net_regime = "Positive (Sticky)"
         elif net_gex < 0: net_regime = "Negative (Volatile)"
         
-        # Walls might be in 'profile' dict list or pre-calculated in snapshot?
-        # Current snapshot loader typically calculates walls? 
-        # Or we rely on what passed in gex_snapshot derived in previous impl.
-        # Let's check gex_snapshot structure or calculate from profile if present.
-        # But previous code re-calculated walls from profile.
-        # Ideally we trust the snapshot loader or recalculate here if needed.
-        # Let's assume passed snapshot has 'profile' list.
-        
-        # Re-using logic from original file roughly:
         profile = gex_snapshot.get("profile", [])
         if profile:
             try:
@@ -316,23 +309,43 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
                 if not df_prof.empty and 'strike' in df_prof.columns and 'total_call_gex' in df_prof.columns:
                      cw_row = df_prof.loc[df_prof['total_call_gex'].idxmax()]
                      pw_row = df_prof.loc[df_prof['total_put_gex'].idxmin()]
-                     cw = cw_row['strike']
-                     pw = pw_row['strike']
-                     cw_pct, cw_label = _calc_relative_dist(cw, close_price)
-                     pw_pct, pw_label = _calc_relative_dist(pw, close_price)
+                     cw = float(cw_row['strike'])
+                     pw = float(pw_row['strike'])
+                     
+                     call_wall_level = cw
+                     put_wall_level = pw
+                     
+                     cw_pct, cw_label = _calc_level_rel_to_price(cw, close_price)
+                     pw_pct, pw_label = _calc_level_rel_to_price(pw, close_price)
+                     
+                     call_wall_pct = cw_pct
+                     call_wall_label = cw_label
+                     
+                     put_wall_pct = pw_pct
+                     put_wall_label = pw_label
+                     
                      call_wall_dist = f"${cw} ({cw_label})"
                      put_wall_dist = f"${pw} ({pw_label})"
             except: pass
 
     options_gex = { 
         "net_regime": f"{net_regime} (Dealer {'Long' if net_regime.startswith('Pos') else 'Short'} Gamma)", 
-        "put_wall_dist": put_wall_dist, 
-        "call_wall_dist": call_wall_dist 
+        "put_wall": put_wall_level,
+        "put_wall_distance": round(put_wall_level - close_price, 2),
+        "put_wall_distance_pct": round(put_wall_pct, 2),
+        "put_wall_label": put_wall_label,
+        "call_wall": call_wall_level,
+        "call_wall_distance": round(call_wall_level - close_price, 2),
+        "call_wall_distance_pct": round(call_wall_pct, 2),
+        "call_wall_label": call_wall_label
     }
 
     # Expected Moves
     em_0dte = 0.0
-    em_1w = [0.0, 0.0]
+    em_1w_range = 0.0
+    em_1w_upper = 0.0
+    em_1w_lower = 0.0
+    em_1m_range = 0.0
     
     if expected_moves_data:
         em_source = expected_moves_data
@@ -341,42 +354,60 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
         
         exps = em_source.get("expirations", {})
         if exps:
-            # Sort by DAYS TO EXPIRY (to handle date strings correctly)
-            # exps is dict: Key->Obj. Obj has 'days_to_expiry'
             exp_items = []
             for k, v in exps.items():
                 dte = v.get("days_to_expiry", 999)
                 exp_items.append((dte, v))
-            
-            # Sort asc by DTE
             exp_items.sort(key=lambda x: x[0])
             
-            # 1. "Next Session" Move -> Minimum Positive DTE
-            # Could be 0, 1, 3 (weekend).
+            # 1. "Next Session"
             if exp_items:
-                # Take the first one as "Next Session"
                 next_sess = exp_items[0][1]
                 em_0dte = _safe_val(next_sess.get("em_dollars"), 0.0)
             
-            # 2. Week Move -> Closest to 7 (or 5-9 range)
-            # Find closest to 7
+            # 2. Week Move (Closest to 7)
             best_diff = 999
             best_week = None
+             
+            # 3. Month Move (Closest to 30)
+            best_diff_m = 999
+            best_month = None
+
             for dte, v in exp_items:
-                diff = abs(dte - 7)
-                if diff < best_diff:
-                    best_diff = diff
+                diff_w = abs(dte - 7)
+                if diff_w < best_diff:
+                    best_diff = diff_w
                     best_week = v
+                
+                diff_m = abs(dte - 30)
+                if diff_m < best_diff_m:
+                    best_diff_m = diff_m
+                    best_month = v
             
-            # Heuristic: only accept if diff is reasonable? e.g. within 3-10 days?
-            # If closest is 21 days, that's monthly.
             if best_week and best_diff < 5:
                 val = _safe_val(best_week.get("em_dollars"), 0.0)
-                upper = close_price + val
-                lower = close_price - val
-                em_1w = [float(f"{lower:.2f}"), float(f"{upper:.2f}")]
+                em_1w_range = val
+                em_1w_upper = close_price + val
+                em_1w_lower = close_price - val
+            
+            if best_month and best_diff_m < 10:
+                em_1m_range = _safe_val(best_month.get("em_dollars"), 0.0)
+
+    # Convert to pct
+    em_0dte_pct = (em_0dte / close_price * 100) if close_price else 0.0
+    em_1w_pct = (em_1w_range / close_price * 100) if close_price else 0.0
+    em_1m_pct = (em_1m_range / close_price * 100) if close_price else 0.0
     
-    options_em = { "0dte_range": f"${em_0dte:.2f}", "1w_range": em_1w }
+    options_em = { 
+        "0dte_range": round(em_0dte, 2),
+        "0dte_range_pct": round(em_0dte_pct, 2),
+        "1w_range_dollars": round(em_1w_range, 2),
+        "1w_upper": round(em_1w_upper, 2),
+        "1w_lower": round(em_1w_lower, 2),
+        "1w_range_pct": round(em_1w_pct, 2),
+        "1m_range": round(em_1m_range, 2),
+        "1m_range_pct": round(em_1m_pct, 2)
+    }
 
     # Sentiment (PCR / Skew)
     pcr_val = _safe_val(skew_data.get('pcr_volume') or tech_data.get('pcr_volume') or tech_data.get('pcr'), 0.0)
@@ -384,7 +415,6 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
     
     skew_val = skew_data.get('skew_25d')
     if pd.isna(skew_val) or skew_val == 0:
-        # Fallback to tech_data keys
         skew_val = tech_data.get('skew_25d') or tech_data.get('skew')
 
     skew_24d = "N/A"
@@ -439,7 +469,7 @@ def generate_llm_payload(df: pd.DataFrame, ticker: str, expected_moves_data: Opt
         "price": price_section,
         "performance": perf_section,
         "regime": regime_section,
-        "trend": trend_section,
+        "technicals": trend_section, 
         "options": options_section,
         "seasonality": seasonality_section
     }

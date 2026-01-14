@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Activity, TrendingUp, AlertTriangle, CheckCircle, XCircle, HelpCircle } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -8,7 +8,14 @@ const PredictionAnalysisDashboard = () => {
     const [dashboardData, setDashboardData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [activeSection, setActiveSection] = useState('summary');
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Default to summary or read from URL
+    const activeSection = searchParams.get('tab') || 'summary';
+
+    const setActiveSection = (sectionId) => {
+        setSearchParams({ tab: sectionId });
+    };
 
     useEffect(() => {
         const loadData = async () => {
@@ -593,7 +600,7 @@ const ReportsSection = () => {
                             </div>
                         </div>
                         <Link
-                            to={`/report-viewer?path=/public_docs/analysis/model_reports/${model.name.toLowerCase().replace(' ', '_')}_PREDICTION_REPORT.md`}
+                            to={`/report-viewer?path=/public_docs/analysis/model_reports/${model.name.toLowerCase().replace(/[\s/]+/g, '_')}_PREDICTION_REPORT.md`}
                             className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-semibold transition-colors"
                         >
                             View Full Report

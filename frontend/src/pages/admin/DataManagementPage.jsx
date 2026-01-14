@@ -177,11 +177,21 @@ const DataManagementPage = () => {
         } catch (e) { console.error(e); }
     };
 
-    const triggerPipeline = async () => {
-        if (!window.confirm("Start a new Daily Pipeline job? This runs in the background.")) return;
+    const triggerPipeline = async (force = false) => {
+        if (!force && !window.confirm("Start a new Daily Pipeline job? This runs in the background.")) return;
         try {
-            const res = await fetch(`${API_BASE}/pipeline/start`, { method: 'POST', headers });
+            const url = `${API_BASE}/pipeline/start` + (force ? '?force=true' : '');
+            const res = await fetch(url, { method: 'POST', headers });
             const json = await res.json();
+
+            if (res.status === 409) {
+                // Already running
+                if (window.confirm("Pipeline is already RUNNING. Do you want to FORCE START a new one? (This will override the current status)")) {
+                    triggerPipeline(true);
+                }
+                return;
+            }
+
             if (res.ok) {
                 alert(json.message);
                 setTimeout(fetchAudit, 1000);
@@ -200,6 +210,8 @@ const DataManagementPage = () => {
             const found = keys.find(k => k.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(k.toLowerCase()));
             return found ? stages[found] : null;
         };
+        const isRunning = auditData.status === 'RUNNING';
+
         return (
             <div>
                 <div style={{ backgroundColor: '#162032', padding: '20px', borderRadius: '8px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
@@ -209,7 +221,21 @@ const DataManagementPage = () => {
                     </div>
                     <div>
                         <StatusBadge status={auditData.status} />
-                        <button onClick={triggerPipeline} style={{ marginLeft: '20px', padding: '8px 16px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Run Pipeline</button>
+                        <button
+                            onClick={() => triggerPipeline(false)}
+                            style={{
+                                marginLeft: '20px',
+                                padding: '8px 16px',
+                                background: isRunning ? '#ff9800' : '#2196f3',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: 'bold'
+                            }}
+                        >
+                            {isRunning ? 'Force Restart' : 'Run Pipeline'}
+                        </button>
                     </div>
                 </div>
                 {PIPELINE_STEPS.map(phase => (
@@ -274,6 +300,38 @@ const DataManagementPage = () => {
         </div>
     );
 
+    const handleDownloadReport = async (filename) => {
+        try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch(`${API_BASE}/reports/${filename}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                if (response.status === 401) alert("Unauthorized. Please login again.");
+                else if (response.status === 404) alert("Report file not found.");
+                else alert("Download failed. Status: " + response.status);
+                return;
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error("Download error:", error);
+            alert("Failed to download report: " + error.message);
+        }
+    };
+
     const renderAiContext = () => (
         <div>
             <h3>Latest AI Context</h3>
@@ -299,7 +357,7 @@ const DataManagementPage = () => {
                         <td style={{ padding: '10px' }}>{new Date(row.modified).toLocaleString()}</td>
                         <td style={{ padding: '10px' }}>{(row.size_bytes / 1024).toFixed(1)} KB</td>
                         <td style={{ padding: '10px' }}>
-                            <a href={`${API_BASE}/reports/${row.filename}`} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Download</a>
+                            <button onClick={() => handleDownloadReport(row.filename)} style={{ color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>Download</button>
                         </td>
                     </tr>
                 ))}

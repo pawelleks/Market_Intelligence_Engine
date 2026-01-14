@@ -298,7 +298,7 @@ const Sidebar = ({ user, logout }) => {
                     </div>
                 ) : (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                        <Link to="/profile" style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', textDecoration: 'none', cursor: 'pointer' }} title="Go to Profile">
                             <div style={{
                                 width: '28px', height: '28px', borderRadius: '50%', background: '#1e293b',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0
@@ -317,7 +317,7 @@ const Sidebar = ({ user, logout }) => {
                                     {user && user.is_admin ? 'Admin' : 'Viewer'}
                                 </span>
                             </div>
-                        </div>
+                        </Link>
 
                         <button
                             onClick={logout}
@@ -336,7 +336,7 @@ const Sidebar = ({ user, logout }) => {
                     </div>
                 )}
             </div>
-        </nav>
+        </nav >
     );
 };
 

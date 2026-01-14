@@ -105,6 +105,10 @@ log "Running build-gex-daily..."
 ${MIE_CMD} build-gex-daily --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-gex-daily completed."
 
+log "Running archive-gex-daily..."
+${MIE_CMD} archive-gex-daily --tickers SPY >> "${LOG_FILE}" 2>&1
+log "archive-gex-daily completed."
+
 # 7. Update Expected Moves
 log "Running update-expected-moves..."
 ${MIE_CMD} update-expected-moves --ticker @config --lookback 5 --include-weekly-reference >> "${LOG_FILE}" 2>&1
@@ -136,12 +140,17 @@ ${MIE_CMD} build-volatility-struct >> "${LOG_FILE}" 2>&1
 log "Running update-volatility (ATR Analysis)..."
 ${MIE_CMD} update-volatility >> "${LOG_FILE}" 2>&1
 
-# 10. Skew & PCR (New)
+# 8. Update FRED Calendar (Upcoming Releases)
+# This script must run safely even if FRED API fails (it logs errors but doesn't crash)
+log "Running update_fred_calendar..."
+${PY} scripts/update_fred_calendar.py >> "${LOG_FILE}" 2>&1
+
+# 9. Update Skew & PCR (Parallel)
 log "Running build-skew-daily..."
 ${MIE_CMD} build-skew-daily --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-skew-daily completed."
 
-# 11. Time Series Momentum (TSMOM)
+# 10. Time Series Momentum (TSMOM)
 log "Running build-tsmom-daily..."
 ${MIE_CMD} build-tsmom-daily --tickers @config >> "${LOG_FILE}" 2>&1
 log "build-tsmom-daily completed."

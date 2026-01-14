@@ -227,10 +227,22 @@ def _run_orchestrator_task():
         logger.error(f"Orchestrator Exception: {e}")
 
 @router.post("/pipeline/start")
-def start_pipeline(background_tasks: BackgroundTasks):
+def start_pipeline(
+    background_tasks: BackgroundTasks,
+    force: bool = False
+):
     """
     Triggers the Daily Pipeline (orchestrator.sh) in the background.
     """
+    # Check if already running
+    from mie_lib.services.audit_logger import get_audit_logger
+    audit = get_audit_logger()
+    if audit.data.get("status") == "RUNNING" and not force:
+        raise HTTPException(
+            status_code=409, 
+            detail="Pipeline is already running. Use force=true to restart."
+        )
+
     background_tasks.add_task(_run_orchestrator_task)
     return {"status": "ok", "message": "Pipeline started. Check Audit Log for progress."}
 
@@ -349,7 +361,7 @@ def trigger_fred_update(
 @router.get("/ai-context")
 def get_ai_context() -> Dict[str, Any]:
     """Returns the latest AI context JSON."""
-    context_path = Path("data/audit/latest_llm_context.json")
+    context_path = Path("data/ai_context/spy_latest.json")
     if not context_path.exists():
         return {"status": "error", "message": "No context found"}
         
@@ -418,3 +430,78 @@ def download_report(filename: str, current_user: User = Depends(verify_admin)):
         
     from fastapi.responses import FileResponse
     return FileResponse(file_path, media_type="application/json", filename=filename)
+
+
+@router.get("/economic/insights-status")
+def get_economic_insights_status() -> Dict[str, Any]:
+    """
+    Get status of AI insights for all 10 JPM indicators
+    Shows which insights exist, when generated, file sizes
+    """
+    import os
+    
+    INSIGHTS_DIR = Path("/app/data/reports/economic")
+    
+    indicators = [
+        'gdp', 'consumer-spending', 'labor-market', 'interest-rates',
+        'inflation', 'business-confidence', 'stock-market', 
+        'trade-balance', 'housing', 'policy'
+    ]
+    
+    status_data = []
+    
+    for indicator_id in indicators:
+        tier1_file = INSIGHTS_DIR / f"{indicator_id}_tier1_latest.json"
+        tier2_file = INSIGHTS_DIR / f"{indicator_id}_tier2_latest.json"
+        tier3_file = INSIGHTS_DIR / f"{indicator_id}_tier3_latest.json"
+        
+        tier1_status = "✅ Generated" if tier1_file.exists() else "❌ Missing"
+        tier2_status = "✅ Generated" if tier2_file.exists() else "❌ Missing"
+        tier3_status = "✅ Generated" if tier3_file.exists() else "⏳ On-demand"
+        
+        # Get timestamps
+        tier1_time = None
+        tier2_time = None
+        
+        if tier1_file.exists():
+            try:
+                with open(tier1_file, 'r') as f:
+                    data = json.load(f)
+                    tier1_time = data.get('generated_at', 'Unknown')
+            except:
+                pass
+        
+        if tier2_file.exists():
+            try:
+                with open(tier2_file, 'r') as f:
+                    data = json.load(f)
+                    tier2_time = data.get('generated_at', 'Unknown')
+            except:
+                pass
+        
+        status_data.append({
+            'indicator_id': indicator_id,
+            'indicator_name': indicator_id.replace('-', ' ').title(),
+            'tier1': {
+                'status': tier1_status,
+                'generated_at': tier1_time,
+                'file_size': os.path.getsize(tier1_file) if tier1_file.exists() else 0
+            },
+            'tier2': {
+                'status': tier2_status,
+                'generated_at': tier2_time,
+                'file_size': os.path.getsize(tier2_file) if tier2_file.exists() else 0
+            },
+            'tier3': {
+                'status': tier3_status
+            }
+        })
+    
+    return {
+        'total_indicators': len(indicators),
+        'tier1_complete': sum(1 for s in status_data if s['tier1']['status'] == "✅ Generated"),
+        'tier2_complete': sum(1 for s in status_data if s['tier2']['status'] == "✅ Generated"),
+        'insights_directory': str(INSIGHTS_DIR),
+        'indicators': status_data
+    }
+

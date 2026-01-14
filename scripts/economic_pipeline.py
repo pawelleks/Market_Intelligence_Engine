@@ -112,6 +112,9 @@ class EconomicPipeline:
             # Step 1: Fetch FRED Data
             self.fetch_fred_data()
             
+            # Step 1.5: Aggregate JPM Dashboard
+            self.aggregate_jpm_dashboard()
+            
             # Step 2 & 3: Calculate Enhanced LEI & COI
             # Step A: Enhanced LEI/COI
             self.run_enhanced_calculations()
@@ -225,6 +228,48 @@ class EconomicPipeline:
             LOG.error(f"FRED fetch failed: {e}")
             self.update_step(step_name, "failed", error=str(e))
             raise
+    
+    def aggregate_jpm_dashboard(self):
+        """Aggregate FRED data into JPM Dashboard indicator files."""
+        step_name = "Aggregate JPM Dashboard"
+        LOG.info(f"Step: {step_name}")
+        self.update_step(step_name, "running")
+        
+        try:
+            from mie_lib.analytics.jpm_dashboard.aggregate_indicators import aggregate_all_indicators
+            
+            # Run aggregation
+            results = aggregate_all_indicators()
+            
+            # Check results
+            successful = sum(results.values())
+            total = len(results)
+            failed_indicators = [k for k, v in results.items() if not v]
+            
+            if successful == total:
+                LOG.info(f"JPM Dashboard aggregation: {successful}/{total} indicators successful")
+                self.update_step(
+                    step_name,
+                    "completed",
+                    indicators_total=total,
+                    indicators_successful=successful
+                )
+            else:
+                LOG.warning(f"JPM Dashboard aggregation partial: {successful}/{total} indicators successful")
+                LOG.warning(f"Failed indicators: {', '.join(failed_indicators)}")
+                self.update_step(
+                    step_name,
+                    "completed",  # Don't fail pipeline for partial success
+                    indicators_total=total,
+                    indicators_successful=successful,
+                    failed_indicators=failed_indicators[:5]  # Limit to first 5
+                )
+            
+        except Exception as e:
+            LOG.error(f"JPM Dashboard aggregation failed: {e}")
+            self.update_step(step_name, "failed", error=str(e))
+            # Don't raise - allow pipeline to continue even if aggregation fails
+            LOG.warning("Continuing pipeline despite JPM aggregation failure")
     
     def run_enhanced_calculations(self):
         """Run Enhanced LEI & COI model calculations."""

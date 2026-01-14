@@ -124,17 +124,13 @@ const GEXChart = ({ data, spotPrice, emRange, title, height = 500, viewMode = 's
     // Find Max GEX Bar for Annotation
     let maxGexStrike = 0;
     let maxGexVal = 0;
-    let maxGexType = 'net';
-    data.forEach(d => {
-        const c = Math.abs(d.call_gex);
-        const p = Math.abs(d.put_gex);
-        const n = Math.abs(d.call_gex + d.put_gex);
 
-        if (viewMode === 'split') {
-            if (c > maxGexVal) { maxGexVal = c; maxGexStrike = d.strike; maxGexType = 'Call'; }
-            if (p > maxGexVal) { maxGexVal = p; maxGexStrike = d.strike; maxGexType = 'Put'; }
-        } else {
-            if (n > maxGexVal) { maxGexVal = n; maxGexStrike = d.strike; maxGexType = 'Net'; }
+    // FIXED: Always calculate Max based on Net GEX to maintain consistency with Statistic Box and across views
+    data.forEach(d => {
+        const n = Math.abs(d.call_gex + d.put_gex);
+        if (n > maxGexVal) {
+            maxGexVal = n;
+            maxGexStrike = d.strike;
         }
     });
 

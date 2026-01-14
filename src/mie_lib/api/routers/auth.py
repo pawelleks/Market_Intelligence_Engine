@@ -53,6 +53,10 @@ class UserResponse(BaseModel):
     is_approved: bool
     is_admin: bool
     visit_count: Optional[int] = 0
+    # New Fields for Terms
+    terms_accepted: bool = False
+    terms_accepted_at: Optional[datetime] = None
+    terms_version: Optional[str] = None
 
     class Config:
         from_attributes = True # Pydantic v2
@@ -128,6 +132,29 @@ async def login(
         
         # Notify Admin (Registration Only)
         await send_telegram_alert(f"🚨 New User Signup: {email} ({name})")
+        
+        # Notify User (Email)
+        # We wrap this in try/except to avoid blocking login if email fails, 
+        # though we should log it.
+        from mie_lib.services.email_service import send_access_request_received
+        try:
+            # Run in executor via wrapper or direct call if we trust it doesn't block too long
+            # send_access_request_received is synchronous.
+            # Using the async wrapper if available or just calling it if we accept slight delay.
+            # Ideally use run_in_executor.
+            # Let's import the wrapper we created or assume send_access_request_received is cheap.
+            # Actually, email_service.py implemented synchronous send_email.
+            # We should use a wrapper or just call it.
+            # For simplicity and given expected load, we'll verify if we can make it async in service.
+            # Check email_service.py content again?
+            # I wrote: async def send_email_notification (...) uses run_in_executor.
+            # But send_access_request_received calls synchronous send_email directly.
+            # I should update send_access_request_received to be async or run_in_executor here.
+            import asyncio
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, send_access_request_received, email, name or "there")
+        except Exception as e:
+            logger.error(f"Failed to send welcome email to {email}: {e}")
         
         # Return 403 for New User
         raise HTTPException(

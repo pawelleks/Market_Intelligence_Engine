@@ -14,3 +14,14 @@ class User(Base):
     subscription_status = Column(String, default='free')
     subscription_end_date = Column(DateTime, nullable=True)
     visit_count = Column(Integer, default=0)
+    
+    # Terms & Notifications
+    terms_accepted = Column(Boolean, default=False)
+    terms_accepted_at = Column(DateTime, nullable=True)
+    terms_version = Column(String, default='1.0')
+    terms_content = Column(String, nullable=True) # Text content of accepted info
+    email_notifications = Column(Boolean, default=True)
+    
+    # Soft Delete
+    deleted = Column(Boolean, default=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)

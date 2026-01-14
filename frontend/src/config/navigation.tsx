@@ -88,6 +88,7 @@ export const NAV_DATA = {
             title: 'Economy',
             id: 'economy',
             items: [
+                { label: 'JPM Economic Dashboard', to: '/economy/jpm-dashboard', icon: LayoutDashboard },
                 { label: 'Prediction Analysis', to: '/analysis/prediction', icon: Target },
                 { label: 'Weekly Economic data', to: '/economy/weekly', icon: Globe },
                 { label: 'Calendar & Releases', to: '/economy/calendar', icon: Calendar },

@@ -10,24 +10,49 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        const initAuth = async () => {
+            if (token) {
+                try {
+                    const decoded = jwtDecode(token);
+                    // Check expiry
+                    if (decoded.exp * 1000 < Date.now()) {
+                        logout();
+                    } else {
+                        // Configure axios default header
+                        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+                        // FIX: Fetch full user profile including Terms Status
+                        try {
+                            const response = await axios.get('/api/users/me');
+                            // Merge decoded (jwt) with response data
+                            setUser({ ...decoded, ...response.data });
+                        } catch (err) {
+                            console.error("Failed to fetch user profile", err);
+                            // Fallback to decoded token if API fails (though API fail might mean invalid token)
+                            setUser(decoded);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Invalid token", e);
+                    logout();
+                }
+            }
+            setLoading(false);
+        };
+        initAuth();
+    }, [token]);
+
+    // Expose a refresh function
+    const refreshUser = async () => {
         if (token) {
             try {
-                const decoded = jwtDecode(token);
-                // Check expiry
-                if (decoded.exp * 1000 < Date.now()) {
-                    logout();
-                } else {
-                    setUser(decoded);
-                    // Configure axios default header
-                    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-                }
-            } catch (e) {
-                console.error("Invalid token", e);
-                logout();
+                const response = await axios.get('/api/users/me');
+                setUser(prev => ({ ...prev, ...response.data }));
+            } catch (err) {
+                console.error("Failed to refresh user", err);
             }
         }
-        setLoading(false);
-    }, [token]);
+    };
 
     const login = async (googleToken) => {
         try {
@@ -37,6 +62,8 @@ export const AuthProvider = ({ children }) => {
             if (access_token) {
                 localStorage.setItem('access_token', access_token);
                 setToken(access_token);
+                // We will fetch full user details in the effect hook
+                // But for immediate return, decoding offers basic info
                 const decoded = jwtDecode(access_token);
                 setUser(decoded);
                 return { success: true };
@@ -79,7 +106,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, token, login, bypassLogin, logout, loading }}>
+        <AuthContext.Provider value={{ user, token, login, bypassLogin, logout, loading, refreshUser }}>
             {!loading && children}
         </AuthContext.Provider>
     );

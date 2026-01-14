@@ -39,6 +39,15 @@ fi
   # Add src to PYTHONPATH so we can run the real CLI module
   export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
+  # Pre-flight Health Check
+  if [ -x "scripts/check_pipeline_health.sh" ]; then
+      ./scripts/check_pipeline_health.sh
+      if [ $? -eq 2 ]; then
+         echo "❌ CRITICAL: Pipeline Health Check Failed. Aborting."
+         exit 2
+      fi
+  fi
+
   # Run incremental pipeline using the real library CLI
   ${PY} -m mie_lib.cli.mie update-everything
 

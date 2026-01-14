@@ -1,0 +1,191 @@
+.upcoming-releases-container {
+    background-color: transparent;
+    /* Match page background */
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    /* No border radius or margins to blend in */
+    padding: 12px 0;
+    margin-bottom: 20px;
+}
+
+.upcoming-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    padding: 0 4px;
+}
+
+.upcoming-header:hover .upcoming-title {
+    color: #fff;
+}
+
+.upcoming-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #bbb;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.2s;
+}
+
+.upcoming-count {
+    font-size: 0.8rem;
+    color: #666;
+    font-weight: 400;
+}
+
+.upcoming-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: #888;
+}
+
+.upcoming-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.75rem;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.icon-primary {
+    color: #ffc107;
+    fill: #ffc107;
+}
+
+.icon-related {
+    color: #4caf50;
+    fill: #4caf50;
+}
+
+.release-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    /* Very condensed */
+}
+
+/* Item Styling */
+.release-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.03);
+    transition: background-color 0.2s;
+}
+
+.release-item:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.release-item.today {
+    background-color: rgba(255, 193, 7, 0.08);
+    /* Subtle amber bg for Today */
+    border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+.release-item.preview {
+    margin-top: 8px;
+    background-color: transparent;
+    padding-left: 0;
+    padding-right: 0;
+    border: none;
+    opacity: 0.8;
+}
+
+.release-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.preview-label {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 8px;
+    /* Align with item */
+}
+
+/* Left Side Layout */
+.release-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+}
+
+.release-date-box {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: 80px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    padding-right: 12px;
+}
+
+.release-date-day {
+    font-size: 0.8rem;
+    color: #ccc;
+    font-weight: 500;
+}
+
+.release-date-time {
+    font-size: 0.7rem;
+    color: #666;
+}
+
+.release-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.release-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.release-name {
+    font-size: 0.9rem;
+    color: #e0e0e0;
+}
+
+/* Right Side Layout */
+.release-right {
+    min-width: 100px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.release-countdown {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+    text-transform: uppercase;
+}
+
+.today-badge {
+    color: #1a1a1a;
+    background: #ffc107;
+    font-weight: 700;
+}

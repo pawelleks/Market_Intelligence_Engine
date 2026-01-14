@@ -80,10 +80,14 @@ async def get_pipeline_status():
     }
 
 
+
 def _run_pipeline_task():
     """Background task to run the economic pipeline."""
     try:
         LOG.info("Starting economic pipeline (background task)...")
+        # Ensure status is set to running even if script is slow to start
+        _update_status_file({"status": "running", "last_run": datetime.now(timezone.utc).isoformat()})
+        
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PATH)],
             check=True,
@@ -92,15 +96,37 @@ def _run_pipeline_task():
             cwd=str(REPO_ROOT)
         )
         LOG.info(f"Pipeline completed: {result.stdout}")
+        
     except subprocess.CalledProcessError as e:
         LOG.error(f"Pipeline failed: {e.stderr}")
+        _update_status_file({
+            "status": "failed", 
+            "error": f"Process failed: {e.stderr[:500]}", 
+            "last_run": datetime.now(timezone.utc).isoformat()
+        })
     except Exception as e:
         LOG.error(f"Pipeline error: {e}", exc_info=True)
+        _update_status_file({
+            "status": "failed", 
+            "error": str(e),
+            "last_run": datetime.now(timezone.utc).isoformat()
+        })
 
+def _update_status_file(updates: Dict[str, Any]):
+    """Helper to update status file safely."""
+    try:
+        current = _load_status()
+        current.update(updates)
+        STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATUS_FILE, 'w') as f:
+            json.dump(current, f, indent=2)
+    except Exception as e:
+        LOG.error(f"Failed to update status file: {e}")
 
 @router.post("/start")
 async def start_pipeline(
     background_tasks: BackgroundTasks,
+    force: bool = False,
     current_user: User = Depends(verify_admin)
 ):
     """
@@ -109,9 +135,9 @@ async def start_pipeline(
     Runs in the background and updates the status file as it progresses.
     Use GET /status to monitor progress.
     """
-    # Check if already running
+    # Check if already running (unless forced)
     status = _load_status()
-    if status.get("status") == "running":
+    if not force and status.get("status") == "running":
         raise HTTPException(
             status_code=409,
             detail="Pipeline is already running. Please wait for it to complete."

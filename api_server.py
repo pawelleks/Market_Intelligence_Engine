@@ -97,6 +97,8 @@ from mie_lib.api.routers.admin_data import router as admin_data_router
 app.include_router(admin_data_router, prefix="/api/v1")
 from mie_lib.api.routers.economy import router as economy_router
 app.include_router(economy_router, prefix="/api/v1")
+from mie_lib.api.routers.users import router as users_router
+app.include_router(users_router) # Prefix is defined in router as /api/users
 from mie_lib.api.routers.prediction_analysis import router as prediction_router
 app.include_router(prediction_router, prefix="/api/v1")
 from mie_lib.api.routers.tools import router as tools_router
@@ -127,6 +129,9 @@ from mie_lib.api.routers.economic_pipeline import router as economic_pipeline_ro
 app.include_router(economic_pipeline_router, prefix="/api/v1")
 from mie_lib.api.routers.economic_calendar import router as economic_calendar_router
 app.include_router(economic_calendar_router)
+from mie_lib.api.routers.jpm_dashboard import router as jpm_dashboard_router
+app.include_router(jpm_dashboard_router, prefix="/api/v1/jpm-dashboard", tags=["jpm-dashboard"])
+
 
 # Configure CORS
 origins = [

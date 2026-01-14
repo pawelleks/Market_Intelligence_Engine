@@ -243,6 +243,50 @@ def _grid_log_append(msg: str):
     print(msg)
     LOG.info(msg)
 
+
+def handle_aggregate_jpm_dashboard(args):
+    """
+    Handle aggregate-jpm-dashboard command.
+    Aggregates FRED data into 10 indicator-specific parquet files.
+    """
+    print("Aggregating JPM Dashboard Data...")
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().start_stage("JPM Dashboard Aggregation")
+    
+    try:
+        from mie_lib.analytics.jpm_dashboard.aggregate_indicators import aggregate_all_indicators
+        
+        # Run aggregation
+        results = aggregate_all_indicators()
+        
+        # Check results
+        successful = sum(results.values())
+        total = len(results)
+        
+        if successful == total:
+            print(f"✅ Successfully aggregated all {total} indicators")
+            get_audit_logger().update_stage("JPM Dashboard Aggregation", "COMPLETED", {
+                "indicators": total,
+                "successful": successful
+            })
+            sys.exit(0)
+        else:
+            failed = [k for k, v in results.items() if not v]
+            print(f"⚠️  Aggregated {successful}/{total} indicators")
+            print(f"Failed: {', '.join(failed)}")
+            get_audit_logger().update_stage("JPM Dashboard Aggregation", "PARTIAL", {
+                "indicators": total,
+                "successful": successful,
+                "failed": failed
+            })
+            sys.exit(0)  # Don't fail pipeline for partial success
+            
+    except Exception as e:
+        print(f"❌ Aggregation failed: {e}")
+        get_audit_logger().update_stage("JPM Dashboard Aggregation", "FAILED", {"error": str(e)})
+        sys.exit(1)
+
+
 # ---------------- Feature build handler (refactored) -----------------
 
 def handle_update_sma_stack(args):
@@ -367,6 +411,7 @@ def handle_start_pipeline_job(args):
     logger.update_stage("Expected Moves", "PENDING", {})
     logger.update_stage("HMM Backtest SPY", "PENDING", {})
     logger.update_stage("GEX", "PENDING", {})
+    logger.update_stage("GEX Archive", "PENDING", {})
     logger.update_stage("TSMOM", "PENDING", {})
     logger.update_stage("GAF", "PENDING", {})
     
@@ -1330,6 +1375,321 @@ def handle_build_volatility_struct(args):
     vts.save_report()
     get_audit_logger().update_stage("VolatilityTermStructure", "COMPLETED", {})
 
+def handle_update_everything(args):
+    """
+    Handle update-everything command.
+    Runs the full daily incremental pipeline: Raw -> Features -> Analytics -> Report
+    """
+    # Validate tickers resolve from YAML
+    tickers = _load_yaml_tickers()
+    if not tickers:
+        print("update-everything ERROR: no tickers resolved from config/tickers.yml")
+        sys.exit(2)
+    
+    if getattr(args, "validate_only", False):
+        print("Validation Mode: Checks passed. (Health check should be run separately via script)")
+        sys.exit(0)
+        
+    target_stage = getattr(args, "stage", None)
+    dry_run = getattr(args, "dry_run", False)
+    
+    def run_stage(name, cmd_list):
+        if target_stage and target_stage.lower() != name.lower():
+            return # Skip if not matching filter
+        
+        if dry_run:
+            print(f"[DRY-RUN] Would run stage '{name}': {' '.join(cmd_list)}")
+            return
+
+        # Execute
+        try:
+            _run(cmd_list)
+        except Exception as e:
+            print(f"ERROR in stage '{name}': {e}")
+            raise e
+
+    # --- JOB TRACKING ---
+    from mie_lib.services.job_tracker import JobTracker
+    tracker = JobTracker()
+    tracker.start_job("Daily Update", total_steps=11)
+    # --------------------
+
+    py = sys.executable
+    mie = os.fspath(Path(__file__).resolve())
+    
+    try:
+        # RAW incremental
+        if not target_stage or target_stage == "raw":
+            tracker.update_progress(1, "Updating Raw Data...")
+            get_audit_logger().start_job("Daily Update Pipeline") # START GLOBAL JOB
+            get_audit_logger().start_stage("Update Raw Data")
+            run_stage("raw", [py, mie, "update-raw"])
+        
+        # FEATURES incremental + CSV
+        if not target_stage or target_stage == "features":
+            tracker.update_progress(2, "Building Features...")
+            get_audit_logger().start_stage("Update Features")
+            run_stage("features", [py, mie, "build-features", "--mode", "update", "--lookback", "90", "--csv"])
+
+        # SMA STACK ANALYTICS
+        if not target_stage or target_stage == "analytics":
+            tracker.update_progress(3, "Calculating SMA Stack...")
+            print("Starting SMA/EMA Stack Trend Analysis...")
+            get_audit_logger().start_stage("SMA/EMA Stack")
+            try:
+                if dry_run:
+                    print("[DRY-RUN] Would calc SMA Stack")
+                else:
+                    from mie_lib.analytics.sma_stack import calculate_and_save_sma_stack
+                    calculate_and_save_sma_stack()
+                    print("SMA/EMA Stack analysis completed successfully.")
+                    get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {})
+            except Exception as e:
+                print(f"ERROR calculating SMA/EMA Stack: {e}")
+                get_audit_logger().update_stage("SMA/EMA Stack", "FAILED", {"error": str(e)})
+            
+            # ADX/DMI ANALYTICS
+            tracker.update_progress(4, "Calculating ADX/DMI...")
+            print("Starting ADX/DMI Analysis...")
+            get_audit_logger().start_stage("ADX/DMI")
+            try:
+                if dry_run:
+                    print("[DRY-RUN] Would calc ADX")
+                else:
+                    from mie_lib.analytics.adx_dmi import calculate_and_save_adx
+                    calculate_and_save_adx()
+                    print("ADX/DMI analysis completed successfully.")
+                    get_audit_logger().update_stage("ADX/DMI", "COMPLETED", {})
+            except Exception as e:
+                print(f"ERROR calculating ADX/DMI: {e}")
+                get_audit_logger().update_stage("ADX/DMI", "FAILED", {"error": str(e)})
+
+            # ICHIMOKU ANALYTICS
+            get_audit_logger().start_stage("Ichimoku")
+            try:
+                if dry_run:
+                    print("[DRY-RUN] Would calc Ichimoku")
+                else:
+                    from mie_lib.analytics.ichimoku import calculate_and_save_ichimoku
+                    calculate_and_save_ichimoku()
+                    print("Ichimoku analysis completed successfully.")
+                    get_audit_logger().update_stage("Ichimoku", "COMPLETED", {})
+            except Exception as e:
+                print(f"ERROR calculating Ichimoku: {e}")
+                get_audit_logger().update_stage("Ichimoku", "FAILED", {"error": str(e)})
+
+            # PSAR ANALYTICS
+            tracker.update_progress(4.5, "Calculating Parabolic SAR...")
+            print("Starting PSAR Analysis...")
+            get_audit_logger().start_stage("PSAR")
+            try:
+                if dry_run:
+                    print("[DRY-RUN] Would calc PSAR")
+                else:
+                    from mie_lib.analytics.psar import calculate_and_save_psar
+                    calculate_and_save_psar()
+                    print("PSAR analysis completed successfully.")
+                    get_audit_logger().update_stage("PSAR", "COMPLETED", {})
+            except Exception as e:
+                print(f"ERROR calculating PSAR: {e}")
+                get_audit_logger().update_stage("PSAR", "FAILED", {"error": str(e)})
+
+        # SEASONALITY incremental
+        if not target_stage or target_stage == "seasonality":
+            tracker.update_progress(5, "Updating Seasonality...")
+            get_audit_logger().start_stage("Seasonality")
+            run_stage("seasonality", [py, mie, "update-seasonality"])
+            get_audit_logger().update_stage("Seasonality", "COMPLETED", {})
+        
+        # MARKOV grid refresh
+        if not target_stage or target_stage == "markov":
+            tracker.update_progress(6, "Building Markov Models...")
+            get_audit_logger().start_stage("Markov Grid")
+            run_stage("markov", [py, mie, "build-markov-grid",
+                "--state-modes", "binary,tri",
+                "--thresholds", ",".join(str(i) for i in range(0,151,5)),
+                "--windows", "1Y,2Y,5Y,10Y,20Y,MAX",
+                "--orders", "1,2,3,4"])  # uses default tickers resolver
+            get_audit_logger().update_stage("Markov Grid", "COMPLETED", {})
+            
+        # HMM grid refresh
+        if not target_stage or target_stage == "hmm":
+            tracker.update_progress(7, "Building HMM Grid...")
+            get_audit_logger().start_stage("HMM Grid")
+            run_stage("hmm", [py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5,10,MAX", "--states", "2,3"])
+            get_audit_logger().update_stage("HMM Grid", "COMPLETED", {})
+        
+        # EXPECTED MOVES (Reliability)
+        if not target_stage or target_stage == "expected_moves":
+            tracker.update_progress(8, "Calculating Expected Moves...")
+            get_audit_logger().start_stage("Expected Moves")
+            run_stage("expected_moves", [py, mie, "update-expected-moves", "--ticker", "@config", "--lookback", "5"])
+            run_stage("expected_moves", [py, mie, "build-expected-moves-snapshots", "--tickers", "@config"])
+            get_audit_logger().update_stage("Expected Moves", "COMPLETED", {})
+
+        # HMM SNAPSHOTS (UI)
+        if not target_stage or target_stage == "snapshots":
+            tracker.update_progress(9, "Generating Snapshots...")
+            get_audit_logger().start_stage("Snapshots")
+            run_stage("snapshots", [py, mie, "build-hmm-snapshots", "--tickers", "@config"])
+            get_audit_logger().update_stage("Snapshots", "COMPLETED", {})
+        
+        # HMM BACKTEST (Specific for SPY)
+        if not target_stage or target_stage == "backtest":
+            tracker.update_progress(9.5, "Running HMM Backtests...")
+            get_audit_logger().start_stage("HMM Backtest SPY")
+            try:
+                run_stage("backtest", [py, mie, "backtest-hmm", "--ticker", "SPY"])
+                get_audit_logger().update_stage("HMM Backtest SPY", "COMPLETED", {})
+            except Exception as e:
+                print(f"WARN: backtest-hmm failed: {e}")
+                get_audit_logger().update_stage("HMM Backtest SPY", "FAILED", {"error": str(e)})
+        
+        # GEX (Best Effort)
+        if not target_stage or target_stage == "gex":
+            try:
+                tracker.update_progress(10, "Updating Gamma Exposure...")
+                get_audit_logger().start_stage("GEX")
+                # Fetch Options Snapshot First (Polygon)
+                run_stage("gex", [py, mie, "fetch-options-snapshot", "--tickers", "@config"])
+                # Then Build GEX
+                run_stage("gex", [py, mie, "build-gex-daily", "--date", "today", "--tickers", "@config"])
+                
+                # --- NEW: Archive GEX ---
+                try:
+                    run_stage("gex_archive", [py, mie, "archive-gex-daily", "--tickers", "@config"])
+                except Exception as ex:
+                    print(f"WARN: archive-gex-daily failed: {ex}")
+                    # Don't fail the whole job for archiving
+                # ------------------------
+                
+                get_audit_logger().update_stage("GEX", "COMPLETED", {})
+            except SystemExit:
+                print("WARN: build-gex-daily failed (likely missing flat files), continuing...")
+                get_audit_logger().update_stage("GEX", "SKIPPED", {"reason": "Missing Flat Files"})
+            except Exception as e:
+                print(f"WARN: build-gex-daily failed: {e}")
+                get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
+
+        # TSMOM DAILY UPDATE
+        if not target_stage or target_stage == "tsmom":
+            try:
+                tracker.update_progress(11, "Updating TSMOM & GAF...")
+                get_audit_logger().start_stage("TSMOM")
+                run_stage("tsmom", [py, mie, "build-tsmom-daily", "--tickers", "@config"])
+                get_audit_logger().update_stage("TSMOM", "COMPLETED", {})
+            except Exception as e:
+                print(f"WARN: build-tsmom-daily failed: {e}")
+                get_audit_logger().update_stage("TSMOM", "FAILED", {"error": str(e)})
+
+        if not target_stage or target_stage == "gaf":
+            try:
+                get_audit_logger().start_stage("GAF")
+                run_stage("gaf", [py, mie, "build-gaf-daily", "--ticker", "@config"])
+                get_audit_logger().update_stage("GAF", "COMPLETED", {})
+            except Exception as e:
+                print(f"WARN: build-gaf-daily failed: {e}")
+                get_audit_logger().update_stage("GAF", "FAILED", {"error": str(e)})
+
+        # ECONOMIC PIPELINE (FRED + COI/LAG/LEI MODELS)
+        if not target_stage or target_stage == "economic":
+            try:
+                tracker.update_progress(11.2, "Updating Economic Models...")
+                get_audit_logger().start_stage("Economic Pipeline")
+                run_stage("economic", [py, mie, "update-economic"])
+                get_audit_logger().update_stage("Economic Pipeline", "COMPLETED", {})
+            except Exception as e:
+                print(f"WARN: update-economic failed: {e}")
+                get_audit_logger().update_stage("Economic Pipeline", "FAILED", {"error": str(e)})
+
+        # AI CONTEXT + REPORT
+        if not target_stage or target_stage == "report":
+            try:
+                tracker.update_progress(11.5, "Generating AI Analysis...")
+                get_audit_logger().start_stage("AI Context Generation")
+                run_stage("report", [py, mie, "generate-ai-context", "--ticker", "SPY"])
+                
+                # New Stage for Report
+                run_stage("report", [py, mie, "generate-ai-report", "--ticker", "SPY"])
+            except Exception as e:
+                print(f"WARN: AI Generation failed: {e}")
+                get_audit_logger().update_stage("AI Context Generation", "FAILED", {"error": str(e)})
+
+        if getattr(args, "snapshots", False):
+            get_audit_logger().start_stage("Publish Analytics Data")
+            # Logic for snapshots if needed, or assumed done by previous steps
+            get_audit_logger().update_stage("Publish Analytics Data", "COMPLETED", {})
+
+        tracker.finish_job("completed", "Daily Update Complete")
+        get_audit_logger().finish_job("COMPLETED")
+        print("✅ Done.")
+        sys.exit(0)
+        
+    except Exception as e:
+        tracker.finish_job("failed", f"Job Failed: {str(e)}")
+        get_audit_logger().finish_job("FAILED", f"Job Failed: {str(e)}")
+        print(f"❌ Job Failed: {e}")
+        sys.exit(1)
+
+
+
+def handle_archive_gex_daily(args):
+    """Archive daily GEX profile."""
+    print("Archiving Daily GEX Profile...")
+    from mie_lib.services.audit_logger import get_audit_logger
+    get_audit_logger().update_stage("GEX Archive", "RUNNING", {})
+    
+    try:
+        import datetime
+        import shutil
+        
+        # Resolve tickers
+        if getattr(args, "tickers", None) and args.tickers != "@config":
+            tickers = args.tickers.split(",")
+            tickers = [t.strip().upper() for t in tickers if t.strip()]
+        else:
+            # Load from Analysis Scope
+            tickers = _load_scope_tickers("Gamma_Exposure")
+            if not tickers:
+                print("  [Warn] No tickers found for Gamma_Exposure scope. Falling back to default.")
+                tickers = _load_yaml_tickers()
+
+        success_count = 0
+        
+        for ticker in tickers:
+            try:
+                source_path = Path("data/analytics/gex") / f"{ticker}_profile.parquet"
+                if not source_path.exists():
+                    print(f"  [Skip] Source profile for {ticker} does not exist.")
+                    continue
+                    
+                # Check timestamp (must be today)
+                stat = source_path.stat()
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime).date()
+                if mtime != datetime.date.today():
+                    print(f"  [Warn] Source profile for {ticker} is stale ({mtime}). Archiving anyway.")
+                
+                today_str = datetime.date.today().strftime("%Y%m%d")
+                history_dir = Path("data/analytics/gex/history")
+                history_dir.mkdir(parents=True, exist_ok=True)
+                
+                dest_path = history_dir / f"{ticker}_profile_{today_str}.parquet"
+                
+                shutil.copy2(source_path, dest_path)
+                print(f"  [OK] Archived {ticker} to {dest_path}")
+                success_count += 1
+                
+            except Exception as e_tick:
+                print(f"  [Err] Failed to archive {ticker}: {e_tick}")
+        
+        get_audit_logger().update_stage("GEX Archive", "COMPLETED", {"archived": success_count})
+        sys.exit(0)
+        
+    except Exception as e:
+        print(f"Error archiving GEX: {e}")
+        get_audit_logger().update_stage("GEX Archive", "FAILED", {"error": str(e)})
+        sys.exit(1)
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="mie", description="Market Intelligence Engine CLI")
     sub = parser.add_subparsers(dest="command")
@@ -1565,6 +1925,10 @@ def build_parser():
 
     p_econ = sub.add_parser("update-economic", help="Run full economic pipeline (FRED + All Models)")
     p_econ.set_defaults(func=handle_update_economic)
+    
+    # JPM Dashboard Aggregation
+    p_jpm_agg = sub.add_parser("aggregate-jpm-dashboard", help="Aggregate FRED data into JPM dashboard files")
+    p_jpm_agg.set_defaults(func=handle_aggregate_jpm_dashboard)
 
 
     # Markov builder command
@@ -1684,12 +2048,8 @@ def build_parser():
             "Full rebuild: RAW fresh, FEATURES full, SEASONALITY base/facts, MARKOV grid, HMM grid for all YAML tickers."
         ),
     )
-    sub.add_parser(
-        "update-everything",
-        help=(
-            "Incremental update: update RAW/FEATURES/SEASONALITY, refresh MARKOV/HMM for all YAML tickers."
-        ),
-    )
+    # Removed duplicate update-everything definition
+
 
     sub.add_parser(
         "rebuild-reliability",
@@ -1718,6 +2078,12 @@ def build_parser():
     p_ai_report.add_argument("--ticker", help="Ticker symbol", default="SPY")
     p_ai_report.add_argument("--model", help="LLM Model", default="gpt-4-turbo-preview")
     
+    # Economic Insights for JPM Dashboard
+    p_econ_insights = sub.add_parser("generate-economic-insights", help="Generate AI insights for JPM Economic Dashboard")
+    p_econ_insights.add_argument("--tier", type=int, default=1, help="Insight tier (1, 2, or 3)")
+    p_econ_insights.add_argument("--indicator", type=str, default=None, help="Specific indicator (or all if not specified)")
+    p_econ_insights.add_argument("--model", type=str, default="gpt-4o", help="OpenAI model to use")
+    
     # Generic Audit Updater
     p_audit = sub.add_parser("update-stage", help="Manually update an audit stage status")
     p_audit.add_argument("--stage", required=True, help="Stage Name (e.g. 'Publish Analytics Data')")
@@ -1734,9 +2100,22 @@ def build_parser():
     p_ichimoku.add_argument("--tickers", type=str, default="@config")
     p_ichimoku.set_defaults(func=handle_update_ichimoku)
 
+    # Update Everything (Main Pipeline)
+    p_ue = sub.add_parser("update-everything", help="Run full daily incremental pipeline (Raw -> Features -> Analytics -> Report)")
+    p_ue.add_argument("--stage", help="Run specific stage only (raw, features, analytics, gex, tsmom, report, etc.)")
+    p_ue.add_argument("--dry-run", action="store_true", help="Simulate run without executing heavy logic")
+    p_ue.add_argument("--validate-only", action="store_true", help="Validate prerequisites and exit")
+    p_ue.add_argument("--snapshots", action="store_true", help="Also generate UI snapshots")
+    p_ue.set_defaults(func=handle_update_everything)
+
     # Pipeline start command for orchestrator
     p_start = sub.add_parser("start-pipeline-job", help="Initialize the audit log for a new job")
     p_start.add_argument("--name", help="Job Name")
+
+    # Archive GEX
+    p_gex_arc = sub.add_parser("archive-gex-daily", help="Archive daily GEX profile")
+    p_gex_arc.add_argument("--tickers", default="SPY")
+    p_gex_arc.set_defaults(func=handle_archive_gex_daily)
     p_start.add_argument("--type", help="Run Type (MANUAL/CRON)")
 
     p_start.set_defaults(func=handle_start_pipeline_job)
@@ -2269,6 +2648,7 @@ def main(argv=None):
         for t in tickers:
             out = build_facts_for_ticker(t, horizons=horizons, dry_run=getattr(args, "dry_run", False))
             rows.append({"ticker": t, "written": [str(p) for p in out]})
+        import json
         print(json.dumps(rows))
         sys.exit(0)
     elif args.command == "update-seasonality":
@@ -2282,6 +2662,7 @@ def main(argv=None):
         else:
             tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
         from mie_lib.analytics.seasonality.update import update_seasonality
+        import json
         out = update_seasonality(tickers, since=getattr(args, "since", None), dry_run=getattr(args, "dry_run", False))
         print(json.dumps([str(p) for p in out]))
         
@@ -2379,201 +2760,8 @@ def main(argv=None):
             sys.exit(2)
         
         
-        # --- JOB TRACKING ---
-        from mie_lib.services.job_tracker import JobTracker
-        tracker = JobTracker()
-        tracker.start_job("Daily Update", total_steps=11)
-        # --------------------
-
-        py = sys.executable
-        mie = os.fspath(Path(__file__).resolve())
-        
-        try:
-            # RAW incremental
-            tracker.update_progress(1, "Updating Raw Data...")
-            get_audit_logger().start_job("Daily Update Pipeline") # START GLOBAL JOB
-            
-            get_audit_logger().start_stage("Update Raw Data")
-            _run([py, mie, "update-raw"])
-            
-            # FEATURES incremental + CSV
-            tracker.update_progress(2, "Building Features...")
-            get_audit_logger().start_stage("Update Features")
-            _run([py, mie, "build-features", "--mode", "update", "--lookback", "90", "--csv"])
-
-            # SMA STACK ANALYTICS
-            tracker.update_progress(3, "Calculating SMA Stack...")
-            print("Starting SMA/EMA Stack Trend Analysis...")
-            get_audit_logger().start_stage("SMA/EMA Stack")
-            try:
-                from mie_lib.analytics.sma_stack import calculate_and_save_sma_stack
-                calculate_and_save_sma_stack()
-                print("SMA/EMA Stack analysis completed successfully.")
-                get_audit_logger().update_stage("SMA/EMA Stack", "COMPLETED", {})
-            except Exception as e:
-                print(f"ERROR calculating SMA/EMA Stack: {e}")
-                get_audit_logger().update_stage("SMA/EMA Stack", "FAILED", {"error": str(e)})
-            
-            # ADX/DMI ANALYTICS
-            tracker.update_progress(4, "Calculating ADX/DMI...")
-            print("Starting ADX/DMI Analysis...")
-            get_audit_logger().start_stage("ADX/DMI")
-            try:
-                from mie_lib.analytics.adx_dmi import calculate_and_save_adx
-                calculate_and_save_adx()
-                print("ADX/DMI analysis completed successfully.")
-                get_audit_logger().update_stage("ADX/DMI", "COMPLETED", {})
-            except Exception as e:
-                print(f"ERROR calculating ADX/DMI: {e}")
-                get_audit_logger().update_stage("ADX/DMI", "FAILED", {"error": str(e)})
-
-            # ICHIMOKU ANALYTICS
-            get_audit_logger().start_stage("Ichimoku")
-            try:
-                from mie_lib.analytics.ichimoku import calculate_and_save_ichimoku
-                calculate_and_save_ichimoku()
-                print("Ichimoku analysis completed successfully.")
-                get_audit_logger().update_stage("Ichimoku", "COMPLETED", {})
-            except Exception as e:
-                print(f"ERROR calculating Ichimoku: {e}")
-                get_audit_logger().update_stage("Ichimoku", "FAILED", {"error": str(e)})
-
-            # PSAR ANALYTICS
-            tracker.update_progress(4.5, "Calculating Parabolic SAR...")
-            print("Starting PSAR Analysis...")
-            get_audit_logger().start_stage("PSAR")
-            try:
-                from mie_lib.analytics.psar import calculate_and_save_psar
-                calculate_and_save_psar()
-                print("PSAR analysis completed successfully.")
-                get_audit_logger().update_stage("PSAR", "COMPLETED", {})
-            except Exception as e:
-                print(f"ERROR calculating PSAR: {e}")
-                get_audit_logger().update_stage("PSAR", "FAILED", {"error": str(e)})
-
-            # SEASONALITY incremental
-            tracker.update_progress(5, "Updating Seasonality...")
-            get_audit_logger().start_stage("Seasonality")
-            _run([py, mie, "update-seasonality"])
-            get_audit_logger().update_stage("Seasonality", "COMPLETED", {})
-            
-            # MARKOV grid refresh
-            tracker.update_progress(6, "Building Markov Models...")
-            get_audit_logger().start_stage("Markov Grid")
-            _run([py, mie, "build-markov-grid",
-                "--state-modes", "binary,tri",
-                "--thresholds", ",".join(str(i) for i in range(0,151,5)),
-                "--windows", "1Y,2Y,5Y,10Y,20Y,MAX",
-                "--orders", "1,2,3,4"])  # uses default tickers resolver
-            get_audit_logger().update_stage("Markov Grid", "COMPLETED", {})
-                
-            # HMM grid refresh
-            tracker.update_progress(7, "Building HMM Grid...")
-            get_audit_logger().start_stage("HMM Grid")
-            _run([py, mie, "build-hmm-grid", "--tickers", "@config", "--windows", "5,10,MAX", "--states", "2,3"])
-            get_audit_logger().update_stage("HMM Grid", "COMPLETED", {})
-            
-            # EXPECTED MOVES (Reliability)
-            tracker.update_progress(8, "Calculating Expected Moves...")
-            get_audit_logger().start_stage("Expected Moves")
-            _run([py, mie, "update-expected-moves", "--ticker", "@config", "--lookback", "5"])
-            _run([py, mie, "build-expected-moves-snapshots", "--tickers", "@config"])
-            get_audit_logger().update_stage("Expected Moves", "COMPLETED", {})
-
-            # HMM SNAPSHOTS (UI)
-            tracker.update_progress(9, "Generating Snapshots...")
-            get_audit_logger().start_stage("Snapshots")
-            _run([py, mie, "build-hmm-snapshots", "--tickers", "@config"])
-            get_audit_logger().update_stage("Snapshots", "COMPLETED", {})
-            
-            # HMM BACKTEST (Specific for SPY)
-            tracker.update_progress(9.5, "Running HMM Backtests...")
-            get_audit_logger().start_stage("HMM Backtest SPY")
-            try:
-                _run([py, mie, "backtest-hmm", "--ticker", "SPY"])
-                get_audit_logger().update_stage("HMM Backtest SPY", "COMPLETED", {})
-            except Exception as e:
-                print(f"WARN: backtest-hmm failed: {e}")
-                get_audit_logger().update_stage("HMM Backtest SPY", "FAILED", {"error": str(e)})
-            
-            # GEX (Best Effort)
-            try:
-                tracker.update_progress(10, "Updating Gamma Exposure...")
-                get_audit_logger().start_stage("GEX")
-                # Fetch Options Snapshot First (Polygon)
-                _run([py, mie, "fetch-options-snapshot", "--tickers", "@config"])
-                # Then Build GEX
-                _run([py, mie, "build-gex-daily", "--date", "today", "--tickers", "@config"])
-                get_audit_logger().update_stage("GEX", "COMPLETED", {})
-            except SystemExit:
-                print("WARN: build-gex-daily failed (likely missing flat files), continuing...")
-                get_audit_logger().update_stage("GEX", "SKIPPED", {"reason": "Missing Flat Files"})
-            except Exception as e:
-                print(f"WARN: build-gex-daily failed: {e}")
-                get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
-
-            # TSMOM DAILY UPDATE
-            try:
-                tracker.update_progress(11, "Updating TSMOM & GAF...")
-                get_audit_logger().start_stage("TSMOM")
-                _run([py, mie, "build-tsmom-daily", "--tickers", "@config"])
-                get_audit_logger().update_stage("TSMOM", "COMPLETED", {})
-            except Exception as e:
-                print(f"WARN: build-tsmom-daily failed: {e}")
-                get_audit_logger().update_stage("TSMOM", "FAILED", {"error": str(e)})
-
-            try:
-                get_audit_logger().start_stage("GAF")
-                _run([py, mie, "build-gaf-daily", "--ticker", "@config"])
-                get_audit_logger().update_stage("GAF", "COMPLETED", {})
-            except Exception as e:
-                print(f"WARN: build-gaf-daily failed: {e}")
-                get_audit_logger().update_stage("GAF", "FAILED", {"error": str(e)})
-
-            # ECONOMIC PIPELINE (FRED + COI/LAG/LEI MODELS)
-            try:
-                tracker.update_progress(11.2, "Updating Economic Models...")
-                get_audit_logger().start_stage("Economic Pipeline")
-                _run([py, mie, "update-economic"])
-                get_audit_logger().update_stage("Economic Pipeline", "COMPLETED", {})
-            except Exception as e:
-                print(f"WARN: update-economic failed: {e}")
-                get_audit_logger().update_stage("Economic Pipeline", "FAILED", {"error": str(e)})
-
-            # AI CONTEXT + REPORT
-            try:
-                tracker.update_progress(11.5, "Generating AI Analysis...")
-                get_audit_logger().start_stage("AI Context Generation")
-                _run([py, mie, "generate-ai-context", "--ticker", "SPY"])
-                
-                # New Stage for Report
-                # get_audit_logger().start_stage("AI Report Generation") 
-                # (Assuming audit logger has this stage or we update generic)
-                _run([py, mie, "generate-ai-report", "--ticker", "SPY"])
-            except Exception as e:
-                print(f"WARN: AI Generation failed: {e}")
-                get_audit_logger().update_stage("AI Context Generation", "FAILED", {"error": str(e)})
-
-            if args.snapshots:
-                get_audit_logger().start_stage("Publish Analytics Data")
-                try:
-                    # 7a. Options Snapshots
-                    # ...
-                    get_audit_logger().update_stage("Publish Analytics Data", "COMPLETED", {})
-                except Exception as e:
-                    logger.error(f"Snapshot build failed: {e}")
-                    get_audit_logger().update_stage("Publish Analytics Data", "FAILED", {"error": str(e)})
-
-            tracker.finish_job("completed", "Daily Update Complete")
-            get_audit_logger().finish_job("COMPLETED")
-            print("✅ Done.")
-            sys.exit(0)
-            
-        except Exception as e:
-            tracker.finish_job("failed", f"Job Failed: {str(e)}")
-            get_audit_logger().finish_job("FAILED", f"Job Failed: {str(e)}")
-            print(f"❌ Job Failed: {e}")
-            sys.exit(1)
+    elif args.command == "update-everything":
+        handle_update_everything(args)
     elif args.command == "rebuild-reliability":
         py = sys.executable
         mie = os.fspath(Path(__file__).resolve())
@@ -2770,17 +2958,211 @@ def main(argv=None):
             # Determine status based on data
             status = "COMPLETED" if expected_moves and df_hmm is not None else "PARTIAL"
             # Fix: log_job_event does not exist, use update_stage
-            get_audit_logger().update_stage("AI Context Generation", status, {"artifact": str(active_path)})
+            get_audit_logger().update_stage("AI Context Generation", "COMPLETED", {"path": str(active_path), "size_kb": active_path.stat().st_size / 1024})
+            
+            print(f"✓ AI Context saved to {active_path}")
+            sys.exit(0)
         except Exception as e:
-            print(f"Error generating AI context: {e}")
-            from mie_lib.services.audit_logger import get_audit_logger
+            print(f"✗ Failed to generate payload: {e}")
             get_audit_logger().update_stage("AI Context Generation", "FAILED", {"error": str(e)})
-            
-        except Exception as e:
-            print(f"Error generating payload: {e}")
+            import traceback
+            traceback.print_exc()
             sys.exit(1)
+    
+    elif args.command == "generate-economic-insights":
+        print(f"Starting Economic Insights Generation (Tier {args.tier})...")
+        from mie_lib.analytics.jpm_dashboard.economic_payload import build_economic_payload
+        from mie_lib.services.economic_analyst import EconomicAnalyst
+        from mie_lib.services.audit_logger import get_audit_logger
+        from scipy.stats import percentileofscore
+        import pandas as pd
+        import json
+        
+        # Use module-level logging (already imported at top of file)
+        logger = logging.getLogger(__name__)
+        
+        # Define indicators and their configurations
+        INDICATORS = {
+            'gdp': {'file': 'gdp.parquet', 'primary_series': 'GDPC1'},
+            'consumer-spending': {'file': 'consumer_spending.parquet', 'primary_series': 'PCE'},
+            'labor-market': {'file': 'labor_market.parquet', 'primary_series': 'UNRATE'},
+            'interest-rates': {'file': 'interest_rates.parquet', 'primary_series': 'FEDFUNDS'},
+            'inflation': {'file': 'inflation.parquet', 'primary_series': 'CPIAUCSL'},
+            'business-confidence': {'file': 'business_confidence.parquet', 'primary_series': 'BSCICP02USM460S'},
+            'stock-market': {'file': 'stock_market.parquet', 'primary_series': 'sp500'},
+            'trade-balance': {'file': 'trade_balance.parquet', 'primary_series': 'BOPGSTB'},
+            'housing': {'file': 'housing.parquet', 'primary_series': 'HOUST'},
+            'policy': {'file': 'policy.parquet', 'primary_series': 'FEDFUNDS'}
+        }
+        
+        # Determine which indicators to process
+        if args.indicator:
+            if args.indicator not in INDICATORS:
+                print(f"ERROR: Unknown indicator '{args.indicator}'")
+                print(f"Valid indicators: {', '.join(INDICATORS.keys())}")
+                sys.exit(1)
+            indicators_to_process = {args.indicator: INDICATORS[args.indicator]}
+        else:
+            indicators_to_process = INDICATORS
+        
+        try:
+            analyst = EconomicAnalyst(model=args.model)
+        except Exception as e:
+            print(f"ERROR: Failed to initialize analyst: {e}")
+            sys.exit(1)
+        
+        # Update audit stage
+        stage_name = f"Economic Insights Tier {args.tier}"
+        get_audit_logger().update_stage(stage_name, "RUNNING", {
+            "tier": args.tier,
+            "indicator_count": len(indicators_to_process),
+            "model": args.model
+        })
+        
+        total_indicators = len(indicators_to_process)
+        processed = 0
+        failed = 0
+        
+        for ind_id, config in indicators_to_process.items():
+            logger.info(f"[{processed+1}/{total_indicators}] Processing {ind_id}...")
             
-        sys.exit(0)
+            try:
+                # Load data
+                df_path = Path("data/processed/jpm_dashboard") / config["file"]
+                if not df_path.exists():
+                    logger.warning(f"  Data file not found: {df_path}")
+                    failed += 1
+                    continue
+                
+                df = pd.read_parquet(df_path)
+                
+                # Calculate metadata (health score, percentile, trend)
+                series_data = df[config['primary_series']].dropna()
+                if len(series_data) == 0:
+                    logger.warning(f"  No data for {config['primary_series']}")
+                    failed += 1
+                    continue
+                
+                current = series_data.iloc[-1]
+                percentile = percentileofscore(series_data, current)
+                health_score = int(percentile * 0.8)  # Simplified (API has full logic)
+                
+                # Determine trend
+                if len(series_data) >= 3:
+                    recent = series_data.tail(3)
+                    if recent.iloc[-1] > recent.iloc[0] * 1.01:
+                        trend = 'up'
+                    elif recent.iloc[-1] < recent.iloc[0] * 0.99:
+                        trend = 'down'
+                    else:
+                        trend = 'flat'
+                else:
+                    trend = 'flat'
+                
+                metadata = {
+                    'health_score': health_score,
+                    'percentile': percentile,
+                    'trend_direction': trend
+                }
+                
+                # Build payload
+                payload = build_economic_payload(
+                    indicator_id=ind_id,
+                    df=df,
+                    primary_series=config['primary_series'],
+                    metadata=metadata
+                )
+                
+                # Log payload to audit (for visualization on admin page)
+                get_audit_logger().update_stage(
+                    f"{stage_name} - {ind_id} Payload",
+                    "COMPLETED",
+                    {
+                        "indicator": ind_id,
+                        "payload_size_kb": len(json.dumps(payload)) / 1024,
+                        "current_value": payload['current_state']['value'],
+                        "health_score": payload['current_state']['health_score']
+                    }
+                )
+                
+                # Generate insight based on tier
+                if args.tier == 1:
+                    insight = analyst.generate_tier1_insight(payload)
+                    logger.info(f"  → {insight}")
+                    # Log LLM response to audit (for visualization)
+                    get_audit_logger().update_stage(
+                        f"{stage_name} - {ind_id} Response",
+                        "COMPLETED",
+                        {
+                            "indicator": ind_id,
+                            "tier": 1,
+                            "one_line_insight": insight,
+                            "response_length": len(insight)
+                        }
+                    )
+                    analyst.save_insights(ind_id, args.tier, {"one_line_insight": insight})
+                    
+                elif args.tier == 2:
+                    insight = analyst.generate_tier2_insight(payload)
+                    logger.info(f"  → Generated detailed analysis")
+                    get_audit_logger().update_stage(
+                        f"{stage_name} - {ind_id} Response",
+                        "COMPLETED",
+                        {
+                            "indicator": ind_id,
+                            "tier": 2,
+                            "response_keys": list(insight.keys()),
+                            "takeaway_count": len(insight.get('key_takeaways', []))
+                        }
+                    )
+                    analyst.save_insights(ind_id, args.tier, insight)
+                    
+                elif args.tier == 3:
+                    insight = analyst.generate_tier3_insight(payload)
+                    logger.info(f"  → Generated deep dive analysis")
+                    get_audit_logger().update_stage(
+                        f"{stage_name} - {ind_id} Response",
+                        "COMPLETED",
+                        {
+                            "indicator": ind_id,
+                            "tier": 3,
+                            "response_keys": list(insight.keys()),
+                            "has_recession_signal": 'recession_signal' in insight
+                        }
+                    )
+                    analyst.save_insights(ind_id, args.tier, insight)
+                
+                processed += 1
+                
+            except Exception as e:
+                logger.error(f"  ✗ Failed: {e}")
+                failed += 1
+                get_audit_logger().update_stage(
+                    f"{stage_name} - {ind_id}",
+                    "FAILED",
+                    {"error": str(e)}
+                )
+        
+        # Final audit update
+        if failed == 0:
+            get_audit_logger().update_stage(stage_name, "COMPLETED", {
+                "processed": processed,
+                "failed": failed,
+                "tier": args.tier
+            })
+            print(f"\n✓ Economic insights generation completed ({processed}/{total_indicators} indicators)")
+            sys.exit(0)
+        else:
+            get_audit_logger().update_stage(stage_name, "PARTIAL", {
+                "processed": processed,
+                "failed": failed,
+                "tier": args.tier
+            })
+            print(f"\n⚠ Economic insights completed with errors ({processed} succeeded, {failed} failed)")
+            sys.exit(0 if processed > 0 else 1)
+    elif args.command == "archive-gex-daily":
+        handle_archive_gex_daily(args)
+            
     elif args.command == "generate-ai-report":
         print("Starting AI Report Generation...")
         from mie_lib.services.audit_logger import get_audit_logger

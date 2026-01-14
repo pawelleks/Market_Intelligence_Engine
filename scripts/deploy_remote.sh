@@ -98,7 +98,7 @@ rsync -avz --delete \
     --exclude '*.pyc' \
     --exclude '.DS_Store' \
     --exclude 'logs' \
-    --exclude 'data' \
+    --exclude '/data' \
     ./ "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
 # Sync .env separately if it exists (be careful not to overwrite prod env with local dev env automatically without asking)
@@ -107,9 +107,9 @@ rsync -avz --delete \
 # --- Step 3: Remote Build & Restart ---
 # --- Step 2.5: Prepare Environment Updates (Local Execution) ---
 echo "[2.5/3] Verifying and packing environment variables..."
+echo "[2.5/3] Verifying and packing environment variables..."
 ENV_UPDATES=""
-REQUIRED_KEYS=("POLYGON_API_KEY" "MASSIVE_API_KEY" "GOOGLE_CLIENT_ID" "JWT_SECRET_KEY" "OPENAI_API_KEY" "LLM_MODEL_NAME" "FRED_API_KEY")
-
+REQUIRED_KEYS=("POLYGON_API_KEY" "MASSIVE_API_KEY" "GOOGLE_CLIENT_ID" "JWT_SECRET_KEY" "OPENAI_API_KEY" "LLM_MODEL_NAME" "FRED_API_KEY" "SENDGRID_API_KEY" "SENDGRID_FROM_EMAIL" "SENDGRID_FROM_NAME")
 for KEY in "${REQUIRED_KEYS[@]}"; do
     VAL="${!KEY}"
     

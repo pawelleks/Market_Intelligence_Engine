@@ -23,7 +23,7 @@ def list_all_users(db: Session = Depends(get_db)):
     return db.query(User).all()
 
 @router.put("/users/{user_id}/approve", response_model=UserResponse)
-def approve_user(user_id: int, db: Session = Depends(get_db)):
+async def approve_user(user_id: int, db: Session = Depends(get_db)):
     """Approve a pending user."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -36,6 +36,16 @@ def approve_user(user_id: int, db: Session = Depends(get_db)):
         
     db.commit()
     db.refresh(user)
+    
+    # Send Approval Email
+    from mie_lib.services.email_service import send_access_approved
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, send_access_approved, user.email, user.full_name or "there")
+    except Exception as e:
+        print(f"Failed to send approval email: {e}")
+
     return user
 
 @router.put("/users/{user_id}/revoke", response_model=UserResponse)

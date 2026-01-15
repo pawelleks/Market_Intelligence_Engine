@@ -635,8 +635,12 @@ def enrich_with_yf_data(df: pd.DataFrame, ticker: str, expiry_date: date) -> pd.
         return df
 
     # Check if we actually need enrichment
-    # If OI is present and mostly non-null, skip
-    if 'oi' in df.columns and df['oi'].notna().sum() > 10:
+    # If OI AND IV are present and mostly non-null, skip
+    # (Polygon might give OI but no IV, requiring YF enrichment)
+    oi_ok = 'oi' in df.columns and df['oi'].notna().sum() > 10
+    iv_ok = 'iv' in df.columns and df['iv'].notna().sum() > 10
+    
+    if oi_ok and iv_ok:
         return df
 
     LOG.info(f"Enriching {ticker} {expiry_date} with YFinance Data (OI/IV)...")

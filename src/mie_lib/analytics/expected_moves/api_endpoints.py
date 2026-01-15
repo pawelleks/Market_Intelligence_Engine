@@ -7,7 +7,7 @@ import logging
 from mie_lib.analytics.expected_moves.models import HistoricalEMRecord
 
 # Setup Router
-router = APIRouter(prefix="/api/v1/expected_moves/reliability", tags=["Expected Moves Reliability"])
+router = APIRouter(prefix="/api/v1/expected_moves", tags=["Expected Moves"])
 
 from mie_lib.utils.paths import OPTIONS_DIR
 
@@ -47,7 +47,7 @@ def _load_archive_data() -> pd.DataFrame:
     print(f"Total rows loaded: {len(combined)}")
     return combined
 
-@router.get("/summary")
+@router.get("/reliability/summary")
 def get_reliability_summary():
     """
     Returns aggregated reliability statistics grouped by ticker and expiry type.
@@ -100,7 +100,7 @@ def get_reliability_summary():
         
     return summary
 
-@router.get("/history", response_model=List[HistoricalEMRecord])
+@router.get("/reliability/history", response_model=List[HistoricalEMRecord])
 def get_reliability_history(
     ticker: Optional[str] = None,
     expiry_type: Optional[str] = None
@@ -142,3 +142,36 @@ def get_reliability_history(
     records = df.to_dict(orient="records")
     
     return records
+
+@router.get("/latest")
+@router.get("/massive/latest")
+async def get_expected_moves_latest():
+    """
+    Returns the latest Expected Moves analysis (JSON).
+    """
+    from mie_lib.utils.paths import options_latest_json_path
+    import json
+    import math
+
+    def sanitize_floats(obj):
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        if isinstance(obj, dict):
+            return {k: sanitize_floats(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [sanitize_floats(x) for x in obj]
+        return obj
+    
+    path = options_latest_json_path()
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Latest Expected Moves data not found")
+        
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return sanitize_floats(data)
+    except Exception as e:
+        logger.error(f"Error reading latest EM data: {e}")
+        raise HTTPException(status_code=500, detail="Error reading data")

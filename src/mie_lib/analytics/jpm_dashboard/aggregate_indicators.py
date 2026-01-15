@@ -85,10 +85,10 @@ INDICATOR_SERIES = {
         'freq': 'monthly'
     },
     'policy': {
-        'primary': ['FEDFUNDS', 'DFEDTARU'],
-        'secondary': ['FYFSD', 'GFDEGDQ188S'],
-        'components': [],
-        'freq': 'monthly'
+        'primary': ['FEDFUNDS'],
+        'secondary': ['WALCL', 'TREAST', 'WSHOMCB', 'DGS10', 'T10Y2Y', 'MORTGAGE30US'],
+        'components': ['DFEDTARU', 'FYFSD', 'GFDEGDQ188S'],
+        'freq': 'daily'  # Changed to daily to capture DGS10, T10Y2Y properly
     }
 }
 

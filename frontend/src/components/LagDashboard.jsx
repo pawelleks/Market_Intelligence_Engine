@@ -202,23 +202,7 @@ const LagDashboard = () => {
                 </p>
             </header>
 
-            {/* Beta Banner */}
-            <div style={{
-                padding: '12px 20px',
-                backgroundColor: 'rgba(251, 191, 36, 0.1)',
-                border: '1px solid #fbbf24',
-                borderRadius: '8px',
-                color: '#fbbf24',
-                fontSize: '14px',
-                fontWeight: '500',
-                marginBottom: '24px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-            }}>
-                <AlertTriangle size={18} />
-                <span>BETA: This model is under construction and not yet fully calibrated. Historical values may change as the model is refined.</span>
-            </div>
+            {/* Beta Banner Removed */}
 
             {/* Status Badge */}
             {latest && (() => {

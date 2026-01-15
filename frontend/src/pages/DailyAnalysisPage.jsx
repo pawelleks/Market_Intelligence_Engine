@@ -107,7 +107,7 @@ const DailyAnalysisPage = () => {
                                 <DataRow label="EMA Stack" value={context.trend?.ema_stack?.verdict} />
                                 <DataRow label="ADX" value={`${context.trend?.adx?.val} (${context.trend?.adx?.trend_strength})`} />
                                 <DataRow label="Ichimoku" value={context.trend?.ichimoku?.status} />
-                                <DataRow label="vs 52W High" value={context.price?.dist_52w_high_label} color={context.price?.dist_52w_high_pct?.startsWith('-') ? '#f44336' : '#4caf50'} />
+                                <DataRow label="vs 52W High" value={context.price?.dist_52w_high_label} color={String(context.price?.dist_52w_high_pct || "").startsWith('-') ? '#f44336' : '#4caf50'} />
                                 <DataRow label="52W Range" value={`$${context.price?.['52w_low']} - $${context.price?.['52w_high']}`} />
                             </ContextGroup>
 
@@ -139,12 +139,12 @@ const DailyAnalysisPage = () => {
 
                             {/* Performance */}
                             <ContextGroup title="Market Performance">
-                                <DataRow label="1 Day" value={context.performance?.['1d']} color={context.performance?.['1d']?.startsWith('+') ? '#4caf50' : '#f44336'} />
-                                <DataRow label="1 Week" value={context.performance?.['1w']} color={context.performance?.['1w']?.startsWith('+') ? '#4caf50' : '#f44336'} />
-                                <DataRow label="1 Month" value={context.performance?.['1m']} color={context.performance?.['1m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
-                                <DataRow label="3 Months" value={context.performance?.['3m']} color={context.performance?.['3m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
-                                <DataRow label="6 Months" value={context.performance?.['6m']} color={context.performance?.['6m']?.startsWith('+') ? '#4caf50' : '#f44336'} />
-                                <DataRow label="1 Year" value={context.performance?.['1y']} color={context.performance?.['1y']?.startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Day" value={context.performance?.['1d']} color={String(context.performance?.['1d'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Week" value={context.performance?.['1w']} color={String(context.performance?.['1w'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Month" value={context.performance?.['1m']} color={String(context.performance?.['1m'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="3 Months" value={context.performance?.['3m']} color={String(context.performance?.['3m'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="6 Months" value={context.performance?.['6m']} color={String(context.performance?.['6m'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
+                                <DataRow label="1 Year" value={context.performance?.['1y']} color={String(context.performance?.['1y'] || "").startsWith('+') ? '#4caf50' : '#f44336'} />
                             </ContextGroup>
                         </div>
                     )}

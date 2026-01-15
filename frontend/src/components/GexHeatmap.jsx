@@ -6,7 +6,9 @@ const GexHeatmap = ({ ticker }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [visibleRange, setVisibleRange] = useState(null);
 
+    // Fetch Heatmap Data
     // Fetch Heatmap Data
     useEffect(() => {
         const fetchData = async () => {
@@ -18,6 +20,36 @@ const GexHeatmap = ({ ticker }) => {
                 }
                 const result = await response.json();
                 setData(result);
+
+                // Calculate visible range based on RESULT not STATE
+                let minStrike = Infinity;
+                let maxStrike = -Infinity;
+
+                if (result.z && result.y) {
+                    result.z.forEach((row, rowIndex) => {
+                        const strike = result.y[rowIndex];
+                        row.forEach(val => {
+                            if (Math.abs(val) > 1000000) {
+                                if (strike < minStrike) minStrike = strike;
+                                if (strike > maxStrike) maxStrike = strike;
+                            }
+                        });
+                    });
+                }
+
+                // Fallback if no visible data found
+                if (minStrike === Infinity && result.y && result.y.length > 0) {
+                    minStrike = result.y[0];
+                    maxStrike = result.y[result.y.length - 1];
+                } else if (minStrike === Infinity) {
+                    // No data at all
+                    minStrike = 0; maxStrike = 100;
+                }
+
+                // Add buffer
+                const buffer = (maxStrike - minStrike) * 0.1;
+                setVisibleRange([minStrike - buffer, maxStrike + buffer]);
+
             } catch (err) {
                 console.error(err);
                 setError(err.message);
@@ -35,10 +67,6 @@ const GexHeatmap = ({ ticker }) => {
     if (error) return <div className="text-red-400 p-4">Error loading heatmap: {error}</div>;
     if (!data) return null;
 
-    // Data Structure:
-    // x: dates, y: strikes, z: matrix [row=strike][col=date]
-    // Available Dates: data.available_dates
-
     // Plotly Data Trace
     const traces = [
         {
@@ -46,23 +74,19 @@ const GexHeatmap = ({ ticker }) => {
             x: data.x,
             y: data.y,
             type: 'heatmap',
-            colorscale: 'RdBu', // Red=Positive (Call), Blue=Negative (Put - Wait, typically Put is Neg GEX?)
-            // Usually: Positive GEX = Long Gamma (Dealers Hedging against trend - Stability)
-            // Negative GEX = Short Gamma (Dealers Hedging with trend - Volatility)
-            // Let's use RdBu. Midpoint 0 is white.
-            // RdBu: Red is low, Blue is high usually? No.
-            // Let's check: 0 should be neutral.
-            // We want Red for Negative GEX (Danger/Vol), Green/Blue for Positive.
-            // Let's stick to standard RdBu and assume user knows.
-            // Actually, in financial heatmaps:
-            // High Positive GEX (Calls) -> Green/Blue
-            // High Negative GEX (Puts) -> Red
-            // RdBu is Red(Low) -> Blue(High). So Negative GEX (-100) is Red. Positive GEX (+100) is Blue.
-            // This works well.
+            colorscale: [
+                [0, 'rgb(255, 0, 0)'],       // Negative GEX = Red
+                [0.45, 'rgba(255, 0, 0, 0.1)'], // Fade to Transparent
+                [0.5, 'rgba(255, 255, 255, 0)'], // Zero = Transparent
+                [0.55, 'rgba(0, 0, 255, 0.1)'], // Fade from Transparent
+                [1, 'rgb(0, 0, 255)']        // Positive GEX = Blue
+            ],
             zmid: 0,
             colorbar: {
                 title: 'Net GEX ($M)',
-                titleside: 'right'
+                titleside: 'right',
+                tickfont: { color: '#ccc' },
+                titlefont: { color: '#ccc' }
             },
             hovertemplate: 'Date: %{x}<br>Strike: %{y}<br>GEX: %{z:.2f} M<extra></extra>'
         }
@@ -78,16 +102,18 @@ const GexHeatmap = ({ ticker }) => {
         xaxis: {
             title: 'Date',
             color: '#ccc',
-            gridcolor: '#333'
+            gridcolor: '#333',
+            tickformat: '%b %d', // Short date format
+            nticks: 10 // Reduce label density
         },
         yaxis: {
             title: 'Strike Price',
             color: '#ccc',
-            gridcolor: '#333'
+            gridcolor: '#333',
+            range: visibleRange // Dynamic range
         },
         margin: { l: 60, r: 20, t: 40, b: 60 },
         height: 500,
-        // Responsive
         autosize: true
     };
 

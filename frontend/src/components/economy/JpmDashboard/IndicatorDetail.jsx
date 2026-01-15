@@ -327,7 +327,7 @@ const IndicatorDetail = () => {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                     <div>
                         <h3 className="text-xl font-bold text-white">
-                            {data.primary_metric?.name} History
+                            {category === 'policy' ? 'Federal Funds Rate History' : `${data.primary_metric?.name} History`}
                         </h3>
                         <p className="text-xs text-gray-500">
                             {data.primary_metric?.unit} • Seasonal Adjustment: {data.primary_metric?.sa ? 'True' : 'False'}
@@ -432,7 +432,8 @@ const IndicatorDetail = () => {
                             layer: 'below'
                         }))
                     }}
-                    config={{ displayModeBar: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] }}
+                    config={{ displayModeBar: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'], responsive: true }}
+                    useResizeHandler={true}
                     style={{ width: '100%', height: '380px' }}  // Reduced from 450px
                 />
             </div>

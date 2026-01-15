@@ -293,153 +293,189 @@ def run_gex_pipeline_parallel(
         "details": []
     }
     
-    def _process_single_ticker(ticker: str) -> Dict[str, Any]:
-        try:
-             # 1. Fetch Spot
-            spot_res = _fetch_spot_price(ticker)
-            if spot_res.spot is None:
-                return {"status": "error", "error": f"No spot price ({spot_res.source})"}
-                
-            spot = spot_res.spot
-            
-            # 2. Fetch Chain (Greeks/OI)
-            yf_chain = _fetch_yfinance_chain_df(ticker)
-            
-            # Check YF Quality (Fallback to Polygon if empty or 0 OI)
-            use_polygon = False
-            if yf_chain.empty:
-                use_polygon = True
-            elif 'oi' in yf_chain.columns and yf_chain['oi'].sum() == 0:
-                LOG.warning(f"YFinance returned 0 OI for {ticker}. Switching to Polygon.")
-                use_polygon = True
-                
-            working_df = pd.DataFrame()
-            
-            if use_polygon:
-                try:
-                    import yfinance as yf
-                    from mie_lib.analytics.expected_moves.data_ingest_polygon import fetch_option_chain as fetch_poly_chain
-                    from datetime import date
-                    
-                    # We need expirations. YF `.options` usually works even if chain data is bad.
-                    poly_expirations = yf.Ticker(ticker).options
-                    poly_rows = []
-                    
-                    for p_exp in poly_expirations:
-                        try:
-                            exp_date = datetime.strptime(p_exp, "%Y-%m-%d").date()
-                            # Fetch Snapshot
-                            df_snap = fetch_poly_chain(ticker, exp_date, date.today(), spot_price=spot)
-                            if not df_snap.empty:
-                                df_snap['expiration'] = p_exp
-                                poly_rows.append(df_snap)
-                        except Exception:
-                            continue
-                            
-                    if poly_rows:
-                        working_df = pd.concat(poly_rows, ignore_index=True)
-                        # Rename/Standardize
-                        # fetch_poly_chain returns: [strike, option_type, prev_close_mid, iv, gamma, oi, contractSymbol]
-                        # GEXEngine logic below expects: [strike, type, expiration, oi, iv]
-                        # We need to map 'option_type' -> 'type' (done below)
-                        # We need 'gamma' if available (GEXEngine uses it if present)
-                        
-                    else:
-                        return {"status": "error", "error": "Polygon fallback also returned no data"}
-                        
-                except Exception as e:
-                    return {"status": "error", "error": f"Polygon fallback failed: {e}"}
-            else:
-                working_df = yf_chain.copy()
-            
-            # 3. Hybrid Merge (Legacy Massve Logic)
-            # We must exist in yfinance to have Greeks.
-            # We SHOULD exist in Massive to have "Trusted Price".
-            # If exists in Massive, overwrite yfinance price?
-            # Or just use Massive price for GEX? (GEX uses Spot, not Option Price...)
-            # WAIT. GEX uses Spot, K, T, IV. It DOES NOT use Option Price.
-            # So why load Massive?
-            # Maybe validation? Or universe filtering?
-            # User said: "Massive.com is where we download option chain...".
-            # If we strictly filter by Massive universe, we simply inner join.
-            
-            # Only keep contracts present in Massive (if Massive data exists)
-            working_df = yf_chain.copy()
-            
-            if prices_map:
-                # Filter universe to Massive
-                # working_df = working_df[working_df['contractSymbol'].isin(prices_map.keys())]
-                # Actually, yfinance might have MORE expirations or strikes than traded?
-                # Or Massive (EOD) might have expired contracts?
-                # Let's perform a 'soft' merge. If in Massive, great. If not, should we skip?
-                # User constraint "Massive is where we download...". 
-                # This implies "Analyze only what's in Massive".
-                
-                # Check intersection size
-                massive_keys = set(prices_map.keys())
-                yf_keys = set(working_df['contractSymbol'])
-                intersection = massive_keys.intersection(yf_keys)
-                
-                if len(intersection) < 5:
-                    # Low overlap? Mismatch?
-                    # Maybe Massive uses different symbology?
-                    # If mismatch, fallback to pure yfinance but log warning?
-                    # LOG.warning(f"Low overlap for {ticker}: {len(intersection)} contracts.")
-                    pass
-                
-                # Strict: Filter to intersection
-                if len(intersection) > 0:
-                     working_df = working_df[working_df['contractSymbol'].isin(intersection)]
-                
-                # If we filter too strictly and intersection is empty (dat mismatch), we fail.
-                # Let's trust yfinance chain if Massive is empty/unaligned, 
-                # but valid Hybrid implies we respected Massive.
-            
-            if working_df.empty:
-                 return {"status": "error", "error": "No contracts after Massive/YF merge"}
-                 
-            # 4. Calculate GEX
-            # working_df has ['strike', 'option_type', 'expiration', 'oi', 'iv']
-            # Map columns for GEXEngine
-            # GEXEngine expects: type (C/P)
-            
-            # working_df['type'] = working_df['option_type'] # Already C/P?
-            # _fetch_yfinance... sets 'option_type'
-            
-            # Rename for engine
-            working_df = working_df.rename(columns={'option_type': 'type'})
-            
-            gex_result = engine.calculate_gex_from_frame(ticker, working_df, spot, as_of=target_date_obj)
-            
-            if gex_result:
-                from .storage import save_gex_profile
-                save_gex_profile(ticker, gex_result)
-                return {"status": "ok"}
-            else:
-                return {"status": "error", "error": "Calculation returned empty"}
-                
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-
     # Run Parallel
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Use module-level hybrid processor
         future_to_ticker = {
-            executor.submit(_process_single_ticker, ticker): ticker
+            executor.submit(_process_single_ticker_hybrid, ticker): ticker
             for ticker in tickers
         }
         
         for future in as_completed(future_to_ticker):
             ticker = future_to_ticker[future]
-            res = future.result()
-            
-            results["processed"] += 1
-            if res["status"] == "ok":
-                results["success"] += 1
-                results["details"].append({"ticker": ticker, "status": "ok"})
-            else:
+            try:
+                res = future.result()
+                
+                results["processed"] += 1
+                if res["status"] == "ok":
+                    results["success"] += 1
+                    results["details"].append({"ticker": ticker, "status": "ok"})
+                else:
+                    results["failed"] += 1
+                    err_msg = res.get("error", "Unknown error")
+                    results["details"].append({"ticker": ticker, "status": "error", "error": err_msg})
+                    LOG.warning(f"GEX failed for {ticker}: {err_msg}")
+            except Exception as e:
+                LOG.error(f"Pipeline future exception for {ticker}: {e}")
                 results["failed"] += 1
-                results["details"].append({"ticker": ticker, "status": "error", "error": res.get("error")})
-                LOG.warning(f"GEX failed for {ticker}: {res.get('error')}")
 
     LOG.info(f"Hybrid GEX Pipeline complete: {results['success']}/{results['processed']} succeeded")
     return results
+
+def _fetch_polygon_chain(ticker: str, spot: float, loader_ref=None) -> pd.DataFrame:
+    """Helper to fetch full Polygon chain across expirations."""
+    try:
+        import yfinance as yf
+        from mie_lib.analytics.expected_moves.data_ingest_polygon import fetch_option_chain as fetch_poly_chain
+        from datetime import date
+        
+        # We need expirations. YF `.options` usually works even if chain data is bad.
+        try:
+             poly_expirations = yf.Ticker(ticker).options
+        except:
+             return pd.DataFrame() # Can't get expirations
+
+        if not poly_expirations:
+             return pd.DataFrame()
+
+        poly_rows = []
+        
+        for p_exp in poly_expirations:
+            try:
+                exp_date = datetime.strptime(p_exp, "%Y-%m-%d").date()
+                # Fetch Snapshot
+                df_snap = fetch_poly_chain(ticker, exp_date, date.today(), spot_price=spot)
+                if not df_snap.empty:
+                    df_snap['expiration'] = p_exp
+                    poly_rows.append(df_snap)
+            except Exception:
+                continue
+                
+        if poly_rows:
+            df = pd.concat(poly_rows, ignore_index=True)
+            # Standardize Columns
+            # fetch_poly_chain returns: [strike, option_type, prev_close_mid, iv, gamma, oi, contractSymbol]
+            # Rename 'option_type' -> 'type' (to match YF intermediate or handle later)
+            # For merge, we want standard keys.
+            
+            # Normalize Type
+            df['type'] = df['option_type'].apply(lambda x: 'C' if str(x).upper() in ['C','CALL'] else 'P')
+            return df
+        
+        return pd.DataFrame()
+            
+    except Exception as e:
+        LOG.warning(f"Polygon fetch failed: {e}")
+        return pd.DataFrame()
+
+
+def _merge_data_sources(yf_df: pd.DataFrame, poly_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge YFinance (Greeks Source) and Polygon (OI Source).
+    Match on Strike, Expiration, Type.
+    """
+    if yf_df.empty and poly_df.empty:
+        return pd.DataFrame()
+
+    # Ensure columns exist in YF (Standardize Type)
+    if not yf_df.empty and 'option_type' in yf_df.columns:
+        yf_df['type'] = yf_df['option_type']
+
+    if yf_df.empty:
+        # Only Polygon (Missing Greeks likely, but return it)
+        return poly_df
+        
+    if poly_df.empty:
+        # Only YF (Missing OI likely)
+        return yf_df
+        
+    on_keys = ['strike', 'expiration', 'type']
+    
+    # Drop duplicates to avoid explosion
+    yf_clean = yf_df.drop_duplicates(subset=on_keys)
+    poly_clean = poly_df.drop_duplicates(subset=on_keys)
+    
+    # Merge
+    merged = pd.merge(yf_clean, poly_clean, on=on_keys, how='outer', suffixes=('_yf', '_poly'))
+    
+    # Resolve Columns (Prioritize Polygon for OI, YF for Greeks)
+    
+    # OI: Poly > YF
+    merged['oi'] = merged['oi_poly'].fillna(merged['oi_yf']).fillna(0)
+    
+    # IV: YF > Poly
+    merged['iv'] = merged['iv_yf'].fillna(merged['iv_poly'])
+    
+    # Gamma: YF > Poly
+    # YF might not have 'gamma' column if not calc? _fetch_yfinance_chain_df mentions it?
+    gamma_yf = merged['gamma_yf'] if 'gamma_yf' in merged.columns else None
+    gamma_poly = merged['gamma'] if 'gamma' in merged.columns else merged.get('gamma_poly')
+    
+    # Actually fetch_poly passes 'gamma'
+    # merged key might be 'gamma' if only in one? No, suffixes.
+    
+    # Let's consolidate 'gamma'
+    if 'gamma_yf' in merged.columns:
+        merged['gamma'] = merged['gamma_yf'].fillna(merged.get('gamma_poly'))
+    elif 'gamma_poly' in merged.columns:
+        merged['gamma'] = merged['gamma_poly']
+        
+    return merged
+
+
+def _process_single_ticker_hybrid(ticker: str) -> Dict[str, Any]:
+    """
+    Process ticker using Hybrid Merge strategy.
+    """
+    # 1. Fetch Spot (YFinance)
+    try:
+        spot_res = _fetch_spot_price(ticker)
+        if spot_res.spot is None:
+             return {"status": "error", "error": f"No spot price ({spot_res.source})"}
+        spot = spot_res.spot
+        
+        # 2. Fetch Chains (Both)
+        yf_chain = _fetch_yfinance_chain_df(ticker)
+        poly_chain = pd.DataFrame()
+        
+        # Check if YF is sufficient?
+        # If YF has OI > 0 and IV, we don't need Polygon (save API calls)
+        yf_ok = False
+        if not yf_chain.empty and 'oi' in yf_chain.columns and yf_chain['oi'].sum() > 0:
+             yf_ok = True
+             
+        if not yf_ok:
+             LOG.info(f"YFinance incomplete for {ticker} (OI=0 or Empty). Fetching Polygon for OI...")
+             poly_chain = _fetch_polygon_chain(ticker, spot)
+             
+        # 3. Merge
+        working_df = _merge_data_sources(yf_chain, poly_chain)
+        
+        if working_df.empty:
+             return {"status": "error", "error": "No options data from YF or Polygon"}
+             
+        # 4. Engine Format
+        # valid cols: strike, type, expiration, oi, iv, gamma
+        
+        from mie_lib.analytics.gex.gex_engine import GEXEngine
+        engine = GEXEngine()
+        
+        gex_result = engine.calculate_gex_from_frame(ticker, working_df, spot)
+        
+        if gex_result and gex_result.get('net_gex') == 0.0 and working_df['oi'].sum() > 0:
+             LOG.warning(f"GEX is 0 but OI exists ({working_df['oi'].sum()}). Check IV/Gamma availability.")
+             # Debug log
+             # LOG.warning(f"Sample: {working_df[['strike','type','oi','iv']].head()}")
+             
+        if gex_result:
+            from .storage import save_gex_profile
+            save_gex_profile(ticker, gex_result)
+            return {"status": "ok"}
+        else:
+            return {"status": "error", "error": "Calculation returned empty"}
+
+    except Exception as e:
+        LOG.error(f"Error processing {ticker}: {e}")
+        return {"status": "error", "error": str(e)}
+
+

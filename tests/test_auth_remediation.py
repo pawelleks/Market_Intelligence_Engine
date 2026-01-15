@@ -73,17 +73,19 @@ async def test_login_pending_user(mock_db, mock_verify_token, mock_send_email, m
 
 @pytest.mark.anyio
 async def test_login_new_user(mock_db, mock_verify_token, mock_send_email, mock_telegram):
-    """New user should get 403 Forbidden and trigger Telegram alert."""
+    """New user should be auto-approved and get a token."""
     mock_verify_token.return_value = {"email": EMAIL_NEW, "sub": "789", "name": "New User"}
     
     mock_db.query.return_value.filter.return_value.first.return_value = None # No user found
     
     mock_login_data = MagicMock(id_token=VALID_TOKEN)
     
-    with pytest.raises(HTTPException) as exc:
-        await auth.login(mock_login_data, db=mock_db)
-        
-    assert exc.value.status_code == 403
-    assert "account is pending approval" in exc.value.detail
+    # Should NOT raise exception now
+    response = await auth.login(mock_login_data, db=mock_db)
+    
+    assert response.access_token is not None
+    assert response.message == "Login successful."
+    
     # Ensure Telegram alert IS called for new user
     assert mock_telegram.called
+    assert "Auto-Approved" in mock_telegram.call_args[0][0]

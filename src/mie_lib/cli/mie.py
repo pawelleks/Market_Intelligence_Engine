@@ -2648,7 +2648,7 @@ def main(argv=None):
         for t in tickers:
             out = build_facts_for_ticker(t, horizons=horizons, dry_run=getattr(args, "dry_run", False))
             rows.append({"ticker": t, "written": [str(p) for p in out]})
-        import json
+
         print(json.dumps(rows))
         sys.exit(0)
     elif args.command == "update-seasonality":
@@ -2662,7 +2662,7 @@ def main(argv=None):
         else:
             tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
         from mie_lib.analytics.seasonality.update import update_seasonality
-        import json
+
         out = update_seasonality(tickers, since=getattr(args, "since", None), dry_run=getattr(args, "dry_run", False))
         print(json.dumps([str(p) for p in out]))
         
@@ -2976,7 +2976,7 @@ def main(argv=None):
         from mie_lib.services.audit_logger import get_audit_logger
         from scipy.stats import percentileofscore
         import pandas as pd
-        import json
+
         
         # Use module-level logging (already imported at top of file)
         logger = logging.getLogger(__name__)
@@ -3224,7 +3224,7 @@ def handle_build_skew_daily(args):
     from mie_lib.analytics.skew.skew_pipeline import run_skew_pipeline_parallel
     from datetime import date
     import logging
-    import json
+
     
     LOG = logging.getLogger(__name__)
 

@@ -123,7 +123,7 @@ async def login(
             email=email,
             google_sub=sub,
             full_name=name,
-            is_approved=False,
+            is_approved=True, # Auto-approve temporarily
             is_admin=False
         )
         db.add(new_user)
@@ -131,36 +131,20 @@ async def login(
         db.refresh(new_user)
         
         # Notify Admin (Registration Only)
-        await send_telegram_alert(f"🚨 New User Signup: {email} ({name})")
+        await send_telegram_alert(f"🚨 New User Signup (Auto-Approved): {email} ({name})")
         
-        # Notify User (Email)
-        # We wrap this in try/except to avoid blocking login if email fails, 
-        # though we should log it.
-        from mie_lib.services.email_service import send_access_request_received
+        # Notify User (Access Approved)
+        from mie_lib.services.email_service import send_access_approved
         try:
-            # Run in executor via wrapper or direct call if we trust it doesn't block too long
-            # send_access_request_received is synchronous.
-            # Using the async wrapper if available or just calling it if we accept slight delay.
-            # Ideally use run_in_executor.
-            # Let's import the wrapper we created or assume send_access_request_received is cheap.
-            # Actually, email_service.py implemented synchronous send_email.
-            # We should use a wrapper or just call it.
-            # For simplicity and given expected load, we'll verify if we can make it async in service.
-            # Check email_service.py content again?
-            # I wrote: async def send_email_notification (...) uses run_in_executor.
-            # But send_access_request_received calls synchronous send_email directly.
-            # I should update send_access_request_received to be async or run_in_executor here.
             import asyncio
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, send_access_request_received, email, name or "there")
+            await loop.run_in_executor(None, send_access_approved, email, name or "there")
         except Exception as e:
             logger.error(f"Failed to send welcome email to {email}: {e}")
         
-        # Return 403 for New User
-        raise HTTPException(
-            status_code=403, 
-            detail="Authentication successful, but account is pending approval."
-        )
+        # PROCEED TO LOGIN (Do not raise 403)
+        # Execution continues to generate token below...
+        user = new_user
 
     # --- IDENTITY VERIFICATION ---
     if user.google_sub and user.google_sub != sub:

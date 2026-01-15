@@ -184,6 +184,8 @@ SERIES_MAPPING = {
     'CPIENGSL': 'CPI Energy',
     'CUSR0000SASLE': 'CPI Services Less Energy',
     'WALCL': 'Fed Total Assets',
+    'TREAST': 'Treasury Securities Held by Fed',
+    'WSHOMCB': 'Mortgage-Backed Securities Held by Fed',
     'STLFSI': 'St. Louis Fed Financial Stress Index',
     'CFNAI': 'Chicago Fed National Activity Index',
     'ECBASSETS': 'ECB Total Assets',
@@ -221,7 +223,10 @@ SERIES_UNITS_METADATA = {
     'T10Y2Y': '%',
     'T10Y3M': '%',
     'SPREAD30Y5Y': '%',
-    'MORTGAGE30US': '%'
+    'MORTGAGE30US': '%',
+    'WALCL': '$B',
+    'TREAST': '$B',
+    'WSHOMCB': '$B'
 }
 
 def standardize_unit(series_id: str, original_unit: str) -> str:

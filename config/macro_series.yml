@@ -86,6 +86,8 @@ series:
   # --- Money & Financial Conditions ---
   M2SL: M2 Money Supply
   WALCL: Total Assets (Federal Reserve)
+  TREAST: Treasury Securities Held by Federal Reserve
+  WSHOMCB: Mortgage-Backed Securities Held by Federal Reserve
   STLFSI: St. Louis Fed Financial Stress Index
   NFCI: Chicago Fed National Financial Conditions Index
   USREC: NBER Recession Indicator (1=Recession, 0=Expansion)
@@ -178,3 +180,5 @@ frequency:
   BSCICP02USM460S: m
   BAMLC0A4CBBB: d
   BUSLOANS: w
+  TREAST: w
+  WSHOMCB: w

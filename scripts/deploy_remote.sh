@@ -183,4 +183,8 @@ EOF
 
 echo "========================================================"
 echo "Deployment Complete!"
+echo "--------------------------------------------------------"
+echo "REMINDER: Dev Login is available if ALLOW_DEV_LOGIN=true"
+echo "Testing URL: https://blindmonkey.io/login?dev_login=true"
+echo "See docs/testing_access.md for details."
 echo "========================================================"

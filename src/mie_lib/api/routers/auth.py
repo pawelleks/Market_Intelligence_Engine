@@ -36,6 +36,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 # We'll rely on the one in .env if present, otherwise skip audience check (DEV ONLY WARNING)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
+# DEV LOGIN CONFIG
+ALLOW_DEV_LOGIN = os.getenv("ALLOW_DEV_LOGIN", "false").lower() == "true"
+
 
 # --- Schemas ---
 class GenericLoginResponse(BaseModel):
@@ -183,4 +186,46 @@ async def login(
         access_token=access_token, 
         token_type="bearer",
         message="Login successful."
+    )
+
+@router.get("/dev-login", response_model=GenericLoginResponse)
+def dev_login(db: Session = Depends(get_db)):
+    """
+    Development backdoor for testing without Google Auth.
+    STRICTLY CONTROLLED by ALLOW_DEV_LOGIN env var.
+    """
+    if not ALLOW_DEV_LOGIN:
+        # Pretend it doesn't exist or forbidden
+        raise HTTPException(status_code=403, detail="Dev login disabled.")
+    
+    logger.warning("DEV LOGIN ACCESSED")
+    
+    # Create or Get Dev User
+    email = "test@blindmonkey.io"
+    
+    from sqlalchemy import func
+    user = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
+    
+    if not user:
+        user = User(
+            email=email,
+            google_sub="dev-test-user",
+            full_name="Test User",
+            is_approved=True,
+            is_admin=True # Grant admin for testing full features
+        )
+        db.add(user)
+        db.commit()
+    
+    # Generate Token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = create_access_token(
+        data={"sub": user.email, "user_id": user.id, "is_admin": user.is_admin},
+        expires_delta=access_token_expires
+    )
+    
+    return GenericLoginResponse(
+        access_token=token,
+        token_type="bearer",
+        message="Dev Login Successful"
     )

@@ -295,7 +295,7 @@ const DashboardHome = () => {
                     />
                     <InfoCard
                         title="DCS Dashboard"
-                        description="Digital Currency Signal tracking crypto market conditions."
+                        description="Downtrend Confirmation Score (DCS) analysis."
                         to="/analysis/dcs"
                         icon={Activity}
                         color="#a78bfa"

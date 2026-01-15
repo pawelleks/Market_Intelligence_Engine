@@ -586,6 +586,33 @@ function AppContent() {
   // FIX 6: Update hook usage to include priceData
   const { markovData, markovMultiStepData, hmmData, priceData, hmmStats, hmmMetrics, hmmDurations, latestMarkovState, freshnessStatus, priceViewerData, loading, error } = useAnalyticalData(settings);
 
+  // --- Dev Login Logic (Backdoor) ---
+  const location = useLocation();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('dev_login') === 'true') {
+      const doDevLogin = async () => {
+        try {
+          const res = await fetch('/api/v1/auth/dev-login');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.access_token) {
+              localStorage.setItem('access_token', data.access_token);
+              // Hard reload to init auth context cleanly
+              window.location.href = '/';
+            }
+          } else {
+            console.error("Dev Login Failed", res.status);
+            alert("Dev Login Failed: Not enabled on server.");
+          }
+        } catch (e) {
+          console.error("Dev Login Error", e);
+        }
+      };
+      doDevLogin();
+    }
+  }, [location]);
+
   // --- Terms of Use Logic ---
   const [showTermsModal, setShowTermsModal] = useState(false);
   const { refreshUser } = useAuth(); // Destructure refreshUser

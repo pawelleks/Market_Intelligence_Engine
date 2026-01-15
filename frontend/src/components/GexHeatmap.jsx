@@ -21,34 +21,32 @@ const GexHeatmap = ({ ticker }) => {
                 const result = await response.json();
                 setData(result);
 
-                // Calculate visible range based on RESULT not STATE
-                let minStrike = Infinity;
-                let maxStrike = -Infinity;
+                // Calculate visible range based on PROXY SPOT from latest data
+                // User Request: Range should be -10% to +10% from current strike.
+                let proxySpot = 0;
+                let totalWeight = 0;
+                const lastColIndex = result.x.length - 1;
 
-                if (result.z && result.y) {
+                if (result.z && result.y && result.x.length > 0) {
                     result.z.forEach((row, rowIndex) => {
                         const strike = result.y[rowIndex];
-                        row.forEach(val => {
-                            if (Math.abs(val) > 1000000) {
-                                if (strike < minStrike) minStrike = strike;
-                                if (strike > maxStrike) maxStrike = strike;
-                            }
-                        });
+                        const val = row[lastColIndex]; // Value on latest date
+                        const weight = Math.abs(val);
+
+                        proxySpot += strike * weight;
+                        totalWeight += weight;
                     });
                 }
 
-                // Fallback if no visible data found
-                if (minStrike === Infinity && result.y && result.y.length > 0) {
-                    minStrike = result.y[0];
-                    maxStrike = result.y[result.y.length - 1];
-                } else if (minStrike === Infinity) {
-                    // No data at all
-                    minStrike = 0; maxStrike = 100;
+                if (totalWeight > 0) {
+                    proxySpot = proxySpot / totalWeight;
+                    setVisibleRange([proxySpot * 0.9, proxySpot * 1.1]);
+                } else {
+                    // Fallback to min/max if calculation fails
+                    if (result.y && result.y.length > 0) {
+                        setVisibleRange([result.y[0], result.y[result.y.length - 1]]);
+                    }
                 }
-
-                // Add buffer
-                const buffer = (maxStrike - minStrike) * 0.1;
-                setVisibleRange([minStrike - buffer, maxStrike + buffer]);
 
             } catch (err) {
                 console.error(err);
@@ -75,11 +73,9 @@ const GexHeatmap = ({ ticker }) => {
             y: data.y,
             type: 'heatmap',
             colorscale: [
-                [0, 'rgb(255, 0, 0)'],       // Negative GEX = Red
-                [0.45, 'rgba(255, 0, 0, 0.1)'], // Fade to Transparent
-                [0.5, 'rgba(255, 255, 255, 0)'], // Zero = Transparent
-                [0.55, 'rgba(0, 0, 255, 0.1)'], // Fade from Transparent
-                [1, 'rgb(0, 0, 255)']        // Positive GEX = Blue
+                [0, '#FF4136'],    // Negative (Red)
+                [0.5, '#111111'],  // Zero (Very Dark Grey - High Contrast against Blue/Red)
+                [1, '#00B5F5']     // Positive (Bright Cyan/Blue)
             ],
             zmid: 0,
             colorbar: {

@@ -128,6 +128,19 @@ const Overview = () => {
                 </p>
             </div>
 
+            {/* BETA WARNING BANNER */}
+            <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg flex items-start gap-3">
+                <div className="text-yellow-500 text-xl">⚠️</div>
+                <div>
+                    <h3 className="font-bold text-yellow-500 text-sm uppercase tracking-wider mb-1">
+                        BETA: Work in Progress
+                    </h3>
+                    <p className="text-sm text-gray-300">
+                        This model is currently under construction. Data feeds and scores are being actively calibrated and may change without notice.
+                    </p>
+                </div>
+            </div>
+
             {/* Overall Health Banner */}
             <div className="mb-8 p-6 border-2 border-cyan-500 rounded-lg bg-gray-900/50">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

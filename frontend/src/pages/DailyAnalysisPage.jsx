@@ -104,9 +104,9 @@ const DailyAnalysisPage = () => {
                             {/* Technicals */}
                             <ContextGroup title="Price & Trend">
                                 <DataRow label="Close" value={`$${context.price?.close}`} />
-                                <DataRow label="EMA Stack" value={context.trend?.ema_stack?.verdict} />
-                                <DataRow label="ADX" value={`${context.trend?.adx?.val} (${context.trend?.adx?.trend_strength})`} />
-                                <DataRow label="Ichimoku" value={context.trend?.ichimoku?.status} />
+                                <DataRow label="EMA Stack" value={context.technicals?.ema_stack?.verdict} />
+                                <DataRow label="ADX" value={`${context.technicals?.adx?.val} (${context.technicals?.adx?.trend_strength})`} />
+                                <DataRow label="Ichimoku" value={context.technicals?.ichimoku?.status} />
                                 <DataRow label="vs 52W High" value={context.price?.dist_52w_high_label} color={String(context.price?.dist_52w_high_pct || "").startsWith('-') ? '#f44336' : '#4caf50'} />
                                 <DataRow label="52W Range" value={`$${context.price?.['52w_low']} - $${context.price?.['52w_high']}`} />
                             </ContextGroup>
@@ -117,14 +117,14 @@ const DailyAnalysisPage = () => {
                                 <DataRow label="Vol Regime" value={context.regime?.vol?.regime} />
                                 <DataRow label="ATR (14)" value={context.regime?.vol?.atr_14} />
                                 <DataRow label="ATR Rank" value={context.regime?.vol?.rank_6m} />
-                                <DataRow label="DCS Status" value={context.trend?.dcs?.status} color={context.trend?.dcs?.score > 50 ? '#f44336' : '#4caf50'} />
+                                <DataRow label="DCS Status" value={context.technicals?.dcs?.status} color={context.technicals?.dcs?.score > 50 ? '#f44336' : '#4caf50'} />
                             </ContextGroup>
 
                             {/* Options & Sentiment */}
                             <ContextGroup title="Options & Sentiment">
                                 <DataRow label="Net GEX" value={context.options?.gex?.net_regime} />
-                                <DataRow label="Call Wall" value={context.options?.gex?.call_wall_dist} />
-                                <DataRow label="Put Wall" value={context.options?.gex?.put_wall_dist} />
+                                <DataRow label="Call Wall" value={context.options?.gex?.call_wall} />
+                                <DataRow label="Put Wall" value={context.options?.gex?.put_wall} />
                                 <DataRow label="PCR (Vol)" value={context.options?.sentiment?.pcr_vol} />
                                 <DataRow label="0DTE Expected" value={context.options?.exp_moves?.['0dte_range']} />
                             </ContextGroup>
@@ -133,8 +133,8 @@ const DailyAnalysisPage = () => {
                             <ContextGroup title="Seasonality">
                                 <DataRow label="Next Day" value={context.seasonality?.next_day} />
                                 <DataRow label="Next Week" value={context.seasonality?.next_week} />
-                                <DataRow label="TSMOM Signal" value={context.trend?.tsmom?.signal} />
-                                <DataRow label="TSMOM 12M" value={context.trend?.tsmom?.['12m_return']} />
+                                <DataRow label="TSMOM Signal" value={context.technicals?.tsmom?.signal} />
+                                <DataRow label="TSMOM 12M" value={context.technicals?.tsmom?.['12m_return']} />
                             </ContextGroup>
 
                             {/* Performance */}

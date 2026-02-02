@@ -61,6 +61,7 @@ export const NAV_DATA = {
             id: 'trading',
             items: [
                 { label: 'Expected Moves', to: '/analysis/expected-moves', icon: Target },
+                { label: 'Real-Time Dealer Flow', to: '/analysis/realtime-flow', icon: Zap },
                 { label: 'EM Reliability', to: '/analysis/reliability', icon: ShieldCheck },
                 { label: 'Gamma Exposure (GEX)', to: '/analysis/gex', icon: Layers },
                 { label: 'Option Skew & PCR', to: '/analysis/skew', icon: Activity },

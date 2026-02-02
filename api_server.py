@@ -36,8 +36,18 @@ from mie_lib.analytics.gex.api_endpoints import router as gex_router
 from mie_lib.analytics.skew.api_endpoints import router as skew_router
 from datetime import date, timedelta
 from typing import Dict, List, Any, Optional
+from contextlib import asynccontextmanager
+import asyncio
+from fastapi import WebSocket, WebSocketDisconnect
 
 from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_volume_conclusion
+
+# Real-time Engine Import
+from mie_lib.realtime.theta_streamer import ThetaStreamer
+
+# Global ThetaStreamer Instance
+# Initializing with default major indices/ETFs
+theta_streamer = ThetaStreamer()
 # ... (rest of imports are fine, just updating the specific block if needed, but replace_file_content works on blocks)
 # Actually, I'll just update the endpoint and the import line separately or together if they are close.
 # The import is at line 27. The endpoint is at the end.
@@ -48,13 +58,36 @@ from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_vo
 # I'll use multi_replace_file_content.
 
 # -----------------------------------------------------------------
-# FastAPI Initialization
+# FastAPI Initialization & Lifespan
 # -----------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager to handle startup and shutdown events.
+    Starts the ThetaStreamer background task.
+    """
+    # Startup
+    print("Starting ThetaStreamer...")
+    # Run the streamer in a background task
+    streamer_task = asyncio.create_task(theta_streamer.start_stream(tickers=["SPY", "SPX"]))
+    
+    yield
+    
+    # Shutdown
+    print("Stopping ThetaStreamer...")
+    await theta_streamer.stop()
+    # Wait for the task to finish (optional but good practice)
+    try:
+        await streamer_task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(
     title="MIE Analytics API",
     description="Serves pre-computed Markov and HMM data as JSON/REST endpoints.",
     version="1.0.0",
+    lifespan=lifespan
 )
 
 # Include Routers
@@ -141,6 +174,8 @@ origins = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://localhost",
+    "http://localhost",
 ]
 
 # Add environment-specified origins
@@ -407,6 +442,7 @@ def get_markov_multistep(
     """Retrieves the pre-computed multi-step forecast probabilities."""
     
     ticker = ticker.upper()
+    state_mode = state_mode.strip().lower() # Normalize to match standardized file naming
     
     # 1. Determine the path to the multi-step file
     path = markov_out_dir(ticker) / f"multi_step_order{order}_{state_mode}_thr{threshold_bps}.parquet"
@@ -415,9 +451,16 @@ def get_markov_multistep(
     data = _read_parquet_and_format(path)
     
     if data is None:
+        # Detailed error for debugging context (including path being checked)
+        abs_path = path.resolve() if path.exists() else path
         raise HTTPException(
             status_code=404, 
-            detail=f"Multi-Step Forecast not found for {ticker} (Order {order}, Mode {state_mode}). Run the CLI job first."
+            detail=(
+                f"Multi-Step Forecast not found for {ticker}. "
+                f"Params: Order={order}, Mode={state_mode}, Thr={threshold_bps}. "
+                f"Checked Path: {path}. "
+                "Run the CLI job first."
+            )
         )
     
     return JSONResponse(content={
@@ -784,6 +827,103 @@ def get_dcs_latest_status(ticker: str) -> JSONResponse:
     except Exception as e:
         print(f"DCS Latest Error: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+    """
+    Get HISTORICAL DCS. Tries pre-computed Parquet, falls back to on-the-fly.
+    """
+    
+# -----------------------------------------------------------------
+# Real-time WebSocket Endpoints
+# -----------------------------------------------------------------
+
+@app.get("/api/v1/stream/history/{ticker}")
+def get_stream_history(ticker: str) -> List[Dict[str, Any]]:
+    """
+    Returns intraday history (1m candles) for the specified ticker.
+    Used for initializing the Real-Time Chart (Backfill).
+    """
+    ticker = ticker.upper()
+    try:
+        history = theta_streamer.get_intraday_history(ticker)
+        return history
+    except Exception as e:
+        print(f"Error fetching history for {ticker}: {e}")
+        return []
+
+
+@app.websocket("/api/ws/theta")
+async def websocket_theta_stream(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time ThetaData updates (HIRO Dealer Flow).
+    Currently streams SPY data by default.
+    """
+    await websocket.accept()
+    # Default to SPY for now as per frontend component
+    ticker = "SPY"
+    
+    # Check if ticker is in our monitored list (should be added by startup event)
+    if ticker not in theta_streamer.tickers:
+        # If not monitored, try to add it (dynamic subscription)
+        # Note: start_stream is already running, we might need a method to add tickers dynamically
+        # For now, we assume SPY is added at startup.
+        pass
+
+    try:
+        while True:
+            # Fetch current state from the engine
+            data = theta_streamer.get_latest_data(ticker)
+            price = data.get("price", 0.0)
+            flow = data.get("hiro_flow", 0.0)
+            
+            # Send data to client
+            # The frontend expects: { time: unix_timestamp, price: float, hiro_flow: float }
+            import time
+            payload = {
+                "time": int(time.time()), # Current server time (Seconds)
+                "price": price if price is not None else 0.0,
+                "hiro_flow": flow if flow is not None else 0.0
+            }
+            
+            await websocket.send_json(payload)
+            
+            # Rate limit to ~100ms (10fps) to avoid flooding
+            await asyncio.sleep(0.1)
+            
+    except WebSocketDisconnect:
+        print("Client disconnected from Theta Stream")
+
+
+    last_state = {}
+    
+    try:
+        while True:
+            # Fetch current state from the engine
+            current_full_state = theta_streamer.get_state()
+            current_ticker_state = current_full_state.get(ticker, {})
+            
+            # Simple check for change (timestamp or value)
+            # For efficiency, we can check if values differed from last loop
+            # Adding a timestamp if not present to force heartbeat or meaningful data
+            
+            if current_ticker_state != last_state:
+                # Add timestamp
+                payload = current_ticker_state.copy()
+                payload["timestamp"] = datetime.now().isoformat()
+                
+                await websocket.send_json(payload)
+                last_state = current_ticker_state
+            
+            # Poll every 100ms
+            await asyncio.sleep(0.1)
+            
+    except WebSocketDisconnect:
+        print(f"Client disconnected from stream {ticker}")
+    except Exception as e:
+        print(f"WebSocket Error: {e}")
+        try:
+             await websocket.close()
+        except:
+            pass
 
 @app.get("/api/v1/dcs/history/{ticker}")
 def get_dcs_history(ticker: str) -> JSONResponse:

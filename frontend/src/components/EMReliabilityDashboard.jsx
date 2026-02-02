@@ -84,7 +84,11 @@ const EMReliabilityDashboard = () => {
                 const tickers = json.tickers || [];
                 setAvailableTickers(tickers);
                 if (tickers.length > 0) {
-                    setSelectedTicker(tickers[0]);
+                    if (tickers.includes('SPY')) {
+                        setSelectedTicker('SPY');
+                    } else {
+                        setSelectedTicker(tickers[0]);
+                    }
                 }
             } catch (err) {
                 console.error("Error fetching tickers:", err);

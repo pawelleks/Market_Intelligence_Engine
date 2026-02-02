@@ -57,6 +57,7 @@ import EmaRespectCalculator from './pages/EmaRespectCalculator';
 import PredictionAnalysisDashboard from './pages/PredictionAnalysisDashboard';
 import JpmDashboardOverview from './components/economy/JpmDashboard/Overview';
 import JpmIndicatorDetail from './components/economy/JpmDashboard/IndicatorDetail';
+import RealTimeFlowPage from './pages/RealTimeFlowPage'; // New Real-Time Page
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -707,6 +708,7 @@ function AppContent() {
               /></ProtectedLayout>}
             />
             <Route path="/analysis/expected-moves" element={<ProtectedLayout><ExpectedMovesPage /></ProtectedLayout>} />
+            <Route path="/analysis/realtime-flow" element={<ProtectedLayout><RealTimeFlowPage /></ProtectedLayout>} />
             <Route path="/analysis/expected-moves-massive" element={<ProtectedLayout><ExpectedMovesPageMassive /></ProtectedLayout>} />
             <Route path="/analysis/reliability" element={<ProtectedLayout><EMReliabilityPage /></ProtectedLayout>} />
             <Route

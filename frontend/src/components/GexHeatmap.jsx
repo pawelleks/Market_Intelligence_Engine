@@ -8,7 +8,29 @@ const GexHeatmap = ({ ticker }) => {
     const [error, setError] = useState(null);
     const [visibleRange, setVisibleRange] = useState(null);
 
-    // Fetch Heatmap Data
+    // Helper: Format GEX Value
+    const formatGexValue = (val) => {
+        if (!val && val !== 0) return 'N/A';
+        const absVal = Math.abs(val);
+        if (absVal >= 1e9) return `$${(val / 1e9).toFixed(2)}B`;
+        if (absVal >= 1e6) return `$${(val / 1e6).toFixed(1)}M`;
+        if (absVal >= 1e3) return `$${(val / 1e3).toFixed(0)}K`;
+        return val.toFixed(0);
+    };
+
+    // Helper: Calculate robust range (1st and 99th percentile) to ignore outliers
+    const calculateRobustRange = (matrix) => {
+        const flat = matrix.flat().filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
+        if (flat.length === 0) return [-1e9, 1e9]; // Fallback
+
+        const p1 = flat[Math.floor(flat.length * 0.01)];
+        const p99 = flat[Math.floor(flat.length * 0.99)];
+
+        // Ensure symmetry around zero for GEX (Red/Blue)
+        const limit = Math.max(Math.abs(p1), Math.abs(p99));
+        return [-limit, limit];
+    };
+
     // Fetch Heatmap Data
     useEffect(() => {
         const fetchData = async () => {
@@ -19,6 +41,17 @@ const GexHeatmap = ({ ticker }) => {
                     throw new Error('Failed to fetch historical GEX data');
                 }
                 const result = await response.json();
+
+                // Pre-calculate Hover Text Matrix
+                if (result.z) {
+                    result.text = result.z.map(row => row.map(val => formatGexValue(val)));
+
+                    // Calculate Robust Z-Limits
+                    const [zMin, zMax] = calculateRobustRange(result.z);
+                    result.zMin = zMin;
+                    result.zMax = zMax;
+                }
+
                 setData(result);
 
                 // Calculate visible range based on PROXY SPOT from latest data
@@ -71,6 +104,7 @@ const GexHeatmap = ({ ticker }) => {
             z: data.z,
             x: data.x,
             y: data.y,
+            text: data.text, // Custom formatted text
             type: 'heatmap',
             colorscale: [
                 [0, '#FF4136'],    // Negative (Red)
@@ -78,13 +112,15 @@ const GexHeatmap = ({ ticker }) => {
                 [1, '#00B5F5']     // Positive (Bright Cyan/Blue)
             ],
             zmid: 0,
+            zmin: data.zMin, // Robust Scale Min
+            zmax: data.zMax, // Robust Scale Max
             colorbar: {
-                title: 'Net GEX ($M)',
+                title: 'Net GEX',
                 titleside: 'right',
                 tickfont: { color: '#ccc' },
                 titlefont: { color: '#ccc' }
             },
-            hovertemplate: 'Date: %{x}<br>Strike: %{y}<br>GEX: %{z:.2f} M<extra></extra>'
+            hovertemplate: 'Date: %{x}<br>Strike: %{y}<br>GEX: %{text}<extra></extra>'
         }
     ];
 

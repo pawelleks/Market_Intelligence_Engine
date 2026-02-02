@@ -142,6 +142,14 @@ def fetch_option_chain(
     # https://api.polygon.io/v3/snapshot/options/{underlyingAsset}?expiration_date={ymd}
     url = f"https://api.polygon.io/v3/snapshot/options/{api_ticker}?expiration_date={expiry.isoformat()}&apiKey={api_key}&limit=250"
     
+    # Server-Side Filtering for Performance (Critical for SPY/Indices)
+    if spot_price:
+        # +/- 30% range captures relevant GEX. 
+        # Deep OTM LEAPS kill performance (pagination) and add little value.
+        low_strike = spot_price * 0.70
+        high_strike = spot_price * 1.30
+        url += f"&strike_price.gte={low_strike}&strike_price.lte={high_strike}"
+    
     logger = logging.getLogger(__name__)
     logger.info(f"Fetching snapshot chain for {ticker} exp {expiry}...")
     

@@ -82,10 +82,10 @@ def get_latest_skew(ticker: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{ticker}/history")
-def get_skew_history(ticker: str):
+def get_skew_history(ticker: str, days: int = 26):
     # ... existing implementation ...
     try:
-        df = storage.load_ticker_history(ticker.upper(), days=120)
+        df = storage.load_ticker_history(ticker.upper(), days=days)
         if df is None or df.empty:
             return []
             

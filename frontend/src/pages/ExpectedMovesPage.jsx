@@ -61,10 +61,14 @@ const ExpectedMovesPageContent = () => {
             }
             const jsonData = await response.json();
             setData(jsonData);
-            // Default select first ticker (Sorted)
+            // Default select SPY if available, otherwise first sorted
             if (jsonData.tickers && Object.keys(jsonData.tickers).length > 0) {
                 const sortedKeys = Object.keys(jsonData.tickers).sort();
-                setSelectedTicker(sortedKeys[0]);
+                if (jsonData.tickers['SPY']) {
+                    setSelectedTicker('SPY');
+                } else {
+                    setSelectedTicker(sortedKeys[0]);
+                }
             }
         } catch (err) {
             setError(err.message);

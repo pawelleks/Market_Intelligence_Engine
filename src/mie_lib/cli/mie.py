@@ -2973,6 +2973,7 @@ def main(argv=None):
         print(f"Starting Economic Insights Generation (Tier {args.tier})...")
         from mie_lib.analytics.jpm_dashboard.economic_payload import build_economic_payload
         from mie_lib.services.economic_analyst import EconomicAnalyst
+        from mie_lib.analytics.jpm_dashboard.scoring import calculate_health_score
         from mie_lib.services.audit_logger import get_audit_logger
         from scipy.stats import percentileofscore
         import pandas as pd
@@ -3045,7 +3046,19 @@ def main(argv=None):
                 
                 current = series_data.iloc[-1]
                 percentile = percentileofscore(series_data, current)
-                health_score = int(percentile * 0.8)  # Simplified (API has full logic)
+
+                # Calculate YoY changes for detailed scoring
+                yoy_change = None
+                yoy_absolute_change = None
+                
+                if len(series_data) >= 13:
+                     # Assumes monthly data, or adequate history
+                     year_ago = series_data.iloc[-13]
+                     if year_ago is not None and year_ago != 0:
+                         yoy_change = ((current - year_ago) / year_ago) * 100
+                         yoy_absolute_change = current - year_ago
+                
+                health_score = calculate_health_score(ind_id, current, percentile, yoy_change, yoy_absolute_change)
                 
                 # Determine trend
                 if len(series_data) >= 3:

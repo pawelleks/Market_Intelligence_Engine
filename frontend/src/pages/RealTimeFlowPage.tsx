@@ -1,0 +1,62 @@
+import React, { useState } from 'react';
+import { RealTimeDealerFlow } from '../components/charts/RealTimeDealerFlow';
+
+export const RealTimeFlowPage = () => {
+    const [ticker, setTicker] = useState('SPY');
+
+    return (
+        <div className="p-6 space-y-6 bg-slate-950 min-h-screen flex flex-col">
+            {/* Header: Title Left, Selector Right */}
+            <header className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-slate-100 mb-1">Real-Time Flow Analysis</h1>
+                    <p className="text-slate-400">High-frequency dealer hedging impact (HIRO) and price action.</p>
+                </div>
+
+                {/* Ticker Selector */}
+                <div className="bg-slate-900 border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-sm">
+                    <label className="text-sm font-medium text-slate-400">Target Ticker</label>
+                    <select
+                        value={ticker}
+                        onChange={(e) => setTicker(e.target.value)}
+                        className="bg-slate-950 border border-slate-700 rounded px-3 py-1 text-slate-200 focus:ring-2 focus:ring-cyan-500 outline-none text-sm"
+                    >
+                        <option value="SPY">SPY (S&P 500 ETF)</option>
+                        <option value="SPX">SPX (Index)</option>
+                        <option value="QQQ">QQQ (Nasdaq)</option>
+                        <option value="IWM">IWM (Russell)</option>
+                    </select>
+                </div>
+            </header>
+
+            {/* Main Chart Area - Full Width */}
+            <div className="w-full flex-grow">
+                <RealTimeDealerFlow ticker={ticker} />
+            </div>
+
+            {/* Metrics - Bottom */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+                    <h3 className="text-slate-100 font-medium mb-2">System Metrics</h3>
+                    <ul className="space-y-2 text-sm">
+                        <li className="flex justify-between">
+                            <span className="text-slate-500">Update Rate</span>
+                            <span className="text-slate-300">100ms</span>
+                        </li>
+                        <li className="flex justify-between">
+                            <span className="text-slate-500">Source</span>
+                            <span className="text-emerald-400">ThetaData Direct</span>
+                        </li>
+                    </ul>
+                </div>
+                {/* Placeholder for GEX Info if needed later */}
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 opacity-50">
+                    <h3 className="text-slate-100 font-medium mb-2">Gamma Exposure</h3>
+                    <p className="text-xs text-slate-500">Real-time GEX Loading...</p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default RealTimeFlowPage;

@@ -6,6 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    platform: linux/amd64
     container_name: mie-api
     ports:
       - "8000:8000"
@@ -22,9 +23,35 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app/src
+      - THETA_HOST=theta_terminal
+      - SYNTHETIC_MODE=false
     restart: unless-stopped
     networks:
       - mie-net
+    depends_on:
+      - theta_terminal
+
+  # 5. Theta Terminal Sidecar
+  theta_terminal:
+    build:
+      context: ./deploy/theta_sidecar
+      dockerfile: Dockerfile
+    container_name: mie-theta
+    platform: linux/amd64
+    ports:
+      - "25510:25510"
+    env_file:
+      - .env
+    # Healthcheck omitted or simple TCP check because terminal might not have curl or endpoint.
+    # The Dockerfile installs curl.
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:25510/v2/list/roots"] 
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 5
+    networks:
+      - mie-net
+    restart: unless-stopped
 
   # 2. Frontend (Production Build served by Nginx)
   web:
@@ -68,6 +95,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cron
+    platform: linux/amd64
     container_name: mie-cron
     volumes:
       - ./data:/app/data               # Share Data with API

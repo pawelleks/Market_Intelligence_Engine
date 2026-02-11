@@ -3,12 +3,13 @@ pytest>=7.0
 pyyaml>=6.0
 
 # Core numerical stack
-numpy>=1.23
+numpy>=1.23,<2.0  # Pin to <2.0 for thetadata 0.9.11 compatibility
 
 # Runtime dependencies for ingestion
 pandas>=1.5
 pyarrow>=9.0
 yfinance>=0.2.18
+pytz>=2023.3
 
 # Analytics: HMM
 hmmlearn>=0.3.2
@@ -45,5 +46,6 @@ openai>=1.0
 python-dotenv>=1.0
 sendgrid>=6.10.0
 
-# Real-time Data
+# Real-time Data (thetadata is deprecated/archived, kept for streaming only)
 websockets>=10.0
+thetadata==0.9.11

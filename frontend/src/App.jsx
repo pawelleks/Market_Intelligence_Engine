@@ -58,6 +58,9 @@ import PredictionAnalysisDashboard from './pages/PredictionAnalysisDashboard';
 import JpmDashboardOverview from './components/economy/JpmDashboard/Overview';
 import JpmIndicatorDetail from './components/economy/JpmDashboard/IndicatorDetail';
 import RealTimeFlowPage from './pages/RealTimeFlowPage'; // New Real-Time Page
+import ExpectedMovesV2Page from './pages/ExpectedMovesV2Page'; // New V2 Page
+import ImpliedProbabilityPage from './pages/ImpliedProbabilityPage';
+
 
 // Auth Pages
 import LoginPage from './pages/LoginPage';
@@ -709,6 +712,9 @@ function AppContent() {
             />
             <Route path="/analysis/expected-moves" element={<ProtectedLayout><ExpectedMovesPage /></ProtectedLayout>} />
             <Route path="/analysis/realtime-flow" element={<ProtectedLayout><RealTimeFlowPage /></ProtectedLayout>} />
+            <Route path="/analysis/expected-moves-v2" element={<ProtectedLayout><ExpectedMovesV2Page /></ProtectedLayout>} />
+            <Route path="/analysis/implied-probability" element={<ProtectedLayout><ImpliedProbabilityPage /></ProtectedLayout>} />
+
             <Route path="/analysis/expected-moves-massive" element={<ProtectedLayout><ExpectedMovesPageMassive /></ProtectedLayout>} />
             <Route path="/analysis/reliability" element={<ProtectedLayout><EMReliabilityPage /></ProtectedLayout>} />
             <Route

@@ -1,6 +1,7 @@
 # Backend Dockerfile
-FROM python:3.10-slim
+FROM python:3.11-slim
 
+ARG TARGETARCH
 WORKDIR /app
 
 # Install build essential for compiling some python packages if needed

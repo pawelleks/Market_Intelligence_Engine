@@ -1,5 +1,6 @@
 # Stage 1: Build the React Application
 FROM node:22-alpine as build
+ARG TARGETARCH
 
 WORKDIR /app
 

@@ -34,11 +34,16 @@ COPY cli/ ./cli/
 RUN chmod +x cli/orchestrator.sh
 # Copy scripts folder
 COPY scripts/ ./scripts/
+# Copy jobs folder (daily pipeline jobs)
+COPY jobs/ ./jobs/
 
 # Create crontab
 # 17:00 EST = 22:00 UTC (Standard)
 # 0 22 * * *
-RUN echo "0 22 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab
+RUN echo "0 22 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab && \
+    echo "10 22 * * * python /app/jobs/process_expected_moves_static.py >> /proc/1/fd/1 2>&1" >> crontab && \
+    echo "30 22 * * * python /app/jobs/fetch_market_eod_chains.py >> /proc/1/fd/1 2>&1" >> crontab && \
+    echo "35 22 * * * python /app/jobs/process_implied_probabilities.py >> /proc/1/fd/1 2>&1" >> crontab
 
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1

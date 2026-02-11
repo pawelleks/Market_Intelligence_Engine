@@ -6,7 +6,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    platform: linux/amd64
     container_name: mie-api
     ports:
       - "8000:8000"
@@ -19,6 +18,8 @@ services:
       - ./scripts:/app/scripts         # Administrative scripts
       - ./api_server.py:/app/api_server.py # Mount entrypoint for updates
       - ./public_docs:/app/public_docs # Output for reports
+      - ./jobs:/app/jobs               # Mount jobs for execution
+      - ./public/data:/app/public/data # Shared Public Data
     env_file:
       - .env
     environment:
@@ -37,9 +38,9 @@ services:
       context: ./deploy/theta_sidecar
       dockerfile: Dockerfile
     container_name: mie-theta
-    platform: linux/amd64
     ports:
       - "25510:25510"
+      - "11000:11000"
     env_file:
       - .env
     # Healthcheck omitted or simple TCP check because terminal might not have curl or endpoint.
@@ -68,6 +69,7 @@ services:
       - VITE_API_URL=http://api:8000
     volumes:
       - ./public_docs:/usr/share/nginx/html/public_docs
+      - ./public/data:/usr/share/nginx/html/data
     depends_on:
       - api
     networks:
@@ -95,7 +97,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cron
-    platform: linux/amd64
     container_name: mie-cron
     volumes:
       - ./data:/app/data               # Share Data with API
@@ -104,6 +105,7 @@ services:
       - ./cli:/app/cli                 # Mount CLI for updates
       - ./scripts:/app/scripts         # Administrative scripts
       - ./public_docs:/app/public_docs # Output for reports
+      - ./public/data:/app/public/data # Shared Public Data
     env_file:
       - .env
     environment:

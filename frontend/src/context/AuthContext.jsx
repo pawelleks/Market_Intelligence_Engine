@@ -21,21 +21,37 @@ export const AuthProvider = ({ children }) => {
                         // Configure axios default header
                         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-                        // FIX: Fetch full user profile including Terms Status
+                        // Bypass Check: If this is the dev token, skip backend validation
+                        if (decoded.sub === 'bypass@local.dev') {
+                            console.warn("Using Developer Bypass - Skipping Backend Validation");
+                            setUser(decoded);
+                            setLoading(false);
+                            return;
+                        }
+
+                        // Fetch full user profile with timeout
                         try {
-                            const response = await axios.get('/api/users/me');
+                            const response = await axios.get('/api/users/me', { timeout: 2000 });
                             // Merge decoded (jwt) with response data
                             setUser({ ...decoded, ...response.data });
                         } catch (err) {
                             console.error("Failed to fetch user profile", err);
-                            // Fallback to decoded token if API fails (though API fail might mean invalid token)
-                            setUser(decoded);
+                            // If token is invalid (401) or forbidden (403), logout immediately
+                            if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+                                logout();
+                            } else {
+                                // For other errors (network, 500, timeout), fall back to decoded token to allow partial access
+                                console.warn("Using offline/decoded token due to API error/timeout.");
+                                setUser(decoded);
+                            }
                         }
                     }
                 } catch (e) {
                     console.error("Invalid token", e);
                     logout();
                 }
+            } else {
+                setUser(null);
             }
             setLoading(false);
         };
@@ -107,7 +123,22 @@ export const AuthProvider = ({ children }) => {
 
     return (
         <AuthContext.Provider value={{ user, token, login, bypassLogin, logout, loading, refreshUser }}>
-            {!loading && children}
+            {loading ? (
+                <div style={{
+                    height: '100vh',
+                    width: '100vw',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    backgroundColor: '#0b1220',
+                    color: '#4caf50',
+                    flexDirection: 'column',
+                    gap: '15px'
+                }}>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>Market Intelligence Engine</div>
+                    <div style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Initializing Application Context...</div>
+                </div>
+            ) : children}
         </AuthContext.Provider>
     );
 };

@@ -1,215 +1,1239 @@
+import os
 import asyncio
 import logging
 import json
-import os
-import random
+import traceback
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-import websockets
+from typing import List, Optional, Dict
+from collections import defaultdict, deque
+
+# Official Library
+try:
+    from thetadata import ThetaClient, StreamMsg
+except ImportError:
+    # Critical dependency missing
+    class ThetaClient: pass
+    class StreamMsg: pass
+
+# Enums (Handle strict import errors for partial versions)
+try:
+    from thetadata import StreamMsgType, OptionReqType, OptionRight, SecurityType
+except ImportError:
+    # Define dummy enums if missing or package is old
+    class StreamMsgType:
+        TRADE = "TRADE"
+        QUOTE = "QUOTE"
+    class OptionReqType:
+        QUOTE = 101
+        OHLC = 102
+        TRADE = 103
+    class OptionRight:
+        CALL = "C"
+        PUT = "P"
+    class SecurityType:
+        OPTION = "OPTION"
+        STOCK = "STOCK"
+        INDEX = "INDEX"
 
 LOG = logging.getLogger(__name__)
 
 class ThetaStreamer:
     """
-    Real-Time Dealer Flow Engine using Direct WebSockets to Theta Terminal.
-    Bypasses 'thetadata' python library dependency.
+    Manages real-time data streaming from Theta Terminal using the OFFICIAL TCP Client.
+    Replacing the custom WebSocket implementation to avoid protocol mismatch.
     """
+    
+    def __init__(self, tickers: List[str]):
+        self.tickers = tickers
+        self.active = False
+        self._queue = asyncio.Queue()  # For internal processing if needed
+        self.listeners = [] # List of queues to broadcast to
+        self.state = {} # Aggregated State for Polling
+        # Flow history: ticker -> deque of {time, price, flow}
+        self.flow_history: Dict[str, deque] = {t: deque(maxlen=5000) for t in tickers}
+        
+        # Determine Host (Docker vs Local)
+        self.theta_host = os.getenv("THETA_HOST", "theta_terminal")
+        self.theta_rest_port = int(os.getenv("THETA_REST_PORT", "25510"))
+        self.theta_timeout = 60
+        
+        # TCP Client provided by thetadata library
+        self.client: Optional[ThetaClient] = None
+        self.streaming_thread = None
+        self.loop = None
 
-    def __init__(self, port: int = 25520):
-        self.port = port
-        self.host = os.getenv("THETA_HOST", "localhost")
-        self.tickers: List[str] = []
-        self.running = False
-        
-        # State
-        self.cumulative_hiro: Dict[str, float] = {}   # {Ticker: Float}
-        self.latest_price: Dict[str, float] = {}      # {Ticker: Float}
-        self.latest_quotes: Dict[str, Dict] = {}      # {Ticker: {bid: float, ask: float}}
-        
-        # WebSocket URL (Theta Terminal usually listens on /v1/events for streams)
-        self.ws_url = f"ws://{self.host}:{self.port}/v1/events"
-
-    def get_latest_data(self, ticker: str) -> Dict[str, Any]:
-        """Returns the current state for a ticker."""
-        return {
-            "ticker": ticker,
-            "price": self.latest_price.get(ticker, 0.0),
-            "hiro_flow": self.cumulative_hiro.get(ticker, 0.0),
-            "time": int(datetime.now().timestamp())
-        }
-        
-    def get_intraday_history(self, ticker: str) -> List[Dict[str, Any]]:
+    async def start(self):
         """
-        Fetches intraday history (1m candles) using YFinance fallback.
-        (Theta REST API handling could be added here later).
+        Initializes the TCP connection and starts streaming.
         """
+        if self.active:
+            LOG.warning("ThetaStreamer already active.")
+            return
+
+        self.loop = asyncio.get_running_loop()
+        LOG.info(f"Starting Theta TCP Streamer (Target: {self.theta_host})...")
+        self.active = True
+        
         try:
-            import yfinance as yf
-            dat = yf.Ticker(ticker)
-            df = dat.history(period="1d", interval="1m")
-            if df.empty: return []
-
-            history = []
-            timestamps = df.index.astype('int64') // 10**9
-            for ts, row in zip(timestamps, df.itertuples()):
-                history.append({
-                    "time": int(ts), 
-                    "value": float(row.Close)
-                })
+            # Initialize Client (Connect Mode Only)
             
-            history.sort(key=lambda x: x['time'])
-            if history:
-                self.latest_price[ticker] = history[-1]['value']
-            return history
+            # Retrieve and Sanitize Password
+            env_user = os.getenv("THETADATA_USERNAME") or os.getenv("THETA_USER", "default")
+            env_pass = os.getenv("THETADATA_PASSWORD") or os.getenv("THETA_PASS", "default")
+            
+            # Strip quotes if present (common .env issue)
+            if env_pass and len(env_pass) > 2:
+                if (env_pass.startswith("'") and env_pass.endswith("'")) or \
+                   (env_pass.startswith('"') and env_pass.endswith('"')):
+                    env_pass = env_pass[1:-1]
+
+            self.client = ThetaClient(
+                username=env_user,
+                passwd=env_pass,
+                launch=False, 
+                host=self.theta_host,
+                port=11000,           # TCP Command Port
+                streaming_port=10000,
+                timeout=5
+            )
+
+            # 1. Connect to Command Port
+            LOG.info("Connecting to Theta Terminal Command Port...")
+            self.client.connect()
+            
+            # 2. Start the background stream thread
+            LOG.info("Connecting to Theta Terminal Stream Port...")
+            self.streaming_thread = self.client.connect_stream(self._on_stream_msg)
+            
+            # Wait a moment for connection
+            await asyncio.sleep(2)
+            
+            # Subscribe
+            await self._subscribe_all()
+
+            # Keep alive loop
+            asyncio.create_task(self._monitor_stream())
+            # REST Polling Fallback for Stock/Index prices (options stream doesn't carry stock prices)
+            asyncio.create_task(self._poll_price_loop())
+            # REST-based Option Flow Poller (bypasses broken thetadata stream)
+            asyncio.create_task(self._poll_option_flow_loop())
+
         except Exception as e:
-            LOG.error(f"Failed to fetch history for {ticker}: {e}")
-            return []
-
-    async def start_stream(self, tickers: List[str] = ["SPY", "SPX"]):
-        """Main loop: Connects, Subscribes, Listens."""
-        self.tickers = [t.upper() for t in tickers]
-        self.running = True
-        
-        # Initialize State
-        for t in self.tickers:
-            if t not in self.cumulative_hiro:
-                self.cumulative_hiro[t] = 0.0
-                self.latest_price[t] = 0.0
-                self.latest_quotes[t] = {'bid': 0.0, 'ask': 0.0}
-
-        LOG.info(f"Connecting to Theta Terminal WebSocket at {self.ws_url}...")
-
-        while self.running:
-            try:
-                async with websockets.connect(self.ws_url) as ws:
-                    LOG.info("WebSocket Connected!")
-                    
-                    # 1. Subscribe
-                    for ticker in self.tickers:
-                        # Subscribe to TRADES (Options)
-                        sub_trade = {
-                            "msg_type": "STREAM", 
-                            "sec_type": "OPTION", 
-                            "req_type": "TRADE", 
-                            "root": ticker
-                        }
-                        await ws.send(json.dumps(sub_trade))
-                        
-                        # Subscribe to QUOTES (Underlying/Option? usually Underlying quote is different)
-                        # We need Underlying Price. 
-                        # Requesting ROOT quote might give underlying? 
-                        # Or explicit "sec_type": "STOCK"? (SPY is stock, SPX is Index).
-                        # Trying generic subscription for now based on user prompt.
-                        sub_quote = {
-                             "msg_type": "STREAM",
-                             "sec_type": "STOCK", # Assuming ROOT is stock/index
-                             "req_type": "QUOTE",
-                             "root": ticker
-                        }
-                        await ws.send(json.dumps(sub_quote))
-                        
-                        LOG.info(f"Subscribed to {ticker}")
-
-                    # 2. Heartbeat Task
-                    heartbeat_task = asyncio.create_task(self._heartbeat(ws))
-                    
-                    # 3. Listen
-                    try:
-                        async for message in ws:
-                            if not self.running: break
-                            await self._handle_message(message)
-                    finally:
-                        heartbeat_task.cancel()
-                        
-            except Exception as e:
-                LOG.error(f"WebSocket Error: {e}")
-                LOG.info("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-
-    async def _heartbeat(self, ws):
-        """Sends Keep-Alive ping every 5 seconds."""
-        while True:
-            try:
-                # Some APIs expect specific text ping, others specific JSON.
-                # Standard WS Ping frame is usually handled by lib, but App-Level ping might be needed.
-                # User asked for "Keep-Alive" ping.
-                await ws.ping()
-                await asyncio.sleep(5)
-            except Exception:
-                break
-
-    async def _handle_message(self, raw_msg: str):
-        try:
-            data = json.loads(raw_msg)
-            
-            # Identify message type via parsing keys (Theta JSON structure varies)
-            # Typically has "type", "ms_of_day", "root", etc.
-            
-            # Check for Quote (Underlying Price)
-            # Quote usually has "bid", "ask"
-            if "bid" in data and "ask" in data:
-                await self._on_quote_msg(data)
-                return
-
-            # Check for Trade
-            if "size" in data and "price" in data:
-                await self._on_trade_msg(data)
-                return
-                
-        except Exception as e:
-            # LOG.debug(f"Parse Error ({raw_msg}): {e}")
-            pass
-
-    async def _on_quote_msg(self, data: Dict):
-        root = data.get("root")
-        if not root or root not in self.tickers: return
-        
-        bid = float(data.get("bid", 0))
-        ask = float(data.get("ask", 0))
-        
-        if bid > 0 and ask > 0:
-            self.latest_quotes[root] = {'bid': bid, 'ask': ask}
-            self.latest_price[root] = (bid + ask) / 2
-        
-        # Fallback 'last'
-        last = float(data.get("last", 0))
-        if last > 0:
-             self.latest_price[root] = last
-
-    async def _on_trade_msg(self, data: Dict):
-        """Calculates HIRO from Option Trade."""
-        # Ensure it's an Option Trade (has 'right' or 'expiry' usually, or from specific sub)
-        # Assuming we only get Option trades from our OPTION sub.
-        
-        root = data.get("root")
-        if not root or root not in self.tickers: return
-
-        # Parse
-        price = float(data.get("price", 0))
-        size = int(data.get("size", 0))
-        # Theta usually provides 'delta' in the stream if configured? 
-        # Or we need to calculate it?
-        # User prompt implicitly assumed 'delta' exists.
-        # If 'delta' is missing, HIRO = 0.
-        delta = float(data.get("delta", 0)) 
-        
-        # Condition codes (for unusual flow later)
-        condition = data.get("condition")
-        
-        # Determine Agitator (Side)
-        quotes = self.latest_quotes.get(root, {'bid': 0.0, 'ask': 0.0})
-        bid = quotes['bid']
-        ask = quotes['ask']
-        
-        agitator_side = 0
-        if ask > 0 and price >= ask: agitator_side = 1 # BUY
-        elif bid > 0 and price <= bid: agitator_side = -1 # SELL
-        
-        # Calculate Flow
-        # Flow = Size * Delta * Agitator
-        flow = size * delta * agitator_side * 1000 # Scaling factor?
-        
-        self.cumulative_hiro[root] = self.cumulative_hiro.get(root, 0.0) + flow
+            LOG.error(f"Failed to start Theta TCP Streamer: {e}")
+            LOG.error(traceback.format_exc())
+            self.active = False
+            # Ensure we close if failed
+            await self.stop()
 
     async def stop(self):
-        self.running = False
+        """
+        Stops the streamer.
+        """
+        LOG.info("Stopping Theta Streamer...")
+        self.active = False
+        if self.client:
+            try:
+                # This might block?
+                self.client.close_stream()
+            except:
+                pass
+        self.client = None
+
+    def _on_stream_msg(self, msg: StreamMsg):
+        """
+        Callback from the Java Bridge Thread.
+        WARNING: This runs in a separate thread.
+        """
+        try:
+            # DEBUG: Log every message type to confirm liveness
+            delta_val = getattr(msg, 'delta', 'N/A')
+            LOG.info(f"STREAM MSG RECEIVED: Type={msg.type} Root={getattr(msg.contract, 'root', 'N/A')} Delta={delta_val}")
+            
+            if msg.type == StreamMsgType.TRADE:
+                # --- ASSET TYPE DETECTION ---
+                # Detect if this is an OPTION or STOCK/INDEX trade
+                # We need to support both since we subbed to both.
+                # Use string conversion to avoid Enum mismatch if library is old/missing
+                raw_sec_type = getattr(msg.contract, "security_type", "UNKNOWN")
+                sec_type_str = str(raw_sec_type)
+                
+                # DEBUG: Audit Security Type
+                LOG.info(f"AUDIT TYPE: {msg.contract.root} -> {sec_type_str} Price={msg.trade.price}") 
+                
+                is_option = sec_type_str == "OPTION" or sec_type_str == "SecurityType.OPTION"
+                is_stock = sec_type_str in ("STOCK", "INDEX", "SecurityType.STOCK", "SecurityType.INDEX")
+
+                # --- OUTLIER FILTERING ---
+                # Check condition code to exclude "LATE", "OUT_OF_SEQUENCE", etc.
+                # Allowed: REGULAR, AUTOMATIC_EXECUTION, INTERMARKET_SWEEP, FORM_T, CROSS_TRADE
+                cond_name = str(msg.trade.condition.name)
+                # Whitelist of standard/good matches - STRICTER LIST
+                # Exclude FORM_T (Sold Out of Sequence) and ensure only active market prints
+                ALLOWED_CONDS = {
+                    "REGULAR", "AUTOMATIC_EXECUTION", "INTERMARKET_SWEEP", 
+                    "CROSS_TRADE", "YELLOW_FLAG_REGULAR", "ISO_ELIGIBLE"
+                }
+                
+                if cond_name not in ALLOWED_CONDS:
+                    return
+
+                # --- PRICE SANITY CHECK (Session-Aware Outlier Protection) ---
+                symbol_price_key = msg.contract.root
+                ticker_state = self.state.get(symbol_price_key, {})
+                last_known = ticker_state.get("price", 0.0)
+                last_update_ms = ticker_state.get("last_update_ms", 0)
+                current_price = msg.trade.price
+                now_ms = int(datetime.now().timestamp() * 1000)
+
+                if is_stock and last_known > 0:
+                    time_gap_ms = (now_ms - last_update_ms) if last_update_ms > 0 else float('inf')
+                    is_session_start = time_gap_ms > 30 * 60 * 1000  # >30 min gap = new session
+
+                    if not is_session_start:
+                        pct_diff = abs(current_price - last_known) / last_known
+                        # 5% threshold covers extended-hours volatility and overnight gaps
+                        if pct_diff > 0.05:
+                            LOG.warning(f"OUTLIER REJECTED: {symbol_price_key} {last_known}->{current_price} ({pct_diff*100:.1f}%)")
+                            return
+                    else:
+                        LOG.info(f"SESSION START: {symbol_price_key} accepting first price {current_price} (gap={time_gap_ms/1000:.0f}s)")
+                
+                # LOG ALL STOCK UPDATES FOR VERIFICATION
+                if is_stock:
+                    LOG.info(f"STOCK UPDATE: {symbol_price_key} @ {current_price} (Cond: {cond_name})")
+                elif is_option:
+                    # LOG.debug(f"OPTION UPDATE: {symbol_price_key} Strike: {msg.contract.strike} Price: {current_price}")
+                    pass
+
+                # Extract Trade Data
+                # Note: msg.contract might need null checks? Library usually valid.
+                data = {
+                    "type": "TRADE",
+                    "root": msg.contract.root,
+                    "strike": msg.contract.strike,
+                    "right": "C" if msg.contract.isCall else "P",
+                    "exp": str(msg.contract.exp), # YYYY-MM-DD
+                    "price": msg.trade.price,
+                    "size": msg.trade.size,
+                    "condition": cond_name,
+                    "ms_of_day": msg.trade.ms_of_day,
+                    "timestamp": datetime.now().isoformat(),
+                    "asset_type": "OPTION" if is_option else "STOCK"
+                }
+                
+                # Get latest state for Flow
+                current_flow = self.state.get(msg.contract.root, {}).get("net_flow", 0.0)
+                
+                # Push to Async Loop
+                # Push to Async Loop
+                if self.loop and self.active:
+                     self.loop.call_soon_threadsafe(
+                         self._update_and_broadcast,
+                         msg, cond_name, is_option, is_stock
+                     )
+
+            elif msg.type == StreamMsgType.QUOTE:
+                 # TODO: Add Quote Handling
+                 pass
+
+        except Exception as e:
+            # Avoid logging too heavily in high-freq callback
+            print(f"Error in stream callback: {e}")
+
+    def _update_and_broadcast(self, msg, cond_name, is_option, is_stock):
+        """
+        Updates state and broadcasts formatted message.
+        """
+        # 1. Update State
+        self._update_state(
+             msg.contract.root, 
+             msg.trade.price, 
+             msg.trade.size, 
+             "C" if msg.contract.isCall else "P",
+             "OPTION" if is_option else "STOCK"
+        )
+        
+        # 2. Get Updated Flow
+        updated_flow = self.state.get(msg.contract.root, {}).get("net_flow", 0.0)
+
+        # 3. Format Message
+        ts_now = datetime.now()
+        data = {
+            "type": "TRADE",
+            "root": msg.contract.root,
+            "strike": msg.contract.strike,
+            "right": "C" if msg.contract.isCall else "P",
+            "exp": str(msg.contract.exp),
+            "price": msg.trade.price,
+            "size": msg.trade.size,
+            "condition": cond_name,
+            "ms_of_day": msg.trade.ms_of_day,
+            "timestamp": ts_now.isoformat(),
+            "time": int(ts_now.timestamp()), # Frontend expects Unix Int
+            "asset_type": "OPTION" if is_option else "STOCK",
+            "hiro_flow": updated_flow
+        }
+        
+        self.broadcast_sync(data)
+
+
+    def broadcast_sync(self, msg: Dict):
+        """
+        Sync wrapper to schedule the async broadcast.
+        """
+        asyncio.create_task(self.broadcast(msg))
+
+    async def broadcast(self, msg: Dict):
+        """
+        Pushes message to all listener queues.
+        """
+        for q in self.listeners:
+            try:
+                await q.put(msg)
+            except Exception:
+                pass
+
+    def get_latest_data(self, ticker: str) -> Dict[str, float]:
+        """
+        Returns the current aggregated state for a ticker.
+        Used by polling endpoints.
+        """
+        if ticker not in self.state:
+            return {"price": 0.0, "hiro_flow": 0.0}
+        return {
+             "price": self.state[ticker]["price"],
+             "hiro_flow": self.state[ticker]["net_flow"]
+        }
+
+    def _record_flow_snapshot(self, ticker: str):
+        """Records a {time, price, flow} data point for intraday history."""
+        if ticker not in self.state:
+            return
+        price = self.state[ticker].get("price", 0.0)
+        flow = self.state[ticker].get("net_flow", 0.0)
+        if price <= 0:
+            return
+        ts = int(datetime.now().timestamp())
+        if ticker not in self.flow_history:
+            self.flow_history[ticker] = deque(maxlen=5000)
+        hist = self.flow_history[ticker]
+        # Avoid duplicate timestamps
+        if hist and hist[-1]["time"] == ts:
+            return
+        hist.append({"time": ts, "value": price, "flow": flow})
+
+    def get_flow_history(self, ticker: str) -> list:
+        """Returns stored intraday flow history for chart backfill."""
+        if ticker not in self.flow_history:
+            return []
+        return list(self.flow_history[ticker])
+
+    def _update_state(self, ticker: str, price: float, size: int, right: str, asset_type: str = "OPTION"):
+        """
+        Updates internal state (Price and Net Flow).
+        Flow Metric: Net Premium (Call Volume - Put Volume).
+        """
+        if ticker not in self.state:
+            self.state[ticker] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
+
+        # 1. Update Net Flow (Only for Options)
+        if asset_type == "OPTION":
+            premium = price * size * 100
+            if right == "C":
+                self.state[ticker]["net_flow"] += premium
+            else:
+                self.state[ticker]["net_flow"] -= premium
+
+        # 2. Update Underlying Price (Only for Stock/Index)
+        elif asset_type == "STOCK":
+            self.state[ticker]["price"] = price
+            self.state[ticker]["last_update_ms"] = int(datetime.now().timestamp() * 1000)
+
+
+    # Index tickers that require /v2/hist/index/price instead of /v2/hist/stock/ohlc
+    INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX"}
+
+    def get_intraday_history(self, ticker: str, resolution: str = "1m") -> list:
+        """
+        Fetches intraday or daily history via Theta Terminal REST API.
+        Uses the REST endpoint directly (not the buggy thetadata v0.9.11 Python lib).
+        Handles both stock (SPY, QQQ, IWM) and index (SPX) tickers with correct endpoints.
+        Resolutions: 1m, 5m, 15m, 30m, 1h, 4h, 1d.
+        """
+        import httpx
+        from datetime import date, timedelta
+        import pytz
+
+        is_index = ticker.upper() in self.INDEX_TICKERS
+
+        # Resolution Mapping (interval_ms, lookback_days)
+        res_map = {
+            "1m": (60000, 5),
+            "5m": (300000, 30),
+            "15m": (900000, 60),
+            "30m": (1800000, 120),
+            "1h": (3600000, 180),
+            "4h": (14400000, 365),
+            "1d": (86400000, 730),
+        }
+
+        interval_ms, lookback_days = res_map.get(resolution, (60000, 1))
+        end_date = date.today()
+        start_date = end_date - timedelta(days=lookback_days)
+
+        base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
+
+        try:
+            if is_index:
+                return self._fetch_index_history(
+                    base_url, ticker, start_date, end_date, resolution, interval_ms
+                )
+            elif resolution == "1d":
+                return self._fetch_stock_daily(
+                    base_url, ticker, start_date, end_date
+                )
+            else:
+                return self._fetch_stock_intraday(
+                    base_url, ticker, start_date, end_date, interval_ms
+                )
+        except Exception as e:
+            LOG.error(f"Failed to fetch history for {ticker} ({resolution}): {e}")
+            LOG.error(traceback.format_exc())
+            return []
+
+    def _fetch_stock_daily(self, base_url: str, ticker: str, start_date, end_date) -> list:
+        """Fetch daily stock OHLC via /v2/hist/stock/eod (purpose-built for daily data)."""
+        import httpx
+
+        url = f"{base_url}/v2/hist/stock/eod"
+        params = {
+            "root": ticker,
+            "start_date": start_date.strftime("%Y%m%d"),
+            "end_date": end_date.strftime("%Y%m%d"),
+        }
+        resp = httpx.get(url, params=params, timeout=60.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        header = data.get("header", {}).get("format", [])
+        rows = data.get("response", [])
+        if not rows:
+            LOG.warning(f"No daily data for {ticker}")
+            return []
+
+        # Map column names to indices
+        col_map = {name.lower(): i for i, name in enumerate(header)}
+        date_i = col_map.get("date")
+        open_i = col_map.get("open")
+        high_i = col_map.get("high")
+        low_i = col_map.get("low")
+        close_i = col_map.get("close")
+        vol_i = col_map.get("volume")
+
+        if date_i is None or close_i is None:
+            LOG.warning(f"Missing columns for {ticker} daily: {header}")
+            return []
+
+        result = []
+        for r in rows:
+            dt_str = str(r[date_i])
+            if len(dt_str) != 8:
+                continue
+            day_str = f"{dt_str[:4]}-{dt_str[4:6]}-{dt_str[6:8]}"
+            c = float(r[close_i]) if close_i is not None else 0
+            if c <= 0:
+                continue
+
+            result.append({
+                "time": day_str,
+                "date": day_str,
+                "open": float(r[open_i]) if open_i is not None else c,
+                "high": float(r[high_i]) if high_i is not None else c,
+                "low": float(r[low_i]) if low_i is not None else c,
+                "close": c,
+                "volume": int(r[vol_i]) if vol_i is not None else 0,
+                "value": c,
+            })
+
+        # Outlier filter: reject bars where ANY OHLC field deviates >50% from its median
+        if len(result) > 2:
+            for field in ("open", "high", "low", "close"):
+                vals = sorted([r[field] for r in result if r[field] > 0])
+                if not vals:
+                    continue
+                median = vals[len(vals) // 2]
+                if median > 0:
+                    before = len(result)
+                    result = [r for r in result if r[field] <= 0 or abs(r[field] - median) / median < 0.5]
+                    if len(result) < before:
+                        LOG.warning(f"Filtered {before - len(result)} outlier bars ({field}) for {ticker}")
+
+        LOG.info(f"Fetched {len(result)} daily bars for {ticker} via /stock/eod")
+        return result
+
+    def _fetch_stock_intraday(self, base_url: str, ticker: str, start_date, end_date, interval_ms: int) -> list:
+        """Fetch intraday stock OHLC via /v2/hist/stock/ohlc."""
+        import httpx
+        import pytz
+        from datetime import date as dt_date
+
+        url = f"{base_url}/v2/hist/stock/ohlc"
+        params = {
+            "root": ticker,
+            "start_date": start_date.strftime("%Y%m%d"),
+            "end_date": end_date.strftime("%Y%m%d"),
+            "ivl": str(interval_ms),
+        }
+        resp = httpx.get(url, params=params, timeout=60.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        rows = data.get("response", [])
+        if not rows:
+            LOG.warning(f"No intraday data for {ticker}")
+            return []
+
+        # Columns: [ms_of_day, open, high, low, close, volume, count, date]
+        et_tz = pytz.timezone("America/New_York")
+        result = []
+        for r in rows:
+            ms_of_day, o, h, l, c, vol, cnt, dt_int = r
+            dt_str = str(dt_int)
+            if len(dt_str) != 8:
+                continue
+            day = dt_date(int(dt_str[:4]), int(dt_str[4:6]), int(dt_str[6:8]))
+            hours = ms_of_day // 3600000
+            minutes = (ms_of_day % 3600000) // 60000
+            seconds = (ms_of_day % 60000) // 1000
+            naive_et = datetime(day.year, day.month, day.day, hours, minutes, seconds)
+            aware_et = et_tz.localize(naive_et)
+            ts = int(aware_et.timestamp())
+
+            result.append({
+                "time": ts,
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "value": float(c),
+            })
+
+        # Outlier filter: reject bars where ANY OHLC field deviates >50% from its median
+        if len(result) > 2:
+            for field in ("open", "high", "low", "close"):
+                vals = sorted([r[field] for r in result if r[field] > 0])
+                if not vals:
+                    continue
+                median = vals[len(vals) // 2]
+                if median > 0:
+                    before = len(result)
+                    result = [r for r in result if r[field] <= 0 or abs(r[field] - median) / median < 0.5]
+                    if len(result) < before:
+                        LOG.warning(f"Filtered {before - len(result)} outlier intraday bars ({field}) for {ticker}")
+
+        LOG.info(f"Fetched {len(result)} intraday bars for {ticker} via /stock/ohlc")
+        return result
+
+    def _fetch_index_history(self, base_url: str, ticker: str, start_date, end_date, resolution: str, interval_ms: int) -> list:
+        """
+        Fetch history for index tickers (SPX, VIX) from /v2/hist/index/price.
+        Always fetches at finest available granularity and resamples to target OHLC.
+        This avoids flat candles (O=H=L=C=price) that appear as dots.
+        """
+        import httpx
+        import pytz
+        from datetime import date as dt_date
+        from collections import OrderedDict
+
+        # Always fetch at finer granularity, then resample to target resolution.
+        # Index endpoint only returns single price per tick, so resampling gives real OHLC.
+        fetch_ivl_map = {
+            "1m": "60000",     # 1m: fetch at 1m (can't go finer — will be flat, but acceptable)
+            "5m": "60000",     # 5m: fetch 1m, resample to 5m
+            "15m": "60000",    # 15m: fetch 1m, resample to 15m
+            "30m": "60000",    # 30m: fetch 1m, resample to 30m
+            "1h": "300000",    # 1h: fetch 5m, resample to 1h
+            "4h": "300000",    # 4h: fetch 5m, resample to 4h
+            "1d": "300000",    # 1d: fetch 5m, resample to daily
+        }
+        fetch_ivl = fetch_ivl_map.get(resolution, "60000")
+
+        url = f"{base_url}/v2/hist/index/price"
+        params = {
+            "root": ticker,
+            "start_date": start_date.strftime("%Y%m%d"),
+            "end_date": end_date.strftime("%Y%m%d"),
+            "ivl": fetch_ivl,
+        }
+        resp = httpx.get(url, params=params, timeout=60.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        header = data.get("header", {}).get("format", [])
+        rows = data.get("response", [])
+        if not rows or not header:
+            LOG.warning(f"No index data for {ticker}")
+            return []
+
+        # Map column names to indices
+        col_map = {name.lower(): i for i, name in enumerate(header)}
+        date_i = col_map.get("date")
+        ms_i = col_map.get("ms_of_day")
+        price_i = col_map.get("price")
+        # Some intervals may return OHLC
+        open_i = col_map.get("open")
+        high_i = col_map.get("high")
+        low_i = col_map.get("low")
+        close_i = col_map.get("close")
+        has_ohlc = all(x is not None for x in [open_i, high_i, low_i, close_i])
+
+        et_tz = pytz.timezone("America/New_York")
+
+        if resolution == "1d":
+            # Resample to daily OHLC
+            daily = OrderedDict()
+            for r in rows:
+                dt_int = r[date_i] if date_i is not None else 0
+                dt_str = str(dt_int)
+                if len(dt_str) != 8:
+                    continue
+                day_key = f"{dt_str[:4]}-{dt_str[4:6]}-{dt_str[6:8]}"
+
+                if has_ohlc:
+                    o_val = float(r[open_i])
+                    h_val = float(r[high_i])
+                    l_val = float(r[low_i])
+                    c_val = float(r[close_i])
+                elif price_i is not None:
+                    p = float(r[price_i])
+                    o_val = h_val = l_val = c_val = p
+                else:
+                    continue
+
+                if c_val <= 0:
+                    continue
+
+                if day_key not in daily:
+                    daily[day_key] = {"open": o_val, "high": h_val, "low": l_val, "close": c_val}
+                else:
+                    d = daily[day_key]
+                    d["high"] = max(d["high"], h_val)
+                    d["low"] = min(d["low"], l_val)
+                    d["close"] = c_val  # Last value of the day
+
+            result = []
+            for day_key, ohlc in daily.items():
+                result.append({
+                    "time": day_key,
+                    "date": day_key,
+                    "open": round(ohlc["open"], 2),
+                    "high": round(ohlc["high"], 2),
+                    "low": round(ohlc["low"], 2),
+                    "close": round(ohlc["close"], 2),
+                    "volume": 0,
+                    "value": round(ohlc["close"], 2),
+                })
+
+            # Outlier filter: reject bars where ANY OHLC field deviates >50% from its median
+            if len(result) > 2:
+                for field in ("open", "high", "low", "close"):
+                    vals = sorted([r[field] for r in result if r[field] > 0])
+                    if not vals:
+                        continue
+                    median = vals[len(vals) // 2]
+                    if median > 0:
+                        before = len(result)
+                        result = [r for r in result if r[field] <= 0 or abs(r[field] - median) / median < 0.5]
+                        if len(result) < before:
+                            LOG.warning(f"Filtered {before - len(result)} outlier daily bars ({field}) for index {ticker}")
+
+            LOG.info(f"Fetched {len(result)} daily bars for index {ticker} (resampled from 5-min)")
+            return result
+
+        else:
+            # Intraday resolution: resample fine-grained ticks into target OHLC buckets
+            bucket_seconds_map = {
+                "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                "1h": 3600, "4h": 14400,
+            }
+            bucket_size = bucket_seconds_map.get(resolution, 60)
+
+            buckets = OrderedDict()
+            for r in rows:
+                dt_int = r[date_i] if date_i is not None else 0
+                ms_of_day = r[ms_i] if ms_i is not None else 0
+
+                dt_str = str(dt_int)
+                if len(dt_str) != 8:
+                    continue
+
+                day = dt_date(int(dt_str[:4]), int(dt_str[4:6]), int(dt_str[6:8]))
+                hours = ms_of_day // 3600000
+                minutes = (ms_of_day % 3600000) // 60000
+                seconds = (ms_of_day % 60000) // 1000
+                naive_et = datetime(day.year, day.month, day.day, hours, minutes, seconds)
+                aware_et = et_tz.localize(naive_et)
+                ts = int(aware_et.timestamp())
+
+                if has_ohlc:
+                    o_val = float(r[open_i])
+                    h_val = float(r[high_i])
+                    l_val = float(r[low_i])
+                    c_val = float(r[close_i])
+                elif price_i is not None:
+                    p = float(r[price_i])
+                    o_val = h_val = l_val = c_val = p
+                else:
+                    continue
+
+                if c_val <= 0:
+                    continue
+
+                # Snap to bucket
+                bucket_ts = (ts // bucket_size) * bucket_size
+                if bucket_ts not in buckets:
+                    buckets[bucket_ts] = {"open": o_val, "high": h_val, "low": l_val, "close": c_val}
+                else:
+                    b = buckets[bucket_ts]
+                    b["high"] = max(b["high"], h_val)
+                    b["low"] = min(b["low"], l_val)
+                    b["close"] = c_val
+
+            result = []
+            for bucket_ts, ohlc in buckets.items():
+                result.append({
+                    "time": bucket_ts,
+                    "open": round(ohlc["open"], 2),
+                    "high": round(ohlc["high"], 2),
+                    "low": round(ohlc["low"], 2),
+                    "close": round(ohlc["close"], 2),
+                    "value": round(ohlc["close"], 2),
+                })
+
+            # Outlier filter: reject bars where ANY OHLC field deviates >50% from its median
+            if len(result) > 2:
+                for field in ("open", "high", "low", "close"):
+                    vals = sorted([r[field] for r in result if r[field] > 0])
+                    if not vals:
+                        continue
+                    median = vals[len(vals) // 2]
+                    if median > 0:
+                        before = len(result)
+                        result = [r for r in result if r[field] <= 0 or abs(r[field] - median) / median < 0.5]
+                        if len(result) < before:
+                            LOG.warning(f"Filtered {before - len(result)} outlier intraday bars ({field}) for index {ticker}")
+
+            LOG.info(f"Fetched {len(result)} intraday bars for index {ticker} (resampled to {resolution})")
+            return result
+
+
+
+    async def _subscribe_all(self):
+        """
+        Sends subscription commands.
+        """
+        if not self.client:
+            return
+            
+        LOG.info(f"Subscribing to {len(self.tickers)} tickers...")
+        
+        # 1. Subscribe to ALL OPTION TRADES (market-wide) for HIRO Flow
+        # This is the official method that doesn't require root/exp/strike
+        try:
+            req_id = self.client.req_full_trade_stream_opt()
+            LOG.info(f"Subscribed to FULL OPTION TRADE STREAM (id={req_id})")
+        except Exception as e:
+            LOG.error(f"Failed to subscribe to full option stream: {e}")
+        
+        # 2. Subscribe to STOCK/INDEX price streams for chart price line
+        # These need root-specific subscriptions
+        for ticker in self.tickers:
+            try:
+                # Use official method with exp=date(1,1,1), strike=0, right='C' for root-level
+                # The library's _format_date handles date(1,1,1) as a null/wildcard
+                from datetime import date
+                from thetadata import OptionRight
+                
+                # Use a minimal date that the library formats as "0" or wildcard
+                null_date = date(1, 1, 1)  # Year 1, month 1, day 1
+                req_id = self.client.req_trade_stream_opt(root=ticker, exp=null_date, strike=0, right=OptionRight.CALL)
+                LOG.info(f"Subscribed to {ticker} option trade stream (id={req_id})")
+            except Exception as e:
+                LOG.error(f"Failed to subscribe to {ticker}: {e}")
+
+    # DEPRECATED: Old manual TCP bypass method
+    # def req_trade_stream_root_bypass(self, root: str):
+    #     ... (kept for reference)
+
+
+    async def _monitor_stream(self):
+        """
+        Keeps the connection alive and handles reconnects if needed.
+        """
+        while self.active:
+            await asyncio.sleep(5)
+            # Check connection status if exposed by library
+            # client._stream_connected is boolean in client.py
+            if self.client and not self.client._stream_connected:
+                LOG.warning("TCP Stream reported disconnected. Reconnecting...")
+                # Simple Restart logic
+                await self.stop()
+                await asyncio.sleep(2)
+                await self.start()
+
+    async def _poll_price_loop(self):
+        """
+        Polls Theta Terminal REST API (port 25510) for latest stock prices.
+        Uses httpx directly — avoids thetadata library connection state issues.
+        Runs every 2s. Provides stock/index prices during all sessions including pre-market.
+        """
+        import httpx
+
+        LOG.info("Starting Price Poller (REST API)...")
+        base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
+
+        # Wait for Theta Terminal to be ready
+        await asyncio.sleep(5)
+
+        while self.active:
+            for ticker in self.tickers:
+                try:
+                    # Use snapshot/stock/quote for real-time bid/ask (works pre-market)
+                    if ticker in ("SPX", "VIX"):
+                        # Indices: use last 1min bar from hist/index/price
+                        from datetime import date, timedelta
+                        end = date.today()
+                        start = end - timedelta(days=3)
+                        url = f"{base_url}/v2/hist/index/price"
+                        params = {
+                            "root": ticker,
+                            "start_date": start.strftime("%Y%m%d"),
+                            "end_date": end.strftime("%Y%m%d"),
+                            "ivl": "60000",
+                        }
+                    else:
+                        # Stocks (SPY, QQQ, IWM): prefer last trade, fallback to quote midpoint
+                        url = f"{base_url}/v2/snapshot/stock/trade"
+                        params = {"root": ticker}
+
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(url, params=params, timeout=5.0)
+
+                    if resp.status_code != 200:
+                        continue
+
+                    data = resp.json()
+                    response = data.get("response", [])
+                    if not response:
+                        continue
+
+                    price = 0.0
+                    if ticker in ("SPX", "VIX"):
+                        # Index: use header-based column mapping for reliability
+                        header = data.get("header", {}).get("format", [])
+                        col_map = {name.lower(): i for i, name in enumerate(header)}
+                        last = response[-1]
+                        if "close" in col_map:
+                            price = float(last[col_map["close"]])
+                        elif "price" in col_map:
+                            price = float(last[col_map["price"]])
+                        else:
+                            # Fallback: second column for simple [ms_of_day, price, date]
+                            price = float(last[1]) if len(last) >= 2 else 0.0
+                    else:
+                        # Last trade: extract price field
+                        header = data.get("header", {}).get("format", [])
+                        tick = response[-1] if isinstance(response[-1], list) else response[-1]
+                        if "price" in header:
+                            price = float(tick[header.index("price")]) if tick[header.index("price")] else 0
+
+                        # Fallback: quote midpoint if trade endpoint returned 0
+                        if price <= 0:
+                            try:
+                                async with httpx.AsyncClient() as client:
+                                    quote_resp = await client.get(
+                                        f"{base_url}/v2/snapshot/stock/quote",
+                                        params={"root": ticker}, timeout=5.0
+                                    )
+                                if quote_resp.status_code == 200:
+                                    q_data = quote_resp.json()
+                                    q_response = q_data.get("response", [])
+                                    q_header = q_data.get("header", {}).get("format", [])
+                                    if q_response and "bid" in q_header and "ask" in q_header:
+                                        q_tick = q_response[-1] if isinstance(q_response[-1], list) else q_response[-1].get("ticks", [[]])[0]
+                                        bid = float(q_tick[q_header.index("bid")]) if q_tick[q_header.index("bid")] else 0
+                                        ask = float(q_tick[q_header.index("ask")]) if q_tick[q_header.index("ask")] else 0
+                                        price = (bid + ask) / 2.0 if bid > 0 and ask > 0 else max(bid, ask)
+                            except Exception:
+                                pass
+
+                    if price > 0:
+                        # Broadcast as a STOCK price update
+                        ts_now = datetime.now()
+                        msg = {
+                            "type": "TRADE",
+                            "root": ticker,
+                            "strike": 0,
+                            "right": "C",
+                            "exp": "0",
+                            "price": price,
+                            "size": 0,
+                            "condition": "POLLED",
+                            "ms_of_day": int(ts_now.timestamp() * 1000) % 86400000,
+                            "timestamp": ts_now.isoformat(),
+                            "time": int(ts_now.timestamp()),
+                            "asset_type": "STOCK",
+                            "hiro_flow": self.state.get(ticker, {}).get("net_flow", 0.0),
+                        }
+
+                        # Update internal state directly
+                        self._update_state(ticker, price, 0, "C", "STOCK")
+
+                        # Record flow snapshot for intraday history
+                        self._record_flow_snapshot(ticker)
+
+                        # Broadcast to all WebSocket listeners
+                        await self.broadcast(msg)
+                        LOG.info(f"Polled {ticker}: ${price:.2f}")
+
+                except Exception as e:
+                    LOG.error(f"Polling failed for {ticker}: {e}")
+
+            await asyncio.sleep(2)
+
+    async def _poll_option_flow_loop(self):
+        """
+        REST-based HIRO Flow Poller.
+        Polls bulk_snapshot/option/ohlc every 10s for each ticker's 0DTE expiry.
+        Tracks volume changes between polls and computes cumulative net premium flow.
+        Bypasses the broken thetadata streaming library.
+        """
+        import httpx
+        from datetime import date as dt_date
+
+        LOG.info("Starting Option Flow Poller (REST API)...")
+        base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
+
+        # Wait for price data to arrive first
+        await asyncio.sleep(15)
+
+        # Track previous volumes: ticker -> {contract_key: volume}
+        prev_volumes: Dict[str, Dict[str, Dict]] = {}
+
+        while self.active:
+            today_str = dt_date.today().strftime("%Y%m%d")
+
+            for ticker in self.tickers:
+                # SPX options use SPXW root; skip VIX (no standard 0DTE)
+                if ticker == "VIX":
+                    continue
+                option_root = "SPXW" if ticker == "SPX" else ticker
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(
+                            f"{base_url}/v2/bulk_snapshot/option/ohlc",
+                            params={"root": option_root, "exp": today_str},
+                            timeout=10.0,
+                        )
+
+                    if resp.status_code != 200:
+                        continue
+
+                    data = resp.json()
+                    header = data.get("header", {}).get("format", [])
+                    if "close" not in header or "volume" not in header:
+                        continue
+
+                    idx_close = header.index("close")
+                    idx_volume = header.index("volume")
+
+                    # Build current volume snapshot
+                    current: Dict[str, Dict] = {}
+                    for item in data.get("response", []):
+                        contract = item.get("contract", {})
+                        ticks = item.get("ticks", [])
+                        if not contract or not ticks:
+                            continue
+
+                        strike = contract.get("strike", 0) / 1000.0
+                        right = contract.get("right", "")
+                        tick = ticks[-1]
+                        volume = int(tick[idx_volume])
+                        close_price = float(tick[idx_close])
+
+                        key = f"{strike}_{right}"
+                        current[key] = {"volume": volume, "close": close_price, "right": right}
+
+                    # Compute flow delta from volume changes
+                    prev = prev_volumes.get(ticker, {})
+                    if prev:
+                        delta_flow = 0.0
+                        for key, curr_data in current.items():
+                            prev_data = prev.get(key)
+                            if prev_data and curr_data["close"] > 0:
+                                delta_vol = curr_data["volume"] - prev_data["volume"]
+                                if delta_vol > 0:
+                                    premium = curr_data["close"] * delta_vol * 100
+                                    if curr_data["right"] == "C":
+                                        delta_flow += premium
+                                    else:
+                                        delta_flow -= premium
+
+                        # Update cumulative flow in state
+                        if ticker not in self.state:
+                            self.state[ticker] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
+                        self.state[ticker]["net_flow"] += delta_flow
+
+                        if abs(delta_flow) > 0:
+                            LOG.info(
+                                f"HIRO FLOW {ticker}: delta=${delta_flow:,.0f} "
+                                f"cumulative=${self.state[ticker]['net_flow']:,.0f}"
+                            )
+
+                    prev_volumes[ticker] = current
+
+                except Exception as e:
+                    LOG.error(f"Option flow poll failed for {ticker}: {e}")
+
+            await asyncio.sleep(10)
+
+    def add_listener(self, queue: asyncio.Queue):
+        self.listeners.append(queue)
+
+    async def get_spx_probability_chain(self, expirations: list) -> list:
+        """
+        Fetches SPX option chain data for specified expirations.
+        Returns a list of dicts with expiration, strike, call_mid, put_mid, forward_price.
+        """
+        if not self.client:
+            LOG.warning("ThetaClient not initialized, cannot fetch SPX chain")
+            return []
+        
+        results = []
+        
+        try:
+            from datetime import date
+            from thetadata.enums import OptionRight, OptionReqType
+            
+            with self.client.connect():
+                # Limit to 8 expirations to save time
+                limited_expirations = expirations[:8]
+                
+                for exp_date in limited_expirations:
+                    # Ensure we have a date object
+                    if isinstance(exp_date, str):
+                        from datetime import datetime
+                        try:
+                            exp_date = datetime.strptime(exp_date, '%Y-%m-%d').date()
+                        except ValueError:
+                            LOG.warning(f"Invalid expiration date format: {exp_date}")
+                            continue
+                    
+                    exp_str = exp_date.isoformat()
+                    
+                    # Try SPX first, then SPXW (Weekly) fallback
+                    strikes_df = None
+                    active_root = 'SPX'
+                    
+                    try:
+                        LOG.debug(f"Trying SPX for {exp_str}...")
+                        strikes_df = self.client.get_strikes(root='SPX', exp=exp_date)
+                    except Exception:
+                        pass
+                        
+                    if strikes_df is None or strikes_df.empty:
+                        try:
+                            LOG.debug(f"Falling back to SPXW for {exp_str}...")
+                            strikes_df = self.client.get_strikes(root='SPXW', exp=exp_date)
+                            active_root = 'SPXW'
+                        except Exception as e:
+                            LOG.warning(f"No strikes found for SPX or SPXW on {exp_str}: {e}")
+                            continue
+                    
+                    if strikes_df is None or strikes_df.empty:
+                        LOG.warning(f"Final: No strikes found for {exp_str}")
+                        continue
+                    
+                    # Extract strikes list
+                    all_strikes = strikes_df.tolist() if hasattr(strikes_df, 'tolist') else []
+                    if not all_strikes:
+                        continue
+                    
+                    # --- SMART FILTERING: Dynamic 3-Sigma Range ---
+                    import math
+                    from datetime import date
+                    today = date.today()
+                    dte_days = max((exp_date - today).days, 1)
+                    
+                    # Attempt to get actual spot price for centering
+                    spot_price = float(all_strikes[len(all_strikes)//2]) # Fallback
+                    try:
+                        from thetadata.enums import StockReqType
+                        # Try SPX last price directly first
+                        spx_p = self.client.get_last_stock(req=StockReqType.QUOTE, root='SPX')
+                        if not spx_p.empty and 'bid' in spx_p.columns:
+                            spot_price = float(spx_p['bid'].iloc[0])
+                        else:
+                            # Fallback to SPY * 10
+                            spy_p = self.client.get_last_stock(req=StockReqType.QUOTE, root='SPY')
+                            if not spy_p.empty and 'bid' in spy_p.columns:
+                                spot_price = float(spy_p['bid'].iloc[0]) * 10
+                        LOG.debug(f"Centering {active_root} on spot: {spot_price}")
+                    except Exception: pass
+                    
+                    # Limit = Spot * IV(20%) * sqrt(Days/365) * 3 Sigma
+                    limit = spot_price * 0.20 * math.sqrt(dte_days / 365.0) * 3.0
+                    lower_bound = spot_price - limit
+                    upper_bound = spot_price + limit
+                    
+                    filtered_strikes = [s for s in all_strikes if lower_bound <= s <= upper_bound]
+                    
+                    # Smart Decimation: instead of hard cap, skip strikes to keep ~100
+                    if len(filtered_strikes) > 100:
+                        step = math.ceil(len(filtered_strikes) / 100)
+                        strikes = filtered_strikes[::step]
+                    else:
+                        strikes = filtered_strikes
+                    
+                    if not strikes:
+                        # Fallback to nearest strikes if bounds are empty
+                        mid = len(all_strikes) // 2
+                        strikes = all_strikes[max(0, mid-50) : min(len(all_strikes), mid+50)]
+                        
+                    LOG.info(f"Processing {len(strikes)} smart-filtered strikes for {active_root} {exp_str} (Range: +/-{limit:.1f}, Step: {len(filtered_strikes)//len(strikes) if len(strikes)>0 else 1})")
+                    
+                    # --- PARALLEL FETCHING: ThreadPoolExecutor ---
+                    from concurrent.futures import ThreadPoolExecutor
+                    
+                    call_prices = {}
+                    put_prices = {}
+                    
+                    def fetch_strike_quotes(strike):
+                        strike_f = float(strike)
+                        c_mid = 0.0
+                        p_mid = 0.0
+                        try:
+                            # CALL
+                            c_q = self.client.get_last_option(
+                                req=OptionReqType.QUOTE,
+                                root=active_root,
+                                exp=exp_date,
+                                strike=strike_f,
+                                right=OptionRight.CALL
+                            )
+                            if not c_q.empty:
+                                b = float(c_q['bid'].iloc[0]) if 'bid' in c_q.columns else 0.0
+                                a = float(c_q['ask'].iloc[0]) if 'ask' in c_q.columns else 0.0
+                                c_mid = (b + a) / 2
+                        except: pass
+                        
+                        try:
+                            # PUT
+                            p_q = self.client.get_last_option(
+                                req=OptionReqType.QUOTE,
+                                root=active_root,
+                                exp=exp_date,
+                                strike=strike_f,
+                                right=OptionRight.PUT
+                            )
+                            if not p_q.empty:
+                                b = float(p_q['bid'].iloc[0]) if 'bid' in p_q.columns else 0.0
+                                a = float(p_q['ask'].iloc[0]) if 'ask' in p_q.columns else 0.0
+                                p_mid = (b + a) / 2
+                        except: pass
+                        
+                        return strike, c_mid, p_mid
+
+                    with ThreadPoolExecutor(max_workers=20) as executor:
+                        all_results = list(executor.map(fetch_strike_quotes, strikes))
+                    
+                    for s, c, p in all_results:
+                        call_prices[s] = c
+                        put_prices[s] = p
+                    
+                    # Forward Price calculation
+                    min_diff = float('inf')
+                    forward_price = 0.0
+                    
+                    for strike in strikes:
+                        cm = call_prices.get(strike, 0.0)
+                        pm = put_prices.get(strike, 0.0)
+                        if cm > 0 and pm > 0:
+                            diff = abs(cm - pm)
+                            if diff < min_diff:
+                                min_diff = diff
+                                forward_price = float(strike + (cm - pm))
+                    
+                    if forward_price == 0.0 and strikes:
+                        forward_price = float((min(strikes) + max(strikes)) / 2)
+                    
+                    # Build Results
+                    for strike in strikes:
+                        results.append({
+                            'expiration': exp_str,
+                            'strike': float(strike),
+                            'call_mid': float(call_prices.get(strike, 0.0)),
+                            'put_mid': float(put_prices.get(strike, 0.0)),
+                            'forward_price': float(forward_price)
+                        })
+            
+            LOG.info(f"Fetched optimized SPX chain: {len(results)} records across {len(limited_expirations)} expirations")
+            return results
+            
+        except Exception as e:
+            LOG.error(f"Failed to fetch SPX probability chain: {e}")
+            import traceback
+            LOG.error(traceback.format_exc())
+            return []
+
+    def get_daily_history(self, ticker: str, days: int = 90) -> list:
+        """
+        Fetches daily OHLC history for the specified ticker.
+        Used for historical price chart background.
+        Returns list of {date: str, close: float}
+        """
+        if not self.client:
+            LOG.warning("ThetaClient not initialized, cannot fetch daily history")
+            return []
+        
+        try:
+            from datetime import date
+            from thetadata.enums import DateRange, StockReqType, DataType
+            
+            # Use DateRange to get last N days
+            date_range = DateRange.from_days(days)
+            
+            with self.client.connect():
+                # Fetch daily bars (86400000ms = 1 day)
+                df = self.client.get_hist_stock(
+                    req=StockReqType.OHLC,
+                    root=ticker,
+                    date_range=date_range,
+                    interval_size=86400000,  # 86400000ms = 1 day
+                    use_rth=True
+                )
+                
+                if df is None or df.empty:
+                    LOG.warning(f"No daily history for {ticker}")
+                    return []
+                
+                # Convert to chart format
+                result = []
+                for idx, row in df.iterrows():
+                    date_val = row[DataType.DATE]
+                    close_val = row[DataType.CLOSE]
+                    
+                    result.append({
+                        "date": str(date_val),
+                        "close": float(close_val)
+                    })
+                
+                LOG.info(f"Fetched {len(result)} daily bars for {ticker}")
+                return result
+                
+        except Exception as e:
+            LOG.error(f"Failed to fetch daily history for {ticker}: {e}")
+            import traceback
+            LOG.error(traceback.format_exc())
+            return []

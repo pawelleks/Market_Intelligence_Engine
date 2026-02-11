@@ -44,10 +44,18 @@ from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_vo
 
 # Real-time Engine Import
 from mie_lib.realtime.theta_streamer import ThetaStreamer
+# from mie_lib.realtime.theta_engine import ThetaStreamer as ThetaEngine
+from datetime import datetime
+from mie_lib.utils.probability_math import BreedenLitzenberger
+
+
 
 # Global ThetaStreamer Instance
 # Initializing with default major indices/ETFs
-theta_streamer = ThetaStreamer()
+theta_streamer = ThetaStreamer(tickers=["SPY", "SPX", "QQQ", "IWM"])
+
+# Separate Engine for Snapshot Data (uses thetadata lib) - DISABLED due to build issues
+# theta_engine_client = ThetaEngine(tickers=['SPX'])
 # ... (rest of imports are fine, just updating the specific block if needed, but replace_file_content works on blocks)
 # Actually, I'll just update the endpoint and the import line separately or together if they are close.
 # The import is at line 27. The endpoint is at the end.
@@ -70,8 +78,26 @@ async def lifespan(app: FastAPI):
     # Startup
     print("Starting ThetaStreamer...")
     # Run the streamer in a background task
-    streamer_task = asyncio.create_task(theta_streamer.start_stream(tickers=["SPY", "SPX"]))
-    
+    streamer_task = asyncio.create_task(theta_streamer.start())
+
+    # Seed static Expected Moves JSON if missing or stale (>24h)
+    import subprocess
+    static_em_path = Path("/app/public/data/expected_moves_static.json")
+    try:
+        needs_seed = not static_em_path.exists()
+        if not needs_seed:
+            age_seconds = datetime.now().timestamp() - static_em_path.stat().st_mtime
+            needs_seed = age_seconds > 86400
+        if needs_seed:
+            print("Seeding static Expected Moves JSON (first run or stale)...")
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, lambda: subprocess.run(
+                ["python", "/app/jobs/process_expected_moves_static.py"],
+                capture_output=True, timeout=120
+            ))
+    except Exception as e:
+        print(f"Static EM seed skipped: {e}")
+
     yield
     
     # Shutdown
@@ -282,6 +308,65 @@ def _process_price_data(df_raw: pd.DataFrame, state_mode: str, threshold_bps: in
 # -----------------------------------------------------------------
 # Endpoints
 # -----------------------------------------------------------------
+
+@app.get("/api/v1/market/status")
+def get_market_status() -> JSONResponse:
+    """
+    Returns the current NYSE market status using pandas_market_calendars (authoritative).
+    Includes: is_trading_day, session_type, market hours in ET.
+    """
+    from mie_lib.utils.trading_calendar import is_trading_day
+    import pytz
+
+    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+    et_tz = pytz.timezone("America/New_York")
+    now_et = now_utc.astimezone(et_tz)
+    today = now_et.date()
+
+    trading_day = is_trading_day(today)
+    hours = now_et.hour
+    minutes = now_et.minute
+    time_in_minutes = hours * 60 + minutes
+
+    PRE_MARKET_OPEN = 4 * 60       # 4:00 AM ET
+    REGULAR_OPEN = 9 * 60 + 30     # 9:30 AM ET
+    REGULAR_CLOSE = 16 * 60        # 4:00 PM ET
+    AFTER_HOURS_CLOSE = 20 * 60    # 8:00 PM ET
+
+    if not trading_day:
+        session_type = "closed"
+        is_open = False
+        status = "Holiday — Market Closed" if now_et.weekday() < 5 else "Weekend — Market Closed"
+    elif time_in_minutes < PRE_MARKET_OPEN:
+        session_type = "closed"
+        is_open = False
+        status = "Overnight — Market Closed"
+    elif time_in_minutes < REGULAR_OPEN:
+        session_type = "pre_market"
+        is_open = False
+        status = "Pre-Market (4:00–9:30 AM ET)"
+    elif time_in_minutes < REGULAR_CLOSE:
+        session_type = "regular"
+        is_open = True
+        status = "Market Open (9:30 AM–4:00 PM ET)"
+    elif time_in_minutes < AFTER_HOURS_CLOSE:
+        session_type = "after_hours"
+        is_open = False
+        status = "After Hours (4:00–8:00 PM ET)"
+    else:
+        session_type = "closed"
+        is_open = False
+        status = "Overnight — Market Closed"
+
+    return JSONResponse(content={
+        "is_trading_day": trading_day,
+        "is_open": is_open,
+        "session_type": session_type,
+        "status": status,
+        "date": today.isoformat(),
+        "time_et": now_et.strftime("%H:%M:%S"),
+    })
+
 
 @app.get("/api/v1/data/freshness/{ticker}")
 def get_data_freshness_status(ticker: str) -> JSONResponse:
@@ -837,93 +922,105 @@ def get_dcs_latest_status(ticker: str) -> JSONResponse:
 # -----------------------------------------------------------------
 
 @app.get("/api/v1/stream/history/{ticker}")
-def get_stream_history(ticker: str) -> List[Dict[str, Any]]:
+def get_stream_history(ticker: str, resolution: str = "1m", source: str = "auto") -> List[Dict[str, Any]]:
     """
-    Returns intraday history (1m candles) for the specified ticker.
-    Used for initializing the Real-Time Chart (Backfill).
+    Returns history for the specified ticker with custom resolution.
+    source=auto: For 1d uses REST OHLC; for intraday prefers flow history then REST.
+    source=ohlc: Always uses ThetaData REST OHLC (no flow history).
     """
     ticker = ticker.upper()
     try:
-        history = theta_streamer.get_intraday_history(ticker)
+        # Daily or explicit OHLC: always fetch from ThetaData REST
+        if resolution == "1d" or source == "ohlc":
+            history = theta_streamer.get_intraday_history(ticker, resolution=resolution)
+            return history
+
+        # Intraday (auto): prefer in-memory flow history (has price + flow together)
+        flow_hist = theta_streamer.get_flow_history(ticker)
+        if flow_hist and len(flow_hist) > 10:
+            return flow_hist
+
+        # Fallback to Theta REST OHLC (no flow data)
+        history = theta_streamer.get_intraday_history(ticker, resolution=resolution)
         return history
     except Exception as e:
-        print(f"Error fetching history for {ticker}: {e}")
+        print(f"Error fetching history for {ticker} at {resolution}: {e}")
         return []
 
 
 @app.websocket("/api/ws/theta")
-async def websocket_theta_stream(websocket: WebSocket):
+async def websocket_theta_stream(websocket: WebSocket, ticker: str = "SPY"):
     """
-    WebSocket endpoint for real-time ThetaData updates (HIRO Dealer Flow).
-    Currently streams SPY data by default.
+    WebSocket endpoint for real-time ThetaData updates.
+    Streams price (from poll loop) and HIRO flow (from option trades) for the requested ticker.
+    Uses event-driven listener queue + periodic heartbeat.
     """
     await websocket.accept()
-    # Default to SPY for now as per frontend component
-    ticker = "SPY"
-    
-    # Check if ticker is in our monitored list (should be added by startup event)
-    if ticker not in theta_streamer.tickers:
-        # If not monitored, try to add it (dynamic subscription)
-        # Note: start_stream is already running, we might need a method to add tickers dynamically
-        # For now, we assume SPY is added at startup.
-        pass
+    ticker = ticker.upper()
+    import time as time_mod
 
-    try:
+    # Register a listener queue to receive broadcast trade events
+    queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+    theta_streamer.add_listener(queue)
+
+    async def heartbeat():
+        """Send price/flow snapshot every 2s as a heartbeat."""
         while True:
-            # Fetch current state from the engine
+            await asyncio.sleep(2)
             data = theta_streamer.get_latest_data(ticker)
             price = data.get("price", 0.0)
             flow = data.get("hiro_flow", 0.0)
-            
-            # Send data to client
-            # The frontend expects: { time: unix_timestamp, price: float, hiro_flow: float }
-            import time
-            payload = {
-                "time": int(time.time()), # Current server time (Seconds)
-                "price": price if price is not None else 0.0,
-                "hiro_flow": flow if flow is not None else 0.0
-            }
-            
-            await websocket.send_json(payload)
-            
-            # Rate limit to ~100ms (10fps) to avoid flooding
-            await asyncio.sleep(0.1)
-            
-    except WebSocketDisconnect:
-        print("Client disconnected from Theta Stream")
+            if price > 0:
+                payload = {
+                    "time": int(time_mod.time()),
+                    "price": price,
+                    "hiro_flow": flow,
+                    "asset_type": "STOCK",
+                }
+                try:
+                    await websocket.send_json(payload)
+                except Exception:
+                    break
 
+    heartbeat_task = asyncio.create_task(heartbeat())
 
-    last_state = {}
-    
     try:
+        last_send_time = 0.0
         while True:
-            # Fetch current state from the engine
-            current_full_state = theta_streamer.get_state()
-            current_ticker_state = current_full_state.get(ticker, {})
-            
-            # Simple check for change (timestamp or value)
-            # For efficiency, we can check if values differed from last loop
-            # Adding a timestamp if not present to force heartbeat or meaningful data
-            
-            if current_ticker_state != last_state:
-                # Add timestamp
-                payload = current_ticker_state.copy()
-                payload["timestamp"] = datetime.now().isoformat()
-                
-                await websocket.send_json(payload)
-                last_state = current_ticker_state
-            
-            # Poll every 100ms
-            await asyncio.sleep(0.1)
-            
+            # Wait for a broadcast event (trade message from stream or poll loop)
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=5.0)
+            except asyncio.TimeoutError:
+                continue
+
+            # Filter: only forward messages relevant to this ticker
+            msg_root = msg.get("root", "")
+            if msg_root != ticker:
+                continue
+
+            # Throttle: max ~2 messages/second to keep chart manageable
+            now = time_mod.time()
+            if now - last_send_time < 0.5:
+                continue
+            last_send_time = now
+
+            # Enrich with latest flow state (broadcast messages carry flow for their own root)
+            flow = msg.get("hiro_flow", theta_streamer.get_latest_data(ticker).get("hiro_flow", 0.0))
+            payload = {
+                "time": msg.get("time", int(now)),
+                "timestamp": msg.get("timestamp"),
+                "price": msg.get("price", 0.0),
+                "hiro_flow": flow,
+                "asset_type": msg.get("asset_type", "OPTION"),
+            }
+            await websocket.send_json(payload)
+
     except WebSocketDisconnect:
-        print(f"Client disconnected from stream {ticker}")
-    except Exception as e:
-        print(f"WebSocket Error: {e}")
-        try:
-             await websocket.close()
-        except:
-            pass
+        pass
+    finally:
+        heartbeat_task.cancel()
+        if queue in theta_streamer.listeners:
+            theta_streamer.listeners.remove(queue)
 
 @app.get("/api/v1/dcs/history/{ticker}")
 def get_dcs_history(ticker: str) -> JSONResponse:
@@ -1032,6 +1129,39 @@ def get_expected_moves_history(ticker: str) -> JSONResponse:
     except Exception as e:
         print(f"Error reading EM history for {ticker}: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/api/history/{ticker}")
+def get_history_parquet(ticker: str) -> JSONResponse:
+    """
+    Returns 1-year EOD history from pre-ingested Parquet files (data/history/).
+    Run jobs/ingest_history.py to populate the data.
+    """
+    import re
+    ticker = ticker.upper()
+    if not re.match(r"^[A-Z0-9]+$", ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker format.")
+
+    history_path = Path(f"data/history/{ticker}.parquet")
+    if not history_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No history data for {ticker}. Run: python jobs/ingest_history.py",
+        )
+
+    try:
+        df = pd.read_parquet(history_path)
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+
+        df = df.replace({np.nan: None})
+        return JSONResponse(content={
+            "ticker": ticker,
+            "count": len(df),
+            "data": df.to_dict(orient="records"),
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading history: {e}")
+
 
 @app.get("/api/v1/market/candles/{ticker}")
 def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") -> JSONResponse:
@@ -1513,3 +1643,110 @@ def get_ai_report() -> Dict[str, Any]:
         return {"status": "no_file", "message": "No AI report generated yet."}
         
     return res
+# -----------------------------------------------------------------
+# Options / Probability Endpoints
+# -----------------------------------------------------------------
+
+from pydantic import BaseModel
+
+class OptionsChainRequest(BaseModel):
+    expirations: List[str] # List of "YYYY-MM-DD" strings
+
+@app.post("/api/v1/options/spx/chain", tags=["options"])
+async def get_spx_chain_distribution(request: OptionsChainRequest):
+    """
+    Fetches SPX Option Probability Chain for specified expirations.
+    Returns Strike, MidPrice, and derived Forward Price.
+    """
+    try:
+        # Convert strings to date objects
+        # Input format expected: "YYYY-MM-DD"
+        exps = []
+        for d_str in request.expirations:
+            try:
+                exps.append(datetime.strptime(d_str, "%Y-%m-%d").date())
+            except ValueError:
+                continue # Skip invalid dates
+        
+        if not exps:
+             # Default to next 45 days if empty (fallback logic or error?)
+             # User requirement: "accept a list". If list empty, maybe error.
+             # But "defaulting to next 45 days" was frontend req.
+             # Let's return empty or handle gracefully.
+             # If empty, let's just return empty results.
+             pass
+
+        data = await theta_streamer.get_spx_probability_chain(expirations=exps)
+        
+        # Group and Calculate PDF
+        grouped = {}
+        # Keep track of global min DTE for spot reference
+        global_fwd = 0.0
+        min_dte_str = None
+
+        for row in data:
+            exp = row['expiration']
+            if exp not in grouped:
+                # Capture forward price from first row of this exp (it's constant per exp)
+                grouped[exp] = {
+                    'strikes': [], 
+                    'call_mids': [], 
+                    'forward_price': row.get('forward_price', 0.0)
+                }
+            grouped[exp]['strikes'].append(row['strike'])
+            grouped[exp]['call_mids'].append(row['call_mid'])
+            
+        bl = BreedenLitzenberger()
+        final_results = []
+        today = date.today()
+        
+        # Sort expirations
+        sorted_exps = sorted(grouped.keys())
+        
+        for exp_str in sorted_exps:
+            grp = grouped[exp_str]
+            exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+            dte = (exp_date - today).days
+            
+            # Use the first expiration's forward as global proxy if not set
+            if global_fwd == 0:
+                global_fwd = grp['forward_price']
+            
+            pdf_data = bl.calculate_pdf(
+                strikes=grp['strikes'],
+                call_prices=grp['call_mids'],
+                dte_days=dte
+            )
+            
+            final_results.append({
+                "expiration": exp_str,
+                "dte": dte,
+                "forward_price": grp['forward_price'],
+                "distribution": pdf_data
+            })
+
+        # Generate Surface (Legacy Support if needed, or remove)
+        # surface_data = bl.generate_surface(final_results, current_spot=ref_price)
+        
+        # Generate Quantile Fan Chart (New)
+        # Pass in 45 days worth of interpolation
+        fan_data = bl.generate_forward_projection_quantiles(final_results, current_spot=global_fwd, days_out=45)
+        
+        # Fetch History (90 Days)
+        history_data = theta_streamer.get_daily_history("SPX", days=90)
+
+        return JSONResponse(content={
+            "ticker": "SPX",
+            "count": len(final_results),
+            "ref_price": global_fwd,
+            "results": final_results,
+            # "surface": surface_data, # Deprecated in favor of fan_chart
+            "fan_chart": fan_data,
+            "history": history_data
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"CRITICAL ERROR in get_spx_chain_distribution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

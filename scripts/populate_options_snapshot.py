@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Config
 TARGET_DATE = "2025-12-05"
-TICKERS = ["SPY", "QQQ", "IWM", "DIA", "^SPX", "^NDX"]
+TICKERS = ["SPY", "QQQ", "IWM", "DIA", "^SPX"]
 OUTPUT_DIR = Path("data/raw/massive/options")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_FILE = OUTPUT_DIR / f"options_{TARGET_DATE}.csv"
@@ -29,7 +29,7 @@ def format_osi(ticker, expiry_str, otype, strike):
     # Usually ^SPX options are SPX or SPXW.
     # Let's keep the underlying ticker base for the first part.
     root = ticker.replace("^", "")
-    # SPX/NDX have quirks but for our internal parser, as long as it matches regex ([A-Z]+), it works.
+    # SPX has quirks but for our internal parser, as long as it matches regex ([A-Z]+), it works.
     
     return f"{root}{yymmdd}{t_char}{strike_str}"
 

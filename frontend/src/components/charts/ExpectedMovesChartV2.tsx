@@ -63,6 +63,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     const [marketStatus, setMarketStatus] = useState<MarketStatus>(getMarketStatus());
     const [dataError, setDataError] = useState<string | null>(null);
     const [emLoading, setEmLoading] = useState<boolean>(true);
+    const [chartLoading, setChartLoading] = useState<boolean>(true);
 
     // Static EM: pre-computed from previous close (instant load)
     const [staticEm, setStaticEm] = useState<StaticEmTicker | null>(null);
@@ -90,6 +91,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         lastPriceRef.current = null;
         setDataError(null);
         setEmLoading(true);
+        setChartLoading(true);
         setStaticEm(null);
         setStaticEmLoading(true);
         staticEmRef.current = null;
@@ -125,6 +127,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     // 1. Initialize Chart
     useEffect(() => {
         if (!chartContainerRef.current) return;
+        setChartLoading(true);
 
         const chart = createChart(chartContainerRef.current, {
             layout: {
@@ -304,12 +307,17 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                             title: 'LIVE',
                         });
                     }
+                    setChartLoading(false);
                 } else if (resolution !== '1d') {
                     setDataError(`No intraday data for ${resolution}. ThetaData may be initializing — try again in a few seconds.`);
+                    setChartLoading(false);
+                } else {
+                    setChartLoading(false);
                 }
             } catch (e) {
                 console.warn("History fetch failed:", (e as Error).message);
                 setDataError("History data unavailable — retrying may help");
+                setChartLoading(false);
             }
 
             // 2. Expected Moves Levels — try static first (instant), then live as fallback/enhancement
@@ -349,7 +357,9 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             const emConfigs = [
                 { tenor: "0dte", eodKey: "0dte_range", highColor: EM_COLORS.dte0.high, lowColor: EM_COLORS.dte0.low, style: LineStyle.Dotted, label: "0DTE" },
                 { tenor: "weekly", eodKey: "weekly_range", highColor: EM_COLORS.weekly.high, lowColor: EM_COLORS.weekly.low, style: LineStyle.Dashed, label: "Weekly" },
-                { tenor: "monthly", eodKey: "monthly_range", highColor: EM_COLORS.monthly.high, lowColor: EM_COLORS.monthly.low, style: LineStyle.Solid, label: "Monthly" }
+                ...(resolution === '1d' ? [
+                    { tenor: "monthly", eodKey: "monthly_range", highColor: EM_COLORS.monthly.high, lowColor: EM_COLORS.monthly.low, style: LineStyle.Solid, label: "Monthly" }
+                ] : []),
             ];
 
             // 2a. Try static EM first (instant from cached JSON, via ref)
@@ -459,7 +469,9 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         const emConfigs = [
             { tenor: "0dte", eodKey: "0dte_range", highColor: EM_COLORS.dte0.high, lowColor: EM_COLORS.dte0.low, style: LineStyle.Dotted, label: "0DTE" },
             { tenor: "weekly", eodKey: "weekly_range", highColor: EM_COLORS.weekly.high, lowColor: EM_COLORS.weekly.low, style: LineStyle.Dashed, label: "Weekly" },
-            { tenor: "monthly", eodKey: "monthly_range", highColor: EM_COLORS.monthly.high, lowColor: EM_COLORS.monthly.low, style: LineStyle.Solid, label: "Monthly" }
+            ...(resolution === '1d' ? [
+                { tenor: "monthly", eodKey: "monthly_range", highColor: EM_COLORS.monthly.high, lowColor: EM_COLORS.monthly.low, style: LineStyle.Solid, label: "Monthly" }
+            ] : []),
         ];
 
         const moves: typeof emMovesRef.current = [];
@@ -490,7 +502,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         emMovesRef.current = moves;
         chartRef.current.priceScale('right').applyOptions({ autoScale: true });
         setEmLoading(false);
-    }, [staticEm, calcMode]);
+    }, [staticEm, calcMode, resolution]);
 
     // WebSocket Updates (only connect during market sessions)
     useEffect(() => {
@@ -819,45 +831,49 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                     </tr>
                                 );
 
-                                // --- Dynamic Row (Live Intraday) ---
-                                const eod = emData ? (emData as any)[row.eodKey] : null;
-                                const dMove = eod
-                                    ? (calcMode === 'breakeven' ? eod.breakeven_move : eod.sigma_move) ?? eod.plus_minus
-                                    : null;
-                                const dCenter = lastPrice && lastPrice > 0 ? lastPrice : (emData?.current_price ?? 0);
-                                const dHi = dMove && dCenter > 0 ? dCenter + dMove : null;
-                                const dLo = dMove && dCenter > 0 ? dCenter - dMove : null;
-                                const dExpiry = eod?.debug?.expiry || emData?.data_date;
-                                const dQuality = eod?.data_quality;
+                                // --- Dynamic Row (Live Intraday) — only during regular session ---
+                                // Outside regular hours, option chains aren't trading so EM values
+                                // would be stale (previous close) recentered on live price — inaccurate.
+                                if (marketStatus.sessionType === 'regular') {
+                                    const sTenorForLive = staticEm ? (staticEm as any)[row.staticKey] : null;
+                                    const dMove = sTenorForLive
+                                        ? (calcMode === 'breakeven' ? sTenorForLive.breakeven_move : sTenorForLive.sigma_move)
+                                        : null;
+                                    const dCenter = lastPrice && lastPrice > 0 ? lastPrice : 0;
+                                    const dHi = dMove && dCenter > 0 ? dCenter + dMove : null;
+                                    const dLo = dMove && dCenter > 0 ? dCenter - dMove : null;
+                                    const dExpiry = sTenorForLive?.target_date || sTenorForLive?.date;
+                                    const dQuality = sTenorForLive?.data_quality;
 
-                                rows.push(
-                                    <tr key={`dynamic-${idx}`} className="border-b border-slate-800/30 hover:bg-slate-900/40 transition-colors">
-                                        <td className="p-2"></td>
-                                        <td className="text-[10px] font-bold uppercase">
-                                            <span className="px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-400 border border-cyan-700/30">LIVE</span>
-                                        </td>
-                                        <td className="font-mono text-cyan-300 font-bold">
-                                            {dCenter > 0 ? `$${dCenter.toFixed(2)}` : '---'}
-                                        </td>
-                                        <td className="font-mono font-bold text-slate-200">
-                                            {dMove ? `\u00B1${dMove.toFixed(2)}` : emLoading ? (
-                                                <span className="text-slate-500 animate-pulse">Loading...</span>
-                                            ) : '---'}
-                                            {dQuality === 'estimated' && (
-                                                <span className="ml-1 text-[8px] text-amber-500" title="One leg was estimated">*</span>
-                                            )}
-                                        </td>
-                                        <td className="font-mono text-red-400 font-bold">
-                                            {dLo ? `$${dLo.toFixed(2)}` : emLoading ? '...' : '---'}
-                                        </td>
-                                        <td className="font-mono text-emerald-400 font-bold">
-                                            {dHi ? `$${dHi.toFixed(2)}` : emLoading ? '...' : '---'}
-                                        </td>
-                                        <td className="text-slate-500 italic text-[10px]">
-                                            {dExpiry || '---'}
-                                        </td>
-                                    </tr>
-                                );
+                                    rows.push(
+                                        <tr key={`dynamic-${idx}`} className="border-b border-slate-800/30 hover:bg-slate-900/40 transition-colors">
+                                            <td className="p-2"></td>
+                                            <td className="text-[10px] font-bold uppercase">
+                                                <span className="px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-400 border border-cyan-700/30">LIVE</span>
+                                            </td>
+                                            <td className="font-mono text-cyan-300 font-bold">
+                                                {dCenter > 0 ? `$${dCenter.toFixed(2)}` : '---'}
+                                            </td>
+                                            <td className="font-mono font-bold text-slate-200">
+                                                {dMove ? `\u00B1${dMove.toFixed(2)}` : staticEmLoading ? (
+                                                    <span className="text-slate-500 animate-pulse">Loading...</span>
+                                                ) : '---'}
+                                                {dQuality === 'estimated' && (
+                                                    <span className="ml-1 text-[8px] text-amber-500" title="One leg was estimated">*</span>
+                                                )}
+                                            </td>
+                                            <td className="font-mono text-red-400 font-bold">
+                                                {dLo ? `$${dLo.toFixed(2)}` : staticEmLoading ? '...' : '---'}
+                                            </td>
+                                            <td className="font-mono text-emerald-400 font-bold">
+                                                {dHi ? `$${dHi.toFixed(2)}` : staticEmLoading ? '...' : '---'}
+                                            </td>
+                                            <td className="text-slate-500 italic text-[10px]">
+                                                {dExpiry || '---'}
+                                            </td>
+                                        </tr>
+                                    );
+                                }
 
                                 return rows;
                             })}
@@ -869,6 +885,14 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             {/* Chart Canvas */}
             <div className="flex-grow relative bg-slate-900">
                 <div ref={chartContainerRef} className="absolute inset-0" />
+                {chartLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center z-10 bg-slate-900/60 backdrop-blur-[1px]">
+                        <div className="flex flex-col items-center gap-3">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
+                            <span className="text-xs text-slate-400">Loading chart data...</span>
+                        </div>
+                    </div>
+                )}
                 {dataError && (
                     <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-900/80 text-amber-200 text-xs px-4 py-1.5 rounded-full border border-amber-700/50 backdrop-blur-sm z-10">
                         {dataError}

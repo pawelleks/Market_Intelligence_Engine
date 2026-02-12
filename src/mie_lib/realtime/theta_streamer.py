@@ -548,9 +548,9 @@ class ThetaStreamer:
         # Always fetch at finer granularity, then resample to target resolution.
         # Index endpoint only returns single price per tick, so resampling gives real OHLC.
         fetch_ivl_map = {
-            "1m": "60000",     # 1m: fetch at 1m (can't go finer — will be flat, but acceptable)
-            "5m": "60000",     # 5m: fetch 1m, resample to 5m
-            "15m": "60000",    # 15m: fetch 1m, resample to 15m
+            "1m": "0",         # 1m: fetch TICK data, resample to 1m OHLC (fixes flat candles)
+            "5m": "0",         # 5m: fetch tick data, resample to 5m OHLC
+            "15m": "60000",    # 15m: fetch 1m, resample to 15m (enough variation)
             "30m": "60000",    # 30m: fetch 1m, resample to 30m
             "1h": "300000",    # 1h: fetch 5m, resample to 1h
             "4h": "300000",    # 4h: fetch 5m, resample to 4h
@@ -800,16 +800,17 @@ class ThetaStreamer:
                 try:
                     # Use snapshot/stock/quote for real-time bid/ask (works pre-market)
                     if ticker in ("SPX", "VIX"):
-                        # Indices: use last 1min bar from hist/index/price
-                        from datetime import date, timedelta
-                        end = date.today()
-                        start = end - timedelta(days=3)
+                        # Indices: use tick-level data from hist/index/price
+                        # ivl=0 returns every price change (~1/sec for SPX)
+                        # so each 2s poll gets the latest tick price, not a stale minute bar
+                        from datetime import date
+                        today = date.today()
                         url = f"{base_url}/v2/hist/index/price"
                         params = {
                             "root": ticker,
-                            "start_date": start.strftime("%Y%m%d"),
-                            "end_date": end.strftime("%Y%m%d"),
-                            "ivl": "60000",
+                            "start_date": today.strftime("%Y%m%d"),
+                            "end_date": today.strftime("%Y%m%d"),
+                            "ivl": "0",
                         }
                     else:
                         # Stocks (SPY, QQQ, IWM): prefer last trade, fallback to quote midpoint
@@ -841,14 +842,28 @@ class ThetaStreamer:
                             # Fallback: second column for simple [ms_of_day, price, date]
                             price = float(last[1]) if len(last) >= 2 else 0.0
                     else:
-                        # Last trade: extract price field
+                        # Stocks: extract last trade price
                         header = data.get("header", {}).get("format", [])
-                        tick = response[-1] if isinstance(response[-1], list) else response[-1]
-                        if "price" in header:
-                            price = float(tick[header.index("price")]) if tick[header.index("price")] else 0
+                        raw_entry = response[-1]
+                        # Handle both flat array and dict-wrapped responses
+                        if isinstance(raw_entry, list):
+                            tick = raw_entry
+                        elif isinstance(raw_entry, dict):
+                            sub_ticks = raw_entry.get("ticks", [])
+                            tick = sub_ticks[-1] if sub_ticks else []
+                        else:
+                            tick = []
+
+                        if tick and "price" in header:
+                            raw_val = tick[header.index("price")]
+                            price = float(raw_val) if raw_val else 0
+                            LOG.info(f"TRADE PRICE {ticker}: ${price:.2f} (header={header})")
+                        else:
+                            LOG.warning(f"TRADE PARSE FAIL {ticker}: header={header}, entry_type={type(raw_entry).__name__}, tick={tick}")
 
                         # Fallback: quote midpoint if trade endpoint returned 0
                         if price <= 0:
+                            LOG.warning(f"TRADE FALLBACK {ticker}: price={price}, using quote midpoint")
                             try:
                                 async with httpx.AsyncClient() as client:
                                     quote_resp = await client.get(
@@ -860,12 +875,14 @@ class ThetaStreamer:
                                     q_response = q_data.get("response", [])
                                     q_header = q_data.get("header", {}).get("format", [])
                                     if q_response and "bid" in q_header and "ask" in q_header:
-                                        q_tick = q_response[-1] if isinstance(q_response[-1], list) else q_response[-1].get("ticks", [[]])[0]
+                                        q_entry = q_response[-1]
+                                        q_tick = q_entry if isinstance(q_entry, list) else q_entry.get("ticks", [[]])[0]
                                         bid = float(q_tick[q_header.index("bid")]) if q_tick[q_header.index("bid")] else 0
                                         ask = float(q_tick[q_header.index("ask")]) if q_tick[q_header.index("ask")] else 0
                                         price = (bid + ask) / 2.0 if bid > 0 and ask > 0 else max(bid, ask)
-                            except Exception:
-                                pass
+                                        LOG.info(f"QUOTE MIDPOINT {ticker}: bid=${bid:.2f} ask=${ask:.2f} mid=${price:.2f}")
+                            except Exception as e:
+                                LOG.warning(f"QUOTE FALLBACK FAILED {ticker}: {e}")
 
                     if price > 0:
                         # Broadcast as a STOCK price update

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.interpolate import UnivariateSpline, griddata
+from scipy.interpolate import UnivariateSpline, griddata, PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 from scipy.integrate import cumulative_trapezoid
 from typing import List, Dict, Any, Tuple
@@ -54,6 +54,17 @@ class BreedenLitzenberger:
         K_arr = np.array([x[0] for x in data])
         C_arr = np.array([x[1] for x in data])
 
+        # Deduplicate strikes (SPX+SPXW can have same strike): average prices
+        unique_K, inv_idx = np.unique(K_arr, return_inverse=True)
+        if len(unique_K) < len(K_arr):
+            avg_C = np.zeros(len(unique_K))
+            counts = np.zeros(len(unique_K))
+            for i, idx in enumerate(inv_idx):
+                avg_C[idx] += C_arr[i]
+                counts[idx] += 1
+            K_arr = unique_K
+            C_arr = avg_C / counts
+
         # Filter out zero/negative call prices (bad bids)
         valid = C_arr > 0
         if valid.sum() < 5:
@@ -62,26 +73,28 @@ class BreedenLitzenberger:
         K_arr = K_arr[valid]
         C_arr = C_arr[valid]
 
+        # Trim far-OTM tail where prices are at minimum tick (noise)
+        # Sparse, flat data at the boundary causes interpolation artifacts
+        MIN_USEFUL_PRICE = 0.02
+        while len(K_arr) > 10 and C_arr[-1] < MIN_USEFUL_PRICE:
+            K_arr = K_arr[:-1]
+            C_arr = C_arr[:-1]
+
+        if len(K_arr) < 5:
+            LOG.warning("Insufficient data after tail trimming.")
+            return {}
+
         T = max(dte_days / 365.25, 0.001) # Avoid divide by zero
 
-        # Dynamic smooth_factor if not provided
-        if smooth_factor is None:
-            smooth_factor = len(K_arr) * 2
-
-        # 2. Smoothing (Cubic Spline)
-        # We model Call Price (C) as a function of Strike (K)
-        # k=3 (Cubic), s=smooth_factor
+        # 2. Monotone Interpolation (PCHIP)
+        # PchipInterpolator preserves shape monotonicity — prevents
+        # oscillation at boundaries where strike spacing is sparse
         try:
-            spline = UnivariateSpline(K_arr, C_arr, k=3, s=smooth_factor)
-            
-            # 3. Derivatives
-            # First Deriv: Delta (should be between -1 and 0 roughly)
-            # Second Deriv: Gamma-like (Probability density factor)
-            d2C_dK2_func = spline.derivative(n=2)
-            
-            # Evaluate PDF at the strikes (or a dense grid)
-            # Using input strikes for now to keep mapping clear
-            densities = d2C_dK2_func(K_arr)
+            pchip = PchipInterpolator(K_arr, C_arr)
+
+            # 3. Second Derivative → Probability Density
+            # PDF(K) = e^(rT) * d²C/dK²
+            densities = pchip.derivative(nu=2)(K_arr)
             
             # 4. Apply Breeden-Litzenberger Formula: PDF = e^(rT) * C''
             # Note: C'' should be positive (convexity of option prices). 

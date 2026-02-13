@@ -12,9 +12,9 @@ interface SkewData {
     interpretation: string;
 }
 
-const SkewPage = () => {
+const SkewPage: React.FC = () => {
     const [selectedSymbol, setSelectedSymbol] = useState('SPX');
-    const [skewData, setSkewData] = useState < SkewData[] > ([]);
+    const [skewData, setSkewData] = useState<SkewData[]>([]);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {

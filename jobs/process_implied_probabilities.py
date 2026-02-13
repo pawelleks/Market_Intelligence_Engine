@@ -201,6 +201,7 @@ def get_anchor_price(client, root):
 
             if last_price > 0:
                 LOG.info(f"   > SUCCESS: {root} close on {target}: ${last_price:.2f} (via REST API)")
+                LOG.info(f"   > 📅 ANCHOR DATE: {target.isoformat()} | This is the reference price for all calculations")
                 return last_price
 
         except Exception as e:
@@ -452,12 +453,13 @@ def generate_projection_heatmap(
     points = []
     values = []
 
+    # Use integer strikes (not drift-adjusted real_world_price_axis) for clean rendering
     for res in density_surfaces:
         dte = res['dte']
         if dte > days_out + 5:
             continue
         dist = res.get('distribution', {})
-        strikes = dist.get('real_world_price_axis', dist.get('strikes', []))
+        strikes = dist.get('strikes', [])  # Use raw integer strikes, NOT real_world_price_axis
         probs = dist.get('prob_above', [])
         if not probs or len(strikes) != len(probs):
             continue
@@ -465,13 +467,22 @@ def generate_projection_heatmap(
             points.append([float(dte), float(k)])
             values.append(float(p))
 
-    # 3. DTE=0 anchor: step function at spot price
-    min_k = spot_price * 0.90
-    max_k = spot_price * 1.10
-    anchor_strikes = np.linspace(min_k, max_k, 50)
+    # 3. Add DTE=0 anchor points to prevent extrapolation artifacts
+    # At DTE=0, the prob_above should be a step function: 100% below spot, 0% above spot
+    # This ensures the 50% contour starts exactly at spot price
+    anchor_strikes = np.linspace(spot_price * 0.85, spot_price * 1.15, 20)
     for k in anchor_strikes:
+        if k < spot_price:
+            anchor_prob = 1.0  # 100% chance of being above strikes below spot
+        else:
+            anchor_prob = 0.0  # 0% chance of being above strikes above spot
         points.append([0.0, float(k)])
-        values.append(1.0 if k < spot_price else 0.0)
+        values.append(anchor_prob)
+
+    # 4. Use spot-centered strike range (±15%) for clean heatmap
+    # The full option chain range (e.g. 4760-7983) is too wide and causes visual distortion
+    min_k = spot_price * 0.85
+    max_k = spot_price * 1.15
 
     if len(points) < 20:
         LOG.warning(f"Insufficient data points ({len(points)}) for heatmap interpolation")

@@ -104,6 +104,7 @@ export const ProbabilityLayeredChart: React.FC<ProbabilityLayeredChartProps> = (
                             stroke="#94a3b8"
                             tick={{ fill: '#94a3b8', fontSize: 10 }}
                             allowDataOverflow={true}
+                            tickFormatter={(v: number) => `$${Math.round(v).toLocaleString()}`}
                         />
                         <YAxis stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 10 }} orientation="right" width={60} />
                         <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155' }} />

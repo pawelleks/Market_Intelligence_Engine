@@ -1,5 +1,11 @@
 # Daily Pipeline Walkthrough
 
+> [!WARNING]
+> **DEPRECATED**: This document describes the batch-only pipeline architecture. The system now uses a **hybrid real-time + batch architecture** with ThetaData streaming, live Expected Moves, and on-demand GEX calculation. See `ARCHITECTURE.md` at the project root for current architecture.
+>
+> **Archived**: 2026-02-12  
+> **Reason**: Incomplete coverage of real-time capabilities
+
 This document explains the **Daily Market Intelligence Engine Pipeline** (`orchestrator.sh`) step-by-step. It details what happens, where data comes from, and where it is stored.
 
 ## 🏃 Run the Pipeline

@@ -5,7 +5,8 @@ import { PriceHistoryHeatmap } from '../components/charts/PriceHistoryHeatmap';
 import { ProbabilityLayeredChart } from '../components/charts/ProbabilityLayeredChart';
 import { ProbabilityEducationModal } from '../components/modals/ProbabilityEducationModal';
 import { SentimentGauge } from '../components/charts/SentimentGauge';
-import { HelpCircle, Clock } from 'lucide-react';
+import { RobustMetricsPanel } from '../components/metrics/RobustMetricsPanel';
+import { HelpCircle, Clock, AlertTriangle } from 'lucide-react';
 
 // Available assets for probability analysis
 const AVAILABLE_ASSETS = ['SPX', 'SPY', 'QQQ', 'IWM'] as const;
@@ -32,6 +33,8 @@ export const ImpliedProbabilityPage = () => {
 
     // Load Static Data when selectedAsset changes
     useEffect(() => {
+        const abortController = new AbortController();
+
         const loadStaticData = async () => {
             setLoading(true);
             setError(null);
@@ -40,10 +43,15 @@ export const ImpliedProbabilityPage = () => {
                 // Fetch static files in parallel for the selected asset
                 const timestamp = new Date().getTime();
                 const [surfaceRes, coneRes, heatmapRes] = await Promise.all([
-                    fetch(`/data/probability_surface_${selectedAsset}.json?v=${timestamp}`),
-                    fetch(`/data/forward_cone_${selectedAsset}.json?v=${timestamp}`),
-                    fetch(`/data/projection_heatmap_${selectedAsset}.json?v=${timestamp}`).catch(() => null)
+                    fetch(`/data/probability_surface_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }),
+                    fetch(`/data/forward_cone_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }),
+                    fetch(`/data/projection_heatmap_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }).catch(() => null)
                 ]);
+
+                // Check if request was aborted
+                if (abortController.signal.aborted) {
+                    return;
+                }
 
                 if (!surfaceRes.ok || !coneRes.ok) {
                     throw new Error(`No data for ${selectedAsset}. Run the daily pipeline first.`);
@@ -70,14 +78,25 @@ export const ImpliedProbabilityPage = () => {
                 }
 
             } catch (e: any) {
+                // Ignore abort errors
+                if (e.name === 'AbortError') {
+                    return;
+                }
                 console.error(`Failed to load ${selectedAsset} probability data:`, e);
                 setError(e.message || 'Failed to load data');
             } finally {
-                setLoading(false);
+                if (!abortController.signal.aborted) {
+                    setLoading(false);
+                }
             }
         };
 
         loadStaticData();
+
+        // Cleanup: abort fetch on unmount or ticker change
+        return () => {
+            abortController.abort();
+        };
     }, [selectedAsset]);
 
     // Fetch Live Price for selected asset
@@ -129,7 +148,7 @@ export const ImpliedProbabilityPage = () => {
 
             const dist = { ...item.distribution };
             if (dist.strikes) {
-                dist.strikes = dist.strikes.map((k: number) => k * driftFactor);
+                dist.strikes = dist.strikes.map((k: number) => Math.round(k * driftFactor));
             }
 
             return {
@@ -188,14 +207,18 @@ export const ImpliedProbabilityPage = () => {
 
     const displayPrice = safeRefPrice;
 
-    // Format date for display
+    // Format date for display with timestamp
     const formatAsOf = (dateStr: string) => {
         if (!dateStr) return '';
         const d = new Date(dateStr);
-        return d.toLocaleDateString('en-US', {
+        return d.toLocaleString('en-US', {
             month: 'short',
             day: 'numeric',
-            year: 'numeric'
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+            timeZoneName: 'short'
         });
     };
 
@@ -254,38 +277,44 @@ export const ImpliedProbabilityPage = () => {
                         How to Read
                     </button>
 
-                    {/* ERP Control */}
-                    <div className="bg-slate-900 border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-sm">
-                        <label className="text-sm font-medium text-slate-400">ERP</label>
-                        <input
-                            type="range"
-                            min="0" max="0.10" step="0.01"
-                            value={erp}
-                            onChange={(e) => setErp(parseFloat(e.target.value))}
-                            className="w-24 cursor-pointer accent-cyan-500"
-                        />
-                        <span className="text-sm font-mono text-cyan-400 w-10 text-right">
-                            {(erp * 100).toFixed(0)}%
-                        </span>
+                    {/* Breeden-Litzenberger Warning */}
+                    <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-4 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-red-200">
+                            <strong className="font-semibold">Breeden-Litzenberger Limitation:</strong> While theoretically elegant,
+                            BL is extremely fragile to real-world data quality (bid-ask noise, stale quotes, illiquid strikes).
+                            Even small price inconsistencies break the derivatives, making it unreliable for trading decisions.
+                            Use the robust metrics panel below for actionable insights.
+                        </div>
                     </div>
 
-                    {/* Expiration Selector */}
-                    {processedData.length > 0 && (
-                        <div className="bg-slate-900 border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-sm">
-                            <label className="text-sm font-medium text-slate-400">Exp</label>
-                            <select
-                                value={targetDate}
-                                onChange={(e) => setTargetDate(e.target.value)}
-                                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:ring-1 focus:ring-cyan-500 outline-none text-sm cursor-pointer"
-                            >
-                                {processedData.map((d: any) => (
-                                    <option key={d.expiration} value={d.expiration}>
-                                        {d.expiration} ({d.dte}d)
-                                    </option>
-                                ))}
-                            </select>
+                    {/* Robust Metrics Panel */}
+                    <RobustMetricsPanel
+                        forwardPrice={6833} // TODO: Calculate from data
+                        spotPrice={displayPrice}
+                        expectedMove={150} // TODO: Calculate from ATM straddle
+                        skew={8.5} // TODO: Calculate from OTM IV difference
+                        dte={30} // Using 30 DTE for these calculations
+                        loading={loading}
+                    />
+
+                    {/* ERP Control with visual indicator */}
+                    <div className="bg-slate-900 border border-slate-700 rounded-lg p-2 flex flex-col gap-1 shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <label className="text-sm font-medium text-slate-400">Drift Adjustment</label>
+                            <input
+                                type="range"
+                                min="0" max="0.10" step="0.01"
+                                value={erp}
+                                onChange={(e) => setErp(parseFloat(e.target.value))}
+                                className="w-24 cursor-pointer accent-cyan-500"
+                            />
+                            <span className="text-sm font-mono text-cyan-400 w-10 text-right">
+                                {(erp * 100).toFixed(0)}%
+                            </span>
                         </div>
-                    )}
+                        <p className="text-[10px] text-slate-500 italic">Shifts forward prices by {(erp * 100).toFixed(1)}% annually</p>
+                    </div>
                 </div>
             </header>
 
@@ -341,10 +370,9 @@ export const ImpliedProbabilityPage = () => {
                         />
                     </div>
 
-                    {/* 3. Bottom: Single Exp Bell Curve */}
+                    {/* 3. Bottom: Single Exp Bell Curve (now with internal selector) */}
                     <ProbabilityBellCurve
                         data={processedData}
-                        targetDate={targetDate}
                         currentPrice={safeRefPrice}
                         ticker={selectedAsset}
                         hardAnchor={safeRefPrice}

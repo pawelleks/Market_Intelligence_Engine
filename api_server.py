@@ -42,17 +42,43 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_volume_conclusion
 
-# Real-time Engine Import
+# Real-time Engine Imports
 from mie_lib.realtime.theta_streamer import ThetaStreamer
+from mie_lib.realtime.alpaca_streamer import AlpacaStreamer
 # from mie_lib.realtime.theta_engine import ThetaStreamer as ThetaEngine
 from datetime import datetime
 from mie_lib.utils.probability_math import BreedenLitzenberger
 
 
+# -----------------------------------------------------------------
+# Data Source Routing Configuration
+# -----------------------------------------------------------------
 
-# Global ThetaStreamer Instance
-# Initializing with default major indices/ETFs
-theta_streamer = ThetaStreamer(tickers=["SPY", "SPX", "QQQ", "IWM"])
+# ETFs: Use Alpaca IEX (free real-time)
+ETF_TICKERS = {"SPY", "QQQ", "IWM"}
+
+# Indices: Use ThetaData (only available source)
+INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX"}
+
+
+def get_quote_source(ticker: str) -> str:
+    """
+    Determines which data source to use for a given ticker.
+    
+    Returns:
+        "alpaca" for ETFs (SPY, QQQ, IWM) - real-time IEX quotes
+        "theta" for indices (SPX, VIX, etc.) - ThetaData TCP stream
+    """
+    ticker = ticker.upper()
+    return "alpaca" if ticker in ETF_TICKERS else "theta"
+
+
+# Global Streamer Instances
+# AlpacaStreamer for ETFs (real-time IEX)
+alpaca_streamer = AlpacaStreamer(tickers=list(ETF_TICKERS))
+
+# ThetaStreamer for Indices (only source)
+theta_streamer = ThetaStreamer(tickers=list(INDEX_TICKERS))
 
 # Separate Engine for Snapshot Data (uses thetadata lib) - DISABLED due to build issues
 # theta_engine_client = ThetaEngine(tickers=['SPX'])
@@ -73,12 +99,16 @@ theta_streamer = ThetaStreamer(tickers=["SPY", "SPX", "QQQ", "IWM"])
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager to handle startup and shutdown events.
-    Starts the ThetaStreamer background task.
+    Starts both AlpacaStreamer (ETFs) and ThetaStreamer (Indices) background tasks.
     """
     # Startup
-    print("Starting ThetaStreamer...")
-    # Run the streamer in a background task
-    streamer_task = asyncio.create_task(theta_streamer.start())
+    print("Starting Real-Time Data Streamers...")
+    print(f"  - Alpaca IEX: {', '.join(ETF_TICKERS)}")
+    print(f"  - ThetaData: {', '.join(INDEX_TICKERS)}")
+    
+    # Run both streamers in background tasks
+    alpaca_task = asyncio.create_task(alpaca_streamer.start())
+    theta_task = asyncio.create_task(theta_streamer.start())
 
     # Seed static Expected Moves JSON if missing or stale (>24h)
     import subprocess
@@ -101,11 +131,13 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    print("Stopping ThetaStreamer...")
+    print("Stopping Real-Time Data Streamers...")
+    await alpaca_streamer.stop()
     await theta_streamer.stop()
-    # Wait for the task to finish (optional but good practice)
+    
+    # Wait for tasks to finish (optional but good practice)
     try:
-        await streamer_task
+        await asyncio.gather(alpaca_task, theta_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 
@@ -1019,6 +1051,50 @@ async def websocket_theta_stream(websocket: WebSocket, ticker: str = "SPY"):
         pass
     finally:
         heartbeat_task.cancel()
+        if queue in theta_streamer.listeners:
+            theta_streamer.listeners.remove(queue)
+
+
+@app.websocket("/api/ws/quotes")
+async def websocket_quotes(websocket: WebSocket):
+    """
+    Unified WebSocket endpoint for real-time quotes.
+    
+    Merges streams from:
+    - AlpacaStreamer (SPY, QQQ, IWM) - real-time IEX
+    - ThetaStreamer (SPX, VIX, etc.) - ThetaData TCP
+    
+    Message format:
+    {
+        "type": "TRADE",
+        "root": "SPY",
+        "price": 475.23,
+        "size": 100,
+        "timestamp": "2024-02-12T14:30:00.123Z",
+        "source": "alpaca_iex" | "theta"
+    }
+    """
+    await websocket.accept()
+    queue = asyncio.Queue()
+    
+    # Register with BOTH streamers
+    alpaca_streamer.listeners.append(queue)
+    theta_streamer.listeners.append(queue)
+    
+    LOG.info("WebSocket /ws/quotes connected (Alpaca + Theta)")
+    
+    try:
+        while True:
+            msg = await queue.get()
+            await websocket.send_json(msg)
+    except WebSocketDisconnect:
+        LOG.info("WebSocket /ws/quotes disconnected")
+    except Exception as e:
+        LOG.error(f"WebSocket quotes error: {e}")
+    finally:
+        # Cleanup: remove from both streamer listeners
+        if queue in alpaca_streamer.listeners:
+            alpaca_streamer.listeners.remove(queue)
         if queue in theta_streamer.listeners:
             theta_streamer.listeners.remove(queue)
 

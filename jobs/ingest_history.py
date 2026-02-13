@@ -78,13 +78,28 @@ def fetch_index_price(client: httpx.Client, root: str, start: str, end: str) -> 
 
 def sanitize_ohlc(df: pd.DataFrame) -> pd.DataFrame:
     """Fix bad ticks using rolling median comparison.
-    If a bar's low/high deviates > 10% from 5-bar rolling median, replace with median."""
+    If a bar's low/high deviates >15% from 5-bar rolling median, replace with median.
+    Also fix decimal place errors (e.g., $69 instead of $690)."""
     if df.empty or "low" not in df.columns or "high" not in df.columns:
         return df
+    
+    # Fix decimal place errors first (low/high >50% away from close)
+    if 'close' in df.columns:
+        for col in ["low", "high"]:
+            close_dev = (df[col] - df['close']).abs() / df['close']
+            decimal_errors = close_dev > 0.50
+            if decimal_errors.any():
+                med = df[col].rolling(5, center=True, min_periods=1).median()
+                tickers = df["date"].dt.strftime("%Y-%m-%d") if "date" in df.columns else df.index
+                for idx in df.index[decimal_errors]:
+                    print(f"   > SANITIZE (decimal error): {col} on {tickers[idx]}: {df.at[idx, col]:.2f} -> {med[idx]:.2f}")
+                df.loc[decimal_errors, col] = med[decimal_errors]
+    
+    # Then apply rolling median check
     for col in ["low", "high"]:
         med = df[col].rolling(5, center=True, min_periods=1).median()
         pct_dev = (df[col] - med).abs() / med
-        bad = pct_dev > 0.10
+        bad = pct_dev > 0.15  # Increased from 0.10 to catch more outliers
         if bad.any():
             tickers = df["date"].dt.strftime("%Y-%m-%d") if "date" in df.columns else df.index
             for idx in df.index[bad]:

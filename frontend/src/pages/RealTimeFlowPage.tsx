@@ -9,7 +9,7 @@ export const RealTimeFlowPage = () => {
         fetch(`/api/v1/gex/latest/${ticker}?_t=${Date.now()}`)
             .then(res => res.ok ? res.json() : null)
             .then(data => { if (data) setGexInfo(data); })
-            .catch(() => {});
+            .catch(() => { });
     }, [ticker]);
 
     const spotPrice = gexInfo?.spot_price;
@@ -61,7 +61,7 @@ export const RealTimeFlowPage = () => {
                         </li>
                         <li className="flex justify-between">
                             <span className="text-slate-500">Source</span>
-                            <span className="text-emerald-400">ThetaData Direct</span>
+                            <span className="text-emerald-400">Alpaca IEX + ThetaData</span>
                         </li>
                     </ul>
                 </div>

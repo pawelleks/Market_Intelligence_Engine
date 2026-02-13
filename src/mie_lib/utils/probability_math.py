@@ -84,6 +84,29 @@ class BreedenLitzenberger:
             LOG.warning("Insufficient data after tail trimming.")
             return {}
 
+        # CRITICAL: Enforce monotonicity - call prices MUST decrease with strike
+        # Non-monotonic data (bad bids, stale quotes) creates positive derivatives → negative probabilities
+        # Use isotonic regression to fit a monotonically decreasing curve
+        from sklearn.isotonic import IsotonicRegression
+        
+        # Check if monotonicity violations exist
+        price_diffs = np.diff(C_arr)
+        violations = (price_diffs >= 0).sum()
+        
+        if violations > 0:
+            LOG.info(f"   > Enforcing monotonicity: fixing {violations} non-decreasing intervals")
+            
+            # Fit isotonic regression (decreasing)
+            iso_reg = IsotonicRegression(increasing=False)
+            C_arr_monotonic = iso_reg.fit_transform(K_arr, C_arr)
+            
+            # Replace with monotonic version
+            C_arr = C_arr_monotonic
+        
+        if len(K_arr) < 5:
+            LOG.warning("Insufficient data after monotonicity enforcement.")
+            return {}
+
         T = max(dte_days / 365.25, 0.001) # Avoid divide by zero
 
         # 2. Monotone Interpolation (PCHIP)
@@ -92,44 +115,37 @@ class BreedenLitzenberger:
         try:
             pchip = PchipInterpolator(K_arr, C_arr)
 
-            # 3. Second Derivative → Probability Density
+            # 3. Probability Above - DIRECT calculation from first derivative (per spec)
+            # Formula: P(Price > K) = -e^(rT) * (∂C/∂K)
+            # This is more accurate than integrating the PDF
+            first_deriv = pchip.derivative(nu=1)(K_arr)
+            prob_above_raw = -np.exp(self.r * T) * first_deriv
+            
+            # Prob Above should be monotonically decreasing from 1 to 0
+            # Clip to [0, 1] range
+            prob_above = np.clip(prob_above_raw, 0.0, 1.0)
+            
+            # Apply light smoothing to remove noise from derivative
+            prob_above = gaussian_filter1d(prob_above, sigma=1.0)
+            
+            # Re-clip after smoothing
+            prob_above = np.clip(prob_above, 0.0, 1.0)
+
+            # 4. PDF from second derivative (for visualization/analysis)
             # PDF(K) = e^(rT) * d²C/dK²
             densities = pchip.derivative(nu=2)(K_arr)
-            
-            # 4. Apply Breeden-Litzenberger Formula: PDF = e^(rT) * C''
-            # Note: C'' should be positive (convexity of option prices). 
-            # Noise might create negative curvature. specific handling: clip to 0.
-            
             pdf_raw = np.exp(self.r * T) * densities
             pdf_clean = np.maximum(pdf_raw, 0.0) # Clip negative probabilities
 
-            # Gaussian Smoothing (User Request) to remove jaggedness
-            # sigma=2.0 provides a good balance for discrete strike gaps
+            # Gaussian Smoothing
             pdf_smooth = gaussian_filter1d(pdf_clean, sigma=2.0)
             
             # Normalize area to 1
-            # Trapezoidal integration
             area = float(np.trapz(pdf_smooth, K_arr))
             if area > 0:
                 pdf_normalized = pdf_smooth / area
             else:
                 pdf_normalized = pdf_clean
-
-            # 6. CDF and Probability Above (Survival Function)
-            # CDF = Ex integral of PDF
-            # Prob Above = 1 - CDF
-            try:
-                # Use trapezoidal cumulative integration
-                # cumulative_trapezoid returns array of len(N-1) by default, or N if initial is set
-                cdf = cumulative_trapezoid(pdf_normalized, K_arr, initial=0)
-                # Ensure it ends at 1.0 (normalization might have slight error)
-                if cdf[-1] > 0:
-                    cdf = cdf / cdf[-1]
-                
-                prob_above = 1.0 - cdf
-            except Exception as e:
-                LOG.warning(f"Failed to calculate CDF: {e}")
-                prob_above = np.zeros_like(K_arr)
 
             # 5. Drift Adjustment (Real-World Transformation)
             # Simple shift of the distribution center

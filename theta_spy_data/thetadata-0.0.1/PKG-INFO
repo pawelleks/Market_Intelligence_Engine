@@ -1,0 +1,56 @@
+Metadata-Version: 2.1
+Name: thetadata
+Version: 0.0.1
+Summary: Python API for ThetaData
+Project-URL: Bug Tracker, https://github.com/ThetaData-API/PythonAPI/issues
+Author-email: Adler Weber <adlerweber8430@gmail.com>, Bailey Danseglio <baileydan911@gmail.com>
+License: MIT License
+        
+        Copyright (c) 2022 Theta Data
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.7
+Requires-Dist: pandas
+Requires-Dist: tqdm
+Provides-Extra: docs
+Requires-Dist: mkdocs; extra == 'docs'
+Requires-Dist: mkdocstrings[python]; extra == 'docs'
+Provides-Extra: tests
+Requires-Dist: coverage>=5.0.3; extra == 'tests'
+Requires-Dist: pytest; extra == 'tests'
+Requires-Dist: pytest-benchmark[histogram]>=3.2.1; extra == 'tests'
+Description-Content-Type: text/markdown
+
+
+Intro
+
+Theta Data API offers a low latency approach to retrieving historical options data. 
+All APIs are designed without compromising simplicity, performance, or customization. 
+This documentation will be updated every major release. The first page will always
+display the date this was last updated, the API version, and the Theta Terminal
+version the documentation uses.
+
+
+Additional Information
+
+A Theta Data subscription is required to access data. The Theta Terminal must be running
+to make requests. Visit https://thetadata.net for more info.

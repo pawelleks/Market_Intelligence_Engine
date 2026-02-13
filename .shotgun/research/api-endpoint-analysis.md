@@ -1,0 +1,428 @@
+# API Endpoint Analysis - Real-Time vs Batch Classification
+
+**Audit Date**: February 12, 2026  
+**Scope**: All FastAPI endpoints and their data sources
+
+---
+
+## Endpoint Inventory
+
+### Expected Moves Endpoints
+
+#### Endpoint 1: Latest Batch Data (Primary)
+```
+GET /api/v1/expected_moves/latest
+GET /api/v1/expected_moves/massive/latest
+
+Module: src/mie_lib/analytics/expected_moves/api_endpoints.py
+Function: get_expected_moves_latest()
+Mode: BATCH
+Data Source: data/analytics/options/latest.json
+Behavior: Pure file serving (no calculation)
+Response Time: <50ms
+```
+
+**Implementation**:
+```python
+@router.get("/latest")
+@router.get("/massive/latest")
+async def get_expected_moves_latest():
+    from mie_lib.utils.paths import options_latest_json_path
+    
+    path = options_latest_json_path()
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    
+    with open(path, "r") as f:
+        data = json.load(f)
+    
+    return sanitize_floats(data)  # Handle NaN/Inf
+```
+
+**Discrepancies**:
+- Not documented in API reference
+- JSON merge logic not explained (prevents overwrite with older data)
+- Date precedence rules not documented
+
+---
+
+#### Endpoint 2: Reliability Summary (Batch Aggregation)
+```
+GET /api/v1/expected_moves/reliability/summary
+
+Module: src/mie_lib/analytics/expected_moves/api_endpoints.py
+Function: get_reliability_summary()
+Mode: BATCH
+Data Source: All *_expected_moves.parquet files
+Behavior: Aggregates historical records, calculates hit rate
+Response Time: <200ms
+```
+
+**Implementation**:
+```python
+@router.get("/reliability/summary")
+def get_reliability_summary():
+    # Load all parquet files from data/analytics/expected_moves/
+    df = _load_archive_data()
+    
+    # Group by ticker + expiry_type
+    # Calculate: hit_rate, average_breach_dollars, max_breach_percent
+    
+    return [
+        {
+            "ticker": "SPY",
+            "expiry_type": "WEEKLY",
+            "total_records": 52,
+            "hit_rate_percent": 84.6,
+            "average_high_breach_dollars": 0.45,
+            "max_breach_percent": 2.3
+        },
+        ...
+    ]
+```
+
+**Discrepancies**:
+- Not documented in API reference
+- Reliability methodology not explained
+- "Hit rate" definition ambiguous
+
+---
+
+#### Endpoint 3: Reliability History (Batch Query)
+```
+GET /api/v1/expected_moves/reliability/history?ticker=SPY&expiry_type=WEEKLY
+
+Module: src/mie_lib/analytics/expected_moves/api_endpoints.py
+Function: get_reliability_history()
+Mode: BATCH
+Data Source: *_expected_moves.parquet files (filtered)
+Behavior: Returns historical records with optional filtering
+Response Time: <100ms
+Parameters: ticker (optional), expiry_type (optional)
+```
+
+**Response Format**:
+```python
+# Returns: List[HistoricalEMRecord]
+[
+    {
+        "ticker": "SPY",
+        "expiry_type": "WEEKLY",
+        "expiry_date": "2026-02-19",
+        "underlying_price": 450.12,
+        "expected_move_dollars": 8.45,
+        "upper_range": 458.57,
+        "lower_range": 441.67,
+        "vix1d_value": 15.4,
+        "confidence_score_percent": 75,
+        "timestamp": "2026-02-12T10:30:00"
+    },
+    ...
+]
+```
+
+**Discrepancies**:
+- Not documented in API reference
+- Response model not in swagger/OpenAPI
+
+---
+
+#### Endpoint 4: Theta Real-Time (Direct Calculation)
+```
+GET /api/v1/expected_moves/theta/latest/{ticker}
+
+Module: src/mie_lib/analytics/expected_moves/api_endpoints.py
+Function: get_theta_expected_moves()
+Mode: REAL-TIME
+Data Source: Theta Terminal REST API (port 25510)
+Behavior: Live calculation on every request
+Response Time: 2-5 seconds (Theta API latency)
+```
+
+**Implementation**:
+```python
+@router.get("/theta/latest/{ticker}")
+async def get_theta_expected_moves(ticker: str):
+    host = os.getenv("THETA_HOST", "theta_terminal")
+    port = int(os.getenv("THETA_REST_PORT", "25510"))
+    engine = ThetaExpectedMovesEngine(host=host, port=port)
+    try:
+        result = engine.run(ticker.upper())
+        return result
+    finally:
+        engine.close()
+```
+
+**Calculation Flow**:
+1. Fetch spot price via Theta `/v2/hist/stock/eod` or `/v2/hist/index/eod`
+2. Determine expirations (0DTE, WEEKLY, MONTHLY)
+3. For each expiration, fetch ATM straddle via `/v2/bulk_snapshot/option/quote`
+4. Apply bad tick filter + estimation
+5. Calculate EM = straddle_price × 0.85 (sigma factor)
+6. Return JSON with high/low/plus_minus/debug
+
+**Discrepancies**:
+- ❌ Completely undocumented (endpoint not in API reference)
+- ❌ Module (theta_expected_moves_engine.py) not documented
+- ❌ When to use (vs batch endpoint) not explained
+- ⚠️ Sigma factor (0.85) not explained
+- ⚠️ Bad tick filter logic not documented
+- ⚠️ Theta Terminal setup requirements not mentioned
+
+---
+
+#### Endpoint 5: Static Pre-Computed (Batch)
+```
+GET /api/v1/expected_moves/static/latest
+
+Module: src/mie_lib/analytics/expected_moves/api_endpoints.py
+Function: get_static_expected_moves()
+Mode: BATCH
+Data Source: /app/public/data/expected_moves_static.json
+Behavior: Instant file serving (pre-generated by cron)
+Response Time: <10ms
+```
+
+**Implementation**:
+```python
+@router.get("/static/latest")
+async def get_static_expected_moves():
+    static_path = Path("/app/public/data/expected_moves_static.json")
+    if not static_path.exists():
+        raise HTTPException(status_code=404, 
+                          detail="Static EM data not available. Waiting for first computation.")
+    
+    with open(static_path, "r") as f:
+        return json.load(f)
+```
+
+**Discrepancies**:
+- Not documented in API reference
+- Difference between `/latest` and `/static/latest` not explained
+- Generation process (cron job) not documented
+
+---
+
+### GEX Endpoints
+
+#### Endpoint 1: Latest GEX (Batch-First with Hidden Real-Time)
+```
+GET /api/v1/gex/latest/{ticker}
+GET /api/v1/gex/latest/{ticker}?force_refresh=true
+
+Module: src/mie_lib/analytics/gex/api_endpoints.py
+Function: get_latest_gex()
+Mode: BATCH-FIRST (with real-time fallback)
+Data Source: In-memory cache (15 min TTL) → Disk → On-demand calculation
+Behavior: Serves cached data, calculates only if missing
+Response Time: <50ms (cached) or 1-3s (on-demand)
+```
+
+**Cache Behavior**:
+```python
+@router.get("/latest/{ticker}")
+def get_latest_gex(ticker: str, force_refresh: bool = False):
+    """
+    STRICTLY prefers persistent storage (Daily Build).
+    Only calculates on-demand if:
+    1. Data is completely missing from disk.
+    2. force_refresh=True is passed.
+    """
+    
+    # Step 1: In-Memory Cache (15 min TTL)
+    if not force_refresh and ticker in _GEX_CACHE:
+        age = datetime.now() - _GEX_CACHE[ticker]["timestamp"]
+        if age < timedelta(minutes=15):
+            return _GEX_CACHE[ticker]["data"]
+    
+    # Step 2: Disk Storage
+    if not force_refresh:
+        disk_data = load_gex_profile(ticker)
+        if disk_data and disk_data.get("profile"):
+            _GEX_CACHE[ticker] = {...}  # Update cache
+            return disk_data
+    
+    # Step 3: On-Demand Calculation (Only if missing or forced)
+    engine = GEXEngine()
+    data = engine.fetch_and_calculate_gex(ticker)
+    _GEX_CACHE[ticker] = {...}  # Update cache
+    return data
+```
+
+**Discrepancies**:
+- ⚠️ `force_refresh` parameter not documented anywhere
+- ⚠️ Cache TTL (15 minutes) not documented
+- ⚠️ Real-time calculation capability hidden from users
+- ⚠️ Fallback order not explained (cache → disk → calc)
+- ⚠️ Data quality differences not mentioned (batch vs on-demand)
+
+---
+
+#### Endpoint 2: GEX History Heatmap (Batch Aggregation)
+```
+GET /api/v1/gex/history/heatmap/{ticker}
+
+Module: src/mie_lib/analytics/gex/api_endpoints.py
+Function: get_gex_history_heatmap()
+Mode: BATCH
+Data Source: Glob pattern: data/analytics/gex/history/{TICKER}_profile_*.parquet
+Behavior: Pivot historical data into heatmap format
+Response Time: <500ms
+```
+
+**Response Format**:
+```python
+{
+    "x": ["2026-02-01", "2026-02-02", ...],  # Dates
+    "y": [430.0, 432.5, 435.0, ...],         # Strikes
+    "z": [[gex_values_per_date_per_strike]],  # 2D array for heatmap
+    "available_dates": ["2026-02-01", ...]
+}
+```
+
+**Discrepancies**:
+- ❌ Not documented in API reference
+- ⚠️ Heatmap structure not documented
+- ⚠️ Data source (parquet files) not mentioned
+- ⚠️ Available date range not shown
+
+---
+
+### HMM Endpoints
+
+#### Endpoint 1: Backtest Results
+```
+GET /api/v1/hmm/backtest/{ticker}
+
+Module: src/mie_lib/analytics/hmm/api_endpoints.py
+Function: get_hmm_backtest_results()
+Mode: BATCH
+Data Source: data/analytics/hmm/backtest_results_{TICKER}.json
+Behavior: Loads pre-computed backtest summary
+Response Time: <50ms
+```
+
+**Status**: ✅ Documented in ARCHITECT_BIBLE
+
+---
+
+#### Endpoint 2: Signals
+```
+GET /api/v1/hmm/signals/{ticker}/{n_states}/{window_years}
+
+Module: src/mie_lib/analytics/hmm/api_endpoints.py
+Function: get_hmm_signals()
+Mode: BATCH
+Data Source: data/analytics/hmm/{TICKER}/signals/signals_{n_states}_{window}.parquet
+Behavior: Loads buy/sell signals for specific configuration
+Response Time: <100ms
+```
+
+**Status**: ✅ Documented in ARCHITECT_BIBLE
+
+---
+
+### Economic/Macro Endpoints
+
+#### LEI Index Endpoint
+```
+GET /api/v1/lei_index
+
+Module: src/mie_lib/api/routers/lei_index.py
+Mode: BATCH
+Data Source: FRED API (batch) + local parquet cache
+Behavior: Loads LEI indicator values
+Response Time: <100ms
+```
+
+**Status**: ⚠️ Partially documented
+
+#### Business Cycle Endpoint
+```
+GET /api/v1/business_cycle
+
+Module: src/mie_lib/api/routers/business_cycle.py
+Mode: BATCH
+Data Source: FRED API (batch) + local parquet cache
+Behavior: Calculates business cycle state
+Response Time: <100ms
+```
+
+**Status**: ⚠️ Partially documented
+
+---
+
+## API Endpoint Summary Table
+
+| Endpoint | Module | Mode | Documented | Hidden Features |
+|----------|--------|------|-----------|-----------------|
+| `/api/v1/expected_moves/latest` | Expected Moves | Batch | ❌ | JSON merge logic |
+| `/api/v1/expected_moves/reliability/summary` | Expected Moves | Batch | ❌ | Hit rate calculation |
+| `/api/v1/expected_moves/reliability/history` | Expected Moves | Batch | ❌ | Filtering logic |
+| `/api/v1/expected_moves/theta/latest/{ticker}` | Expected Moves | Real-time | ❌ | Sigma factor, bad ticks |
+| `/api/v1/expected_moves/static/latest` | Expected Moves | Batch | ❌ | vs /latest difference |
+| `/api/v1/gex/latest/{ticker}` | GEX | Batch-first | ⚠️ | force_refresh param |
+| `/api/v1/gex/history/heatmap/{ticker}` | GEX | Batch | ❌ | - |
+| `/backtest/{ticker}` | HMM | Batch | ✅ | - |
+| `/signals/{ticker}/{n}/{window}` | HMM | Batch | ✅ | - |
+| `/api/v1/lei_index` | LEI | Batch | ⚠️ | - |
+| `/api/v1/business_cycle` | Bus Cycle | Batch | ⚠️ | - |
+
+---
+
+## Key Findings
+
+### Finding 1: Missing API Reference Document
+**Issue**: No centralized API documentation  
+**Impact**: Users don't know all endpoints exist  
+**Affected**: 5+ Expected Moves endpoints, 2 GEX endpoints
+
+### Finding 2: Real-Time Capability Hidden
+**Issue**: `/api/v1/expected_moves/theta/latest/{ticker}` not documented  
+**Impact**: Alternative calculation method invisible  
+**Severity**: HIGH (users might not know real-time option exists)
+
+### Finding 3: Force-Refresh Parameter Undiscoverable
+**Issue**: `GET /api/v1/gex/latest/{ticker}?force_refresh=true` not in docs  
+**Impact**: Users can't trigger live calculation  
+**Severity**: MEDIUM (feature exists but hidden)
+
+### Finding 4: Calculation Methods Undocumented
+**Issue**: EM formulas (Straddle, IV, Sigma) not explained  
+**Impact**: Can't validate results or explain to stakeholders  
+**Severity**: MEDIUM
+
+### Finding 5: Batch vs Real-Time Not Indicated
+**Issue**: No indication in response format whether data is batch or real-time  
+**Impact**: Confusion about data freshness  
+**Severity**: MEDIUM
+
+---
+
+## Recommendations
+
+### Tier 1: Critical (Visibility)
+1. Create centralized `docs/API_REFERENCE.md` with:
+   - All endpoints listed with paths
+   - Real-time vs batch classification
+   - Data freshness indicators (batch date, Theta timestamp)
+   - Hidden parameters documented (force_refresh, etc.)
+
+### Tier 2: Important (Documentation)
+1. Document `/api/v1/expected_moves/theta/latest/{ticker}` with:
+   - When to use vs batch endpoint
+   - Setup requirements (Theta Terminal)
+   - Calculation method (sigma factor)
+2. Document GEX `force_refresh` parameter with:
+   - How to trigger live calculation
+   - Cache invalidation rules
+   - Response time implications
+
+### Tier 3: Nice to Have
+1. Add calculation formula documentation
+2. Create decision flowchart: which endpoint for what use case
+3. Document data quality differences (batch vs real-time)
+
+---
+
+**Status**: ✅ Analysis complete. Ready for specification and API documentation.

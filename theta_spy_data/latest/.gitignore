@@ -1,0 +1,22 @@
+build/
+dist/
+venv/
+site/
+dev/
+JupyterNotebook/credentials.txt
+dev/err.py
+*.egg-info/
+*.DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pycharm
+.idea/
+PythonAPI.iml
+/resources/
+/resources/corretto-11.0.16.1-win/
+resources/
+*/ThetaTerminal.jar

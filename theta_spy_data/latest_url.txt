@@ -1,0 +1,1 @@
+https://files.pythonhosted.org/packages/dc/6a/e94ab30ae637040d53b287895133c3fbe996893d3181ca8565e0665ec998/thetadata-0.9.11.tar.gz

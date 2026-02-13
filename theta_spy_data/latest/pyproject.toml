@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thetadata"
+version = "0.9.11"
+authors = [
+  { name="Bailey Danseglio", email="bailey@thetadata.net" },
+  { name="Adler Weber", email="redacted@thetadata.net" },
+]
+description = "Python API for Thetadata"
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.7"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "tqdm",
+  "pandas",
+  "wget",
+  "psutil",
+  "ijson",
+  "requests",
+]
+
+[project.optional-dependencies]
+tests = [
+  "coverage>=5.0.3",
+  "pytest",
+  "pytest-benchmark[histogram]>=3.2.1",
+]
+docs = [
+  "mkdocs",
+  "mkdocstrings[python]",
+  "mkdocs-material"
+]
+
+[project.urls]
+"Homepage" = "https://thetadata.net"
+"Source" = "https://thetadata-api.github.io/thetadata-python/reference/"
+"Bug Tracker" = "https://github.com/ThetaData-API/thetadata-python/issues"
+"Documentation" = "https://thetadata-api.github.io/thetadata-python/"

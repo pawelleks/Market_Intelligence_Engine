@@ -227,8 +227,8 @@ const IndicatorCard = ({ indicator, navigate }) => {
             onClick={() => navigate(`/economy/jpm-dashboard/${indicator.id}`)}
             className={`p-4 border-2 ${healthColor} rounded-lg bg-gray-900/50 cursor-pointer hover:bg-gray-800/70 transition-all transform hover:-translate-y-1`}
         >
-            {/* Label */}
-            <div className="text-sm text-gray-400 mb-2 font-medium uppercase tracking-wider">
+            {/* Title - Made more prominent */}
+            <div className="text-base font-bold text-white mb-3 uppercase tracking-wide">
                 {indicator.name}
             </div>
 

@@ -97,3 +97,5 @@ const SkewPage: React.FC = () => {
         </div>
     );
 };
+
+export default SkewPage;

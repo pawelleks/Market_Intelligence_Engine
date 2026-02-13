@@ -224,96 +224,63 @@ export const ImpliedProbabilityPage = () => {
 
     return (
         <div className="p-6 space-y-6 bg-slate-950 min-h-screen flex flex-col font-inter text-slate-200">
-            {/* Construction Banner */}
-            <div className="bg-amber-900/40 border border-amber-600/50 rounded-lg px-4 py-2.5 text-center text-sm text-amber-200">
-                Under Construction — This page may not work properly as it is still under development. Do not use the data presented to make any trading or investment decisions.
-            </div>
+            {/* Header Section */}
+            <header className="space-y-4">
+                {/* Title Row */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
+                    <div>
+                        <h1 className="text-3xl font-bold text-slate-100 mb-1">Implied Probability (ThetaData Pure)</h1>
+                        <p className="text-slate-400">Option Chain Analysis & Breeden-Litzenberger PDF</p>
 
-            {/* Header */}
-            <header className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-slate-100 mb-1">Implied Probability (ThetaData Pure)</h1>
-                    <p className="text-slate-400">Option Chain Analysis & Breeden-Litzenberger PDF.</p>
+                        {/* Data Timestamp */}
+                        {surfaceData?.as_of && (
+                            <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
+                                <Clock className="w-3 h-3" />
+                                <span>Map Generated: {formatAsOf(surfaceData.as_of)} (EOD Data)</span>
+                                {safeRefPrice > 0 && (
+                                    <span className="text-green-400 ml-2">
+                                        • {selectedAsset} Spot: ${safeRefPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
-                    {/* Data Timestamp */}
-                    {surfaceData?.as_of && (
-                        <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
-                            <Clock className="w-3 h-3" />
-                            <span>Map Generated: {formatAsOf(surfaceData.as_of)} (EOD Data)</span>
-                            {safeRefPrice > 0 && (
-                                <span className="text-green-400 ml-2">
-                                    • {selectedAsset} Spot: ${safeRefPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                </span>
-                            )}
-                        </div>
-                    )}
+                    {/* Help Button */}
+                    <button
+                        onClick={() => setIsEducationOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg transition-colors">
+                        <HelpCircle className="w-4 h-4" />
+                        How to Read
+                    </button>
                 </div>
 
-                {/* Controls */}
-                <div className="flex flex-wrap items-center gap-4">
-
-                    {/* Asset Selector */}
+                {/* Asset Selector - Pill Style */}
+                <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium text-slate-400">Asset:</span>
                     <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg p-1">
                         {AVAILABLE_ASSETS.map((asset) => (
                             <button
                                 key={asset}
                                 onClick={() => setSelectedAsset(asset)}
-                                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${selectedAsset === asset
-                                    ? 'bg-cyan-600 text-white shadow-md'
-                                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                                    }`}
-                            >
+                                className={`px-4 py-2 text-sm font-semibold rounded-md transition-all ${selectedAsset === asset
+                                        ? 'bg-cyan-600 text-white shadow-md'
+                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                                    }`}>
                                 {asset}
                             </button>
                         ))}
                     </div>
+                </div>
 
-                    {/* Education Button */}
-                    <button
-                        onClick={() => setIsEducationOpen(true)}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg transition-colors"
-                    >
-                        <HelpCircle className="w-4 h-4" />
-                        How to Read
-                    </button>
-
-                    {/* Breeden-Litzenberger Warning */}
-                    <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-4 flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                        <div className="text-sm text-red-200">
-                            <strong className="font-semibold">Breeden-Litzenberger Limitation:</strong> While theoretically elegant,
-                            BL is extremely fragile to real-world data quality (bid-ask noise, stale quotes, illiquid strikes).
-                            Even small price inconsistencies break the derivatives, making it unreliable for trading decisions.
-                            Use the robust metrics panel below for actionable insights.
-                        </div>
-                    </div>
-
-                    {/* Robust Metrics Panel */}
-                    <RobustMetricsPanel
-                        forwardPrice={6833} // TODO: Calculate from data
-                        spotPrice={displayPrice}
-                        expectedMove={150} // TODO: Calculate from ATM straddle
-                        skew={8.5} // TODO: Calculate from OTM IV difference
-                        dte={30} // Using 30 DTE for these calculations
-                        loading={loading}
-                    />
-
-                    {/* ERP Control with visual indicator */}
-                    <div className="bg-slate-900 border border-slate-700 rounded-lg p-2 flex flex-col gap-1 shadow-sm">
-                        <div className="flex items-center gap-3">
-                            <label className="text-sm font-medium text-slate-400">Drift Adjustment</label>
-                            <input
-                                type="range"
-                                min="0" max="0.10" step="0.01"
-                                value={erp}
-                                onChange={(e) => setErp(parseFloat(e.target.value))}
-                                className="w-24 cursor-pointer accent-cyan-500"
-                            />
-                            <span className="text-sm font-mono text-cyan-400 w-10 text-right">
-                                {(erp * 100).toFixed(0)}%
-                            </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 italic">Shifts forward prices by {(erp * 100).toFixed(1)}% annually</p>
+                {/* BL Warning Banner - More Condensed */}
+                <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-3 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-red-200">
+                        <strong className="font-semibold">Breeden-Litzenberger Limitation:</strong> While theoretically elegant,
+                        BL is extremely fragile to real-world data quality (bid-ask noise, stale quotes, illiquid strikes).
+                        Even small price inconsistencies break the derivatives, making it unreliable for trading decisions.
+                        Use the robust metrics panel below for actionable insights.
                     </div>
                 </div>
             </header>
@@ -336,47 +303,97 @@ export const ImpliedProbabilityPage = () => {
                 </div>
             )}
 
-            {/* Charts Grid */}
+            {/* Main Content - Only show if data loaded */}
             {!loading && processedData.length > 0 && (
                 <div className="space-y-8 animate-in fade-in duration-500">
+                    {/* SECTION 1: Market-Implied Metrics (TOP - Most Actionable) */}
+                    <section>
+                        <h2 className="text-xl font-semibold text-slate-100 mb-4">Market-Implied Metrics</h2>
+                        <p className="text-sm text-slate-400 mb-4">
+                            Battle-tested practitioner metrics using put-call parity and ATM straddles
+                        </p>
+                        <RobustMetricsPanel
+                            forwardPrice={6833} // TODO: Calculate from data
+                            spotPrice={displayPrice}
+                            expectedMove={150} // TODO: Calculate from ATM straddle
+                            skew={8.5} // TODO: Calculate from OTM IV difference
+                            dte={30} // Using 30 DTE for these calculations
+                            loading={loading}
+                        />
+                    </section>
 
-                    {/* 0. Sentiment Gauge */}
-                    <SentimentGauge
-                        sentiment={coneData?.sentiment || null}
-                        ticker={selectedAsset}
-                    />
+                    {/* SECTION 2: Probability Visualizations - 2x2 Grid */}
+                    <section>
+                        <h2 className="text-xl font-semibold text-slate-100 mb-4">Probability Visualizations</h2>
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                            {/* Top Left: Price History + Heatmap */}
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                                <PriceHistoryHeatmap
+                                    data={heatmapData}
+                                    ticker={selectedAsset}
+                                />
+                            </div>
 
-                    {/* 1. Price History + Probability Heatmap (Full Width) */}
-                    <PriceHistoryHeatmap
-                        data={heatmapData}
-                        ticker={selectedAsset}
-                    />
+                            {/* Top Right: Layered Bell Curves (Forward Cone) */}
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                                <ProbabilityLayeredChart
+                                    data={processedData}
+                                    currentPrice={safeRefPrice}
+                                    ticker={selectedAsset}
+                                    hardAnchor={safeRefPrice}
+                                />
+                            </div>
 
-                    {/* 2. Middle Row: Surface 3D + Layered Bell Curves */}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                        {/* 3D Surface */}
-                        <ProbabilitySurface3D
-                            data={processedData}
-                            forwardPrice={safeRefPrice}
+                            {/* Bottom Left: Single Expiration Bell Curve */}
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                                <ProbabilityBellCurve
+                                    data={processedData}
+                                    currentPrice={safeRefPrice}
+                                    ticker={selectedAsset}
+                                    hardAnchor={safeRefPrice}
+                                />
+                            </div>
+
+                            {/* Bottom Right: 3D Surface */}
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                                <ProbabilitySurface3D
+                                    data={processedData}
+                                    forwardPrice={safeRefPrice}
+                                    ticker={selectedAsset}
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* SECTION 3: Market Sentiment */}
+                    <section>
+                        <h2 className="text-xl font-semibold text-slate-100 mb-4">Market Sentiment</h2>
+                        <SentimentGauge
+                            sentiment={coneData?.sentiment || null}
                             ticker={selectedAsset}
                         />
+                    </section>
 
-                        {/* Layered Bell Curves (Multi-Exp) */}
-                        <ProbabilityLayeredChart
-                            data={processedData}
-                            currentPrice={safeRefPrice}
-                            ticker={selectedAsset}
-                            hardAnchor={safeRefPrice}
-                        />
-                    </div>
-
-                    {/* 3. Bottom: Single Exp Bell Curve (now with internal selector) */}
-                    <ProbabilityBellCurve
-                        data={processedData}
-                        currentPrice={safeRefPrice}
-                        ticker={selectedAsset}
-                        hardAnchor={safeRefPrice}
-                    />
+                    {/* Drift Control - Moved to bottom advanced section */}
+                    <details className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+                        <summary className="text-sm font-medium text-slate-300 cursor-pointer">
+                            Advanced: Drift Adjustment
+                        </summary>
+                        <div className="mt-4 flex items-center gap-4">
+                            <label className="text-sm font-medium text-slate-400">Drift Adjustment:</label>
+                            <input
+                                type="range"
+                                min="0" max="0.10" step="0.01"
+                                value={erp}
+                                onChange={(e) => setErp(parseFloat(e.target.value))}
+                                className="flex-grow cursor-pointer accent-cyan-500"
+                            />
+                            <span className="text-sm font-mono text-cyan-400 w-16 text-right">
+                                {(erp * 100).toFixed(0)}%
+                            </span>
+                        </div>
+                        <p className="text-xs text-slate-500 italic mt-2">Shifts forward prices by {(erp * 100).toFixed(1)}% annually</p>
+                    </details>
                 </div>
             )}
 

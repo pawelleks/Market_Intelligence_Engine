@@ -55,10 +55,11 @@ from mie_lib.utils.probability_math import BreedenLitzenberger
 # -----------------------------------------------------------------
 
 # ETFs: Use Alpaca IEX (free real-time)
+# ETFs: Use ThetaData (Alpaca disabled)
 ETF_TICKERS = {"SPY", "QQQ", "IWM"}
 
-# Indices: Use ThetaData (only available source)
-INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX"}
+# Indices + ETFs: Use ThetaData for ALL
+INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX", "SPY", "QQQ", "IWM"}
 
 
 def get_quote_source(ticker: str) -> str:
@@ -70,12 +71,12 @@ def get_quote_source(ticker: str) -> str:
         "theta" for indices (SPX, VIX, etc.) - ThetaData TCP stream
     """
     ticker = ticker.upper()
-    return "alpaca" if ticker in ETF_TICKERS else "theta"
+    return "theta"
 
 
 # Global Streamer Instances
-# AlpacaStreamer for ETFs (real-time IEX)
-alpaca_streamer = AlpacaStreamer(tickers=list(ETF_TICKERS))
+# AlpacaStreamer DISABLED
+# alpaca_streamer = AlpacaStreamer(tickers=list(ETF_TICKERS))
 
 # ThetaStreamer for Indices (only source)
 theta_streamer = ThetaStreamer(tickers=list(INDEX_TICKERS))
@@ -103,11 +104,11 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     print("Starting Real-Time Data Streamers...")
-    print(f"  - Alpaca IEX: {', '.join(ETF_TICKERS)}")
+    # print(f"  - Alpaca IEX: {', '.join(ETF_TICKERS)}")
     print(f"  - ThetaData: {', '.join(INDEX_TICKERS)}")
     
     # Run both streamers in background tasks
-    alpaca_task = asyncio.create_task(alpaca_streamer.start())
+    # alpaca_task = asyncio.create_task(alpaca_streamer.start())
     theta_task = asyncio.create_task(theta_streamer.start())
 
     # Seed static Expected Moves JSON if missing or stale (>24h)
@@ -132,12 +133,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("Stopping Real-Time Data Streamers...")
-    await alpaca_streamer.stop()
+    # await alpaca_streamer.stop()
     await theta_streamer.stop()
     
     # Wait for tasks to finish (optional but good practice)
     try:
-        await asyncio.gather(alpaca_task, theta_task, return_exceptions=True)
+        await asyncio.gather(theta_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 

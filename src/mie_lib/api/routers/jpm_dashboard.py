@@ -751,6 +751,7 @@ async def get_overview(response: Response) -> Dict[str, Any]:
             indicators.append({
                 'id': category,
                 'category': category,
+                'name': DISPLAY_NAMES.get(category, category),
                 'tier': 1,
                 'current_value': float(display_value) if pd.notna(display_value) else None,
                 'current_date': current_date,

@@ -20,6 +20,7 @@ export const ImpliedProbabilityPage = () => {
     const [surfaceData, setSurfaceData] = useState<any>(null);
     const [coneData, setConeData] = useState<any>(null);
     const [heatmapData, setHeatmapData] = useState<any>(null);
+    const [emData, setEmData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -42,10 +43,11 @@ export const ImpliedProbabilityPage = () => {
             try {
                 // Fetch static files in parallel for the selected asset
                 const timestamp = new Date().getTime();
-                const [surfaceRes, coneRes, heatmapRes] = await Promise.all([
+                const [surfaceRes, coneRes, heatmapRes, emRes] = await Promise.all([
                     fetch(`/data/probability_surface_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }),
                     fetch(`/data/forward_cone_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }),
-                    fetch(`/data/projection_heatmap_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }).catch(() => null)
+                    fetch(`/data/projection_heatmap_${selectedAsset}.json?v=${timestamp}`, { signal: abortController.signal }).catch(() => null),
+                    fetch(`/data/expected_moves_static.json?v=${timestamp}`, { signal: abortController.signal })
                 ]);
 
                 // Check if request was aborted
@@ -57,20 +59,17 @@ export const ImpliedProbabilityPage = () => {
                     throw new Error(`No data for ${selectedAsset}. Run the daily pipeline first.`);
                 }
 
-                const [surfaceJson, coneJson] = await Promise.all([
+                const [surfaceJson, coneJson, heatmapResParsed, emJson] = await Promise.all([
                     surfaceRes.json(),
-                    coneRes.json()
+                    coneRes.json(),
+                    heatmapRes && heatmapRes.ok ? heatmapRes.json() : null,
+                    emRes.json()
                 ]);
-
-                // Heatmap is optional — don't fail if missing
-                let heatmapJson = null;
-                if (heatmapRes && heatmapRes.ok) {
-                    heatmapJson = await heatmapRes.json();
-                }
 
                 setSurfaceData(surfaceJson);
                 setConeData(coneJson);
-                setHeatmapData(heatmapJson);
+                setHeatmapData(heatmapResParsed);
+                setEmData(emJson);
 
                 // Update ERP from data if available
                 if (surfaceJson.erp) {
@@ -264,8 +263,8 @@ export const ImpliedProbabilityPage = () => {
                                 key={asset}
                                 onClick={() => setSelectedAsset(asset)}
                                 className={`px-4 py-2 text-sm font-semibold rounded-md transition-all ${selectedAsset === asset
-                                        ? 'bg-cyan-600 text-white shadow-md'
-                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                                    ? 'bg-cyan-600 text-white shadow-md'
+                                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                                     }`}>
                                 {asset}
                             </button>
@@ -313,11 +312,11 @@ export const ImpliedProbabilityPage = () => {
                             Battle-tested practitioner metrics using put-call parity and ATM straddles
                         </p>
                         <RobustMetricsPanel
-                            forwardPrice={6833} // TODO: Calculate from data
+                            forwardPrice={currentFwd}
                             spotPrice={displayPrice}
-                            expectedMove={150} // TODO: Calculate from ATM straddle
-                            skew={8.5} // TODO: Calculate from OTM IV difference
-                            dte={30} // Using 30 DTE for these calculations
+                            expectedMove={emData?.[selectedAsset]?.monthly?.breakeven_move}
+                            skew={coneData?.sentiment?.drift_gap ? coneData.sentiment.drift_gap * 100 : undefined}
+                            dte={30} // Using Monthly logic (~30 DTE)
                             loading={loading}
                         />
                     </section>
@@ -327,7 +326,7 @@ export const ImpliedProbabilityPage = () => {
                         <h2 className="text-xl font-semibold text-slate-100 mb-4">Probability Visualizations</h2>
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                             {/* Top Left: Price History + Heatmap */}
-                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
+                            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 xl:col-span-2">
                                 <PriceHistoryHeatmap
                                     data={heatmapData}
                                     ticker={selectedAsset}

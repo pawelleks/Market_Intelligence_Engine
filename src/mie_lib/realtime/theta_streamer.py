@@ -36,6 +36,7 @@ except ImportError:
         INDEX = "INDEX"
 
 LOG = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 class ThetaStreamer:
     """
@@ -817,8 +818,27 @@ class ThetaStreamer:
                         url = f"{base_url}/v2/snapshot/stock/trade"
                         params = {"root": ticker}
 
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(url, params=params, timeout=5.0)
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(url, params=params, timeout=5.0)
+                            
+                        if resp.status_code == 472:
+                            # 472 = No Data (Common on weekends/holidays for "Today")
+                            # Just continue silently or debug log occasionally
+                            continue
+                            
+                        if resp.status_code != 200:
+                            # Log other errors as warning but don't crash loop
+                            LOG.warning(f"Polling warning for {ticker}: HTTP {resp.status_code}")
+                            continue
+
+                    except httpx.ReadTimeout:
+                        # Timeout means sidecar is busy/crashed. Don't spam error logs.
+                        LOG.warning(f"Polling timeout for {ticker} (Theta Sidecar busy/down)")
+                        continue
+                    except Exception as e:
+                        LOG.error(f"Polling failed for {ticker}: {e}")
+                        continue
 
                     if resp.status_code != 200:
                         continue
@@ -947,12 +967,29 @@ class ThetaStreamer:
                 option_root = "SPXW" if ticker == "SPX" else ticker
 
                 try:
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(
-                            f"{base_url}/v2/bulk_snapshot/option/ohlc",
-                            params={"root": option_root, "exp": today_str},
-                            timeout=10.0,
-                        )
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(
+                                f"{base_url}/v2/bulk_snapshot/option/ohlc",
+                                params={"root": option_root, "exp": today_str},
+                                timeout=10.0,
+                            )
+                            
+                        # Handle 472 (No Data)
+                        if resp.status_code == 472:
+                            continue
+                            
+                        if resp.status_code != 200:
+                            LOG.warning(f"Flow Poll warning for {ticker}: HTTP {resp.status_code}")
+                            continue
+                            
+                    except httpx.ReadTimeout:
+                        # Timeout means sidecar is busy/crashed. Don't spam error logs.
+                        LOG.warning(f"Flow polling timeout for {ticker}")
+                        continue
+                    except Exception as e:
+                        LOG.error(f"Option flow poll failed for {ticker}: {e}")
+                        continue
 
                     if resp.status_code != 200:
                         continue

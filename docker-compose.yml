@@ -43,6 +43,8 @@ services:
       - "11000:11000"
     env_file:
       - .env
+    environment:
+      - _JAVA_OPTIONS=-Xmx4g
     # Healthcheck omitted or simple TCP check because terminal might not have curl or endpoint.
     # The Dockerfile installs curl.
     # healthcheck:

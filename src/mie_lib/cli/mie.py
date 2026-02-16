@@ -409,6 +409,7 @@ def handle_start_pipeline_job(args):
     logger.update_stage("HMM Grid", "PENDING", {})
     logger.update_stage("Backtest HMM", "PENDING", {})
     logger.update_stage("Expected Moves", "PENDING", {})
+    logger.update_stage("Expected Moves V2", "PENDING", {})
     logger.update_stage("HMM Backtest SPY", "PENDING", {})
     logger.update_stage("GEX", "PENDING", {})
     logger.update_stage("GEX Archive", "PENDING", {})
@@ -2132,7 +2133,54 @@ def build_parser():
     p_skew.add_argument("--workers", type=int, default=10, help="Parallel worker threads (default: 10)")
     p_skew.set_defaults(func=handle_build_skew_daily)
 
+    # --- Expected Moves V2 (Static) ---
+    # --- Expected Moves V2 (Static) ---
+    em_v2_parser = sub.add_parser("update-expected-moves-v2", help="Update Static Expected Moves (Theta)")
+    em_v2_parser.set_defaults(func=handle_update_expected_moves_v2)
+
     return parser
+
+
+def handle_update_expected_moves_v2(args):
+    """
+    Handler for update-expected-moves-v2.
+    Wraps jobs/process_expected_moves_static.py with AuditLogger.
+    """
+    from mie_lib.services.audit_logger import get_audit_logger
+    import subprocess
+    import sys
+    import os
+
+    logger = get_audit_logger()
+    stage_name = "Expected Moves V2"
+    
+    print("Starting Expected Moves V2 (Static)...")
+    logger.update_stage(stage_name, "RUNNING", {})
+
+    try:
+        # Locate the script relative to project root
+        script_path = PROJECT_ROOT / "jobs" / "process_expected_moves_static.py"
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script not found: {script_path}")
+
+        # Run the script
+        cmd = [sys.executable, str(script_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("✅ Expected Moves V2 completed successfully.")
+            print(result.stdout)
+            logger.update_stage(stage_name, "COMPLETED", {})
+        else:
+            print(f"❌ Expected Moves V2 failed with code {result.returncode}")
+            print(result.stderr)
+            logger.update_stage(stage_name, "FAILED", {"error": result.stderr})
+            sys.exit(result.returncode)
+
+    except Exception as e:
+        print(f"❌ Error in update-expected-moves-v2: {e}")
+        logger.update_stage(stage_name, "FAILED", {"error": str(e)})
+        sys.exit(1)
 
 
 def main(argv=None):

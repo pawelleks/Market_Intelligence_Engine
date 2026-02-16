@@ -100,14 +100,15 @@ def load_features_for_markov(ticker: str):
     return df
 
 
-# Unified classification imports
-from .states_model import classify_tri_state, classify_binary_state, multi_step # Now imports the utility
+# Delayed import to avoid circular dependency
+# from .states_model import classify_tri_state, classify_binary_state, multi_step
 
 
 def _states_from_returns(ret: "pd.Series", cfg: MarkovConfig) -> "pd.Series":
     import pandas as pd
 
     # Vectorized apply using unified helpers to ensure boundary consistency
+    from .states_model import classify_tri_state, classify_binary_state
     mode = cfg.state_mode
     thr = cfg.threshold_bps
     if mode == "tri":
@@ -264,6 +265,7 @@ def build_markov_for_ticker(ticker: str, cfg: MarkovConfig) -> Dict[str, str]:
         # horizons are not configurable here, assume standard 1, 2, 3, 4, 5 days
         horizons = [1, 2, 3, 4, 5] 
         try:
+            from .states_model import multi_step
             multi_step_df = multi_step(prob_df, horizons, cfg.state_mode)
             
             if not multi_step_df.empty:

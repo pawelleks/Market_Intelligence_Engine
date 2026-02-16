@@ -1,27 +1,27 @@
 # MINSKY - Prediction Analysis Report
 
-**Generated**: 2026-01-11 11:25  
-**Analysis Period**: 1986-01-01 00:00:00 to 2025-04-01 00:00:00  
-**Data Coverage**: 39.2 years
+**Generated**: 2026-02-16 08:29  
+**Analysis Period**: 1986-01-01 00:00:00 to 2025-07-01 00:00:00  
+**Data Coverage**: 39.5 years
 
 ---
 
 ## Executive Summary
 
-**Overall Performance Rank**: #4 out of 9 models  
-**Overall Score**: 25.1/100
+**Overall Performance Rank**: #8 out of 9 models  
+**Overall Score**: 0.0/100
 
 ### Key Metrics at a Glance
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
-| **Hit Rate** | 50.0% | ⚠️ Good |
-| **False Positive Rate** | 62.5% | ⚠️ Acceptable |
-| **Average Lead Time** | 7.0 months | ⚠️ Acceptable |
-| **Avg 12m Return After Signal** | 11.1% | ⚠️ Blow-off Top Pattern |
-| **Total Signals Generated** | 8 | - |
-| **Recessions Analyzed** | 4 | - |
-| **Recessions Caught** | 2 | - |
+| **Hit Rate** | nan% | ❌ Poor |
+| **False Positive Rate** | 100.0% | ❌ High |
+| **Average Lead Time** | nan months | ❌ Too Early |
+| **Avg 12m Return After Signal** | 0.4% | ⚠️ Blow-off Top Pattern |
+| **Total Signals Generated** | 1 | - |
+| **Recessions Analyzed** | 0 | - |
+| **Recessions Caught** | 0 | - |
 
 ---
 
@@ -29,8 +29,8 @@
 
 ### Summary Statistics
 
-- **Hit Rate**: 50.0% (2 of 4 recessions predicted)
-- **Average Lead Time**: 7.0 months
+- **Hit Rate**: nan% (0 of 0 recessions predicted)
+- **Average Lead Time**: nan months
 - **Lead Time Range**: 2 to 12 months
 
 ### Recession-by-Recession Analysis
@@ -44,9 +44,9 @@
 
 ### False Positive Analysis
 
-**False Positive Rate**: 62.5% (5 of 8 signals)
+**False Positive Rate**: 100.0% (1 of 1 signals)
 
-**Assessment**: ⚠️ **Acceptable precision** - False positive rate is moderate. Use in combination with other models for confirmation.
+**Assessment**: ❌ **High false positive rate** - This model triggers frequently without recessions. Best used as an early warning system, not a definitive signal.
 
 ---
 
@@ -56,21 +56,21 @@
 
 | Time Horizon | Average Return | Min | Max |
 |--------------|----------------|-----|-----|
-| **6 Months** | 6.9% | -6.3% | 25.8% |
-| **12 Months** | 11.1% | -0.3% | 29.9% |
-| **24 Months** | 12.4% | -39.1% | 47.7% |
+| **6 Months** | 25.8% | 25.8% | 25.8% |
+| **12 Months** | 0.4% | 0.4% | 0.4% |
+| **24 Months** | 13.6% | 13.6% | 13.6% |
 
 ### Drawdown Analysis
 
-- **Average Max Drawdown**: -14.7%
-- **Worst Drawdown**: -47.3%
-- **Average Time to Bottom**: 6.6 months
+- **Average Max Drawdown**: -8.5%
+- **Worst Drawdown**: -8.5%
+- **Average Time to Bottom**: 11.1 months
 
 ### Blow-off Top Analysis
 
-**Blow-off Tops Detected**: 8 out of 8 signals (100.0%)
+**Blow-off Tops Detected**: 1 out of 1 signals (100.0%)
 
-⚠️ **High Blow-off Top Rate**: Markets rallied **28.9% on average** in the **17.2 months** after this model signaled TROUBLE before eventually declining.
+⚠️ **High Blow-off Top Rate**: Markets rallied **37.6% on average** in the **7.8 months** after this model signaled TROUBLE before eventually declining.
 
 **Implication**: Recession signals from this model do NOT mean immediate market crash. Expect a rally first, then gradual decline.
 
@@ -84,32 +84,27 @@
 
 ## Signal Characteristics
 
-**Total Observations**: 158  
-**TROUBLE Periods**: 99 (62.7% of time)  
-**WARNING Periods**: 30  
-**CLEAR Periods**: 25
+**Total Observations**: 159  
+**TROUBLE Periods**: 155 (97.5% of time)  
+**WARNING Periods**: 0  
+**CLEAR Periods**: 0
 
 ---
 
 ## Key Findings & Recommendations
 
-### Strength: Actionable Lead Time
-
-- ✅ Short lead time means timely signals
-- ✅ Less risk of "too early" positioning
-- ✅ Better for tactical trading
-
 ### Recommended Use Cases
 
-- **Secondary Confirmation**: Use to confirm signals from other models
+- **Supporting Indicator**: Use as part of a broader ensemble
 - **Tactical Trading**: Suitable for near-term positioning
 
 ### Limitations
 
+- ⚠️ High false positive rate (100%) - many signals don't lead to recessions
 - ⚠️ Very high blow-off top rate (100%) - signals don't mean immediate market crashes
 
 ---
 
-**Report Generated**: 2026-01-11 11:25:27  
+**Report Generated**: 2026-02-16 08:29:26  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

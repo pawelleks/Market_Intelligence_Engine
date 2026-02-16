@@ -1,27 +1,27 @@
 # LAG - Prediction Analysis Report
 
-**Generated**: 2026-01-11 11:25  
-**Analysis Period**: 1990-01-01 00:00:00 to 2025-12-01 00:00:00  
-**Data Coverage**: 35.9 years
+**Generated**: 2026-02-16 08:29  
+**Analysis Period**: 1960-01-01 00:00:00 to 2026-01-01 00:00:00  
+**Data Coverage**: 66.0 years
 
 ---
 
 ## Executive Summary
 
-**Overall Performance Rank**: #3 out of 9 models  
-**Overall Score**: 25.9/100
+**Overall Performance Rank**: #4 out of 9 models  
+**Overall Score**: 28.1/100
 
 ### Key Metrics at a Glance
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
-| **Hit Rate** | 66.7% | ✅ Excellent |
-| **False Positive Rate** | 60.0% | ⚠️ Acceptable |
-| **Average Lead Time** | 16.5 months | ⚠️ Acceptable |
-| **Avg 12m Return After Signal** | 0.5% | ⚠️ Blow-off Top Pattern |
-| **Total Signals Generated** | 5 | - |
-| **Recessions Analyzed** | 3 | - |
-| **Recessions Caught** | 2 | - |
+| **Hit Rate** | 62.5% | ✅ Excellent |
+| **False Positive Rate** | 55.6% | ⚠️ Acceptable |
+| **Average Lead Time** | 15.2 months | ⚠️ Acceptable |
+| **Avg 12m Return After Signal** | 3.2% | ⚠️ Blow-off Top Pattern |
+| **Total Signals Generated** | 9 | - |
+| **Recessions Analyzed** | 8 | - |
+| **Recessions Caught** | 5 | - |
 
 ---
 
@@ -29,21 +29,26 @@
 
 ### Summary Statistics
 
-- **Hit Rate**: 66.7% (2 of 3 recessions predicted)
-- **Average Lead Time**: 16.5 months
-- **Lead Time Range**: 9 to 24 months
+- **Hit Rate**: 62.5% (5 of 8 recessions predicted)
+- **Average Lead Time**: 15.2 months
+- **Lead Time Range**: 7 to 27 months
 
 ### Recession-by-Recession Analysis
 
 | Recession | Start Date | Signal? | Lead Time | Assessment |
 |-----------|------------|---------|-----------|------------|
+| 1970 | 1970-01 | ❌ No | N/A | Missed |
+| 1973-75 | 1973-12 | ✅ Yes | 7mo | Good timing |
+| 1980 | 1980-02 | ✅ Yes | 9mo | Good timing |
+| 1981-82 | 1981-08 | ✅ Yes | 27mo | Very early |
+| 1990-91 | 1990-08 | ❌ No | N/A | Missed |
 | 2001 | 2001-04 | ✅ Yes | 9mo | Good timing |
 | 2008-09 | 2008-01 | ✅ Yes | 24mo | Very early |
 | 2020 | 2020-03 | ❌ No | N/A | Missed |
 
 ### False Positive Analysis
 
-**False Positive Rate**: 60.0% (3 of 5 signals)
+**False Positive Rate**: 55.6% (5 of 9 signals)
 
 **Assessment**: ⚠️ **Acceptable precision** - False positive rate is moderate. Use in combination with other models for confirmation.
 
@@ -55,19 +60,19 @@
 
 | Time Horizon | Average Return | Min | Max |
 |--------------|----------------|-----|-----|
-| **6 Months** | -9.0% | -42.6% | 7.9% |
-| **12 Months** | 0.5% | -19.6% | 13.9% |
-| **24 Months** | 2.1% | -34.9% | 35.1% |
+| **6 Months** | -2.0% | -42.6% | 20.5% |
+| **12 Months** | 3.2% | -19.6% | 32.7% |
+| **24 Months** | 10.1% | -34.9% | 55.7% |
 
 ### Drawdown Analysis
 
-- **Average Max Drawdown**: -19.8%
+- **Average Max Drawdown**: -16.0%
 - **Worst Drawdown**: -47.2%
-- **Average Time to Bottom**: 9.8 months
+- **Average Time to Bottom**: 8.1 months
 
 ### Blow-off Top Analysis
 
-**Blow-off Tops Detected**: 3 out of 5 signals (60.0%)
+**Blow-off Tops Detected**: 6 out of 9 signals (66.7%)
 
 ⚠️ **Moderate Blow-off Top Risk**: About half of signals were followed by market rallies before eventual declines.
 
@@ -79,18 +84,14 @@
 
 ## Signal Characteristics
 
-**Total Observations**: 432  
-**TROUBLE Periods**: 34 (7.9% of time)  
-**WARNING Periods**: 64  
-**CLEAR Periods**: 328
+**Total Observations**: 793  
+**TROUBLE Periods**: 97 (12.2% of time)  
+**WARNING Periods**: 130  
+**CLEAR Periods**: 560
 
 ---
 
 ## Key Findings & Recommendations
-
-### ⭐ Top Performer
-
-This model ranks in the **top 3** of all tested models. 
 
 ### Strength: High Hit Rate
 
@@ -102,12 +103,13 @@ This model ranks in the **top 3** of all tested models.
 
 - **Secondary Confirmation**: Use to confirm signals from other models
 - **Strategic Planning**: Good for long-term portfolio allocation
+- **Risk Management**: Trigger defensive actions when signal activates
 
 ### Limitations
 
 
 ---
 
-**Report Generated**: 2026-01-11 11:25:27  
+**Report Generated**: 2026-02-16 08:29:26  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

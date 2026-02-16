@@ -20,7 +20,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import re
-import yfinance as yf
+# import yfinance as yf # REPLACED BY THETA REST
+from mie_lib.data_ingest.providers.theta_rest import ThetaRestClient
 
 from mie_lib.analytics.expected_moves.core import (
     calculate_straddle_em,
@@ -175,6 +176,12 @@ def run_daily_em_build(tickers: List[str], as_of: Optional[date] = None) -> Dict
             LOG.error(f"Failed to process {ticker}: {e}")
             latest_results["tickers"][ticker] = {"error": str(e)}
             
+    # 3.5 Validation: Ensure we computed at least ONE successful ticker before overwriting critical file
+    success_count = sum(1 for t, res in latest_results["tickers"].items() if "error" not in res)
+    if success_count == 0:
+        LOG.error("No successful tickers processed (Success=0). Aborting latest.json update to preserve previous state.")
+        return latest_results
+
     # 4. Save Latest JSON
     json_path = options_latest_json_path()
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -316,8 +323,8 @@ def _process_ticker(
             LOG.warning(f"No chain found for {ticker} {expiry_type} ({expiry_date})")
             continue
             
-        # Enrich with YFinance Data if OI is missing (Price-only file)
-        chain = enrich_with_yf_data(chain, ticker, expiry_date)
+        # Enrich with Theta Data if OI is missing (Price-only file)
+        chain = enrich_with_theta_data(chain, ticker, expiry_date)
             
         # _filter_chain is no longer needed as we fetched specific data
         # But we verify it's not empty again just in case
@@ -625,90 +632,71 @@ def _filter_chain(df_all: pd.DataFrame, ticker: str, expiry_date: date) -> pd.Da
             
     return df
 
-def enrich_with_yf_data(df: pd.DataFrame, ticker: str, expiry_date: date) -> pd.DataFrame:
-    """
-    Enriches the Options DataFrame with Open Interest and IV from YFinance.
-    Used when flat files lack these columns (Price-only / OHLC files).
-    """
-    if expiry_date < date.today():
-        # YFinance only supports current/future option chains
-        return df
+# from mie_lib.data_ingest.providers.massive_api import fetch_historical_option_chain # REMOVED to enforce Flat File usage
+# from mie_lib.data_ingest.massive_options_loader import MassiveOptionsLoader # Removed
+# from mie_lib.utils.paths import (
+#     options_expected_moves_path,
+#     options_latest_json_path,
+# )
 
+from mie_lib.data_ingest.providers.theta_rest import ThetaRestClient
+
+# ... (omitted imports)
+
+def enrich_with_theta_data(df: pd.DataFrame, ticker: str, expiry_date: date) -> pd.DataFrame:
+    """
+    Enriches the Options DataFrame with Open Interest and IV from ThetaData (REST).
+    Used when flat files lack these columns (Price-only / OHLC files).
+    Replaces deprecated enrich_with_yf_data.
+    """
     # Check if we actually need enrichment
     # If OI AND IV are present and mostly non-null, skip
-    # (Polygon might give OI but no IV, requiring YF enrichment)
     oi_ok = 'oi' in df.columns and df['oi'].notna().sum() > 10
     iv_ok = 'iv' in df.columns and df['iv'].notna().sum() > 10
     
     if oi_ok and iv_ok:
         return df
 
-    LOG.info(f"Enriching {ticker} {expiry_date} with YFinance Data (OI/IV)...")
+    LOG.info(f"Enriching {ticker} {expiry_date} with ThetaData (IV/OI)...")
 
     try:
-        # YFinance Ticker
-        # Handle Indices: ^SPX -> ^SPX is correct for YF usually?
-        # User tested with SPY. 
-        # Use existing ticker.
-        yf_ticker = yf.Ticker(ticker)
+        client = ThetaRestClient()
+        # Fetch snapshot (IV/OI)
+        # Returns ['strike', 'option_type', 'iv'] (and potentially OI if updated)
+        theta_df = client.get_option_snapshot(ticker, expiry_date)
         
-        exp_str = expiry_date.strftime("%Y-%m-%d")
-        
-        try:
-             chain_data = yf_ticker.option_chain(exp_str)
-        except Exception:
-             # Expired or not found
-             LOG.warning(f"YFinance option chain not found for {ticker} {exp_str}")
-             return df
-             
-        calls = chain_data.calls
-        puts = chain_data.puts
-        
-        # Normalize YF Data
-        # YF Columns: contractSymbol, strike, openInterest, impliedVolatility
-        cols_needed = ['contractSymbol', 'strike', 'openInterest', 'impliedVolatility']
-        
-        # Prepare YF dataframe for merge
-        yf_calls = calls[cols_needed].copy() if not calls.empty else pd.DataFrame(columns=cols_needed)
-        yf_puts = puts[cols_needed].copy() if not puts.empty else pd.DataFrame(columns=cols_needed)
-        
-        yf_calls['option_type'] = 'C'
-        yf_puts['option_type'] = 'P'
-        
-        yf_df = pd.concat([yf_calls, yf_puts])
-        
-        if yf_df.empty:
+        if theta_df.empty:
+            LOG.warning(f"ThetaData snapshot not found for {ticker} {expiry_date}")
             return df
             
         # Rename for merge
-        yf_df = yf_df.rename(columns={
-            'openInterest': 'oi_yf',
-            'impliedVolatility': 'iv_yf'
+        # Theta columns: strike, option_type, iv
+        theta_df = theta_df.rename(columns={
+            'iv': 'iv_theta'
         })
         
         # We merge on Strike + OptionType
         # Ensure types match
         df['strike'] = df['strike'].astype(float)
-        yf_df['strike'] = yf_df['strike'].astype(float)
+        theta_df['strike'] = theta_df['strike'].astype(float)
         
         # Merge
         # Left join to preserve original rows (Prices)
-        # We match on strike and option_type
-        # Note: rounding strikes might be needed if floats differ slightly
-        merged = pd.merge(df, yf_df[['strike', 'option_type', 'oi_yf', 'iv_yf']], on=['strike', 'option_type'], how='left')
+        merged = pd.merge(df, theta_df[['strike', 'option_type', 'iv_theta']], on=['strike', 'option_type'], how='left')
         
-        # Fill missing 'oi' with 'oi_yf'
-        # Ensure numeric types to avoid FutureWarning about downcasting
-        merged['oi'] = pd.to_numeric(merged['oi'], errors='coerce')
+        # Fill missing 'iv' with 'iv_theta'
         merged['iv'] = pd.to_numeric(merged['iv'], errors='coerce')
-        merged['oi'] = merged['oi'].fillna(merged['oi_yf'])
-        merged['iv'] = merged['iv'].fillna(merged['iv_yf'])
+        merged['iv'] = merged['iv'].fillna(merged['iv_theta'])
         
         # Drop temp columns
-        merged = merged.drop(columns=['oi_yf', 'iv_yf'])
+        merged = merged.drop(columns=['iv_theta'])
+        
+        # Note: Theta snapshot might not have OI yet (depends on provider impl). 
+        # If getting OI is critical, we need to update provider.
+        # For Expected Moves, IV is critical for standard deviation calc. OI is secondary for display.
         
         return merged
 
     except Exception as e:
-        LOG.warning(f"YFinance enrichment failed for {ticker} {expiry_date}: {e}")
+        LOG.warning(f"ThetaData enrichment failed for {ticker} {expiry_date}: {e}")
         return df

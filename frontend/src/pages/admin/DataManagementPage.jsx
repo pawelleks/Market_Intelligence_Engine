@@ -8,7 +8,7 @@ import { usePageTitle } from '../../hooks/usePageTitle';
 const PIPELINE_STEPS = [
     { id: "Ingestion", label: "Phase 1: Ingestion", steps: ["Update Raw Data", "Download Daily Options (Flat File)", "Extract Options Tickers"] },
     { id: "Features", label: "Phase 2: Features", steps: ["Update Features"] },
-    { id: "Analytics", label: "Phase 3: Analytics", steps: ["Minervini Scanner", "Markov Grid", "Markov Snapshots", "HMM Grid", "Backtest HMM", "GEX", "Expected Moves", "Skew & PCR", "Seasonality", "TSMOM", "GAF", "SMA/EMA Stack", "ADX/DMI", "Ichimoku", "PSAR", "VolatilityTermStructure", "AI Context Generation"] },
+    { id: "Analytics", label: "Phase 3: Analytics", steps: ["Minervini Scanner", "Markov Grid", "Markov Snapshots", "HMM Grid", "Backtest HMM", "GEX", "Expected Moves", "Expected Moves V2", "Skew & PCR", "Seasonality", "TSMOM", "GAF", "SMA/EMA Stack", "ADX/DMI", "Ichimoku", "PSAR", "VolatilityTermStructure", "AI Context Generation"] },
     { id: "Snapshots", label: "Phase 4: Data Publishing", steps: ["Publish Analytics Data"] }
 ];
 

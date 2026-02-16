@@ -39,12 +39,12 @@ def _process_markov_grid_for_ticker(
     Thread-safe: each call processes one ticker's files independently.
     """
     try:
-        from mie_lib.analytics.markov.markov_engine import (
+        from mie_lib.analytics.markov.states_model import (
             build_states_from_features,
             derive_matrix,
-            multi_step,
-            FEATURES_DIR
+            multi_step
         )
+        from mie_lib.analytics.markov.markov_engine import FEATURES_DIR
         
         feat_path = FEATURES_DIR / f"{ticker}.parquet"
         if not feat_path.exists():

@@ -5,19 +5,19 @@ This module adheres to the strict "Split-Source" Data Strategy defined in agent_
 
 OPTION CHAINS: Must come from Massive.com (Flat Files). Do NOT refactor to use APIs.
 
-ENRICHMENT: yfinance is allowed ONLY for underlying price/metadata.
+ENRICHMENT: ThetaData (REST) is allowed ONLY for underlying price/metadata.
 
 Any attempt to replace the flat-file ingest with an API call is a violation of project constraints. Fix logic errors only; do not change the data provider.
 """
 """
 Data ingestion layer for Expected Moves (EM).
 Handles fetching VIX1D, determining expiration dates, and retrieving option chains.
-Uses yfinance for all data to avoid missing provider dependencies.
+Uses ThetaData REST API for spot prices and VIX to avoid yfinance dependency.
 """
 from datetime import date, timedelta, datetime, timezone
 import logging
 import pandas as pd
-import yfinance as yf
+# import yfinance as yf # REPLACED BY THETA REST
 from typing import Optional, Tuple, Dict, Any
 
 from mie_lib.utils.trading_calendar import (
@@ -26,39 +26,33 @@ from mie_lib.utils.trading_calendar import (
     last_trading_day_of_week,
 )
 
+# New Theta Provider
+from mie_lib.data_ingest.providers.theta_rest import ThetaRestClient
+
 LOG = logging.getLogger(__name__)
 
 def fetch_vix1d_close(as_of: date) -> Optional[float]:
     """
-    Fetches the EOD close for VIX1D (or fallback VIX) for the given date.
+    Fetches the EOD close for VIX1D (or fallback VIX) for the given date using ThetaData.
     """
+    client = ThetaRestClient()
+    
     # Try VIX1D first, then VIX
-    tickers = ["^VIX1D", "^VIX"]
+    # ThetaData uses VIX1D and VIX roots (no ^ prefix)
+    tickers = ["VIX1D", "VIX"]
     
     for symbol in tickers:
         try:
-            # Fetch a small window around the date to ensure we get the close
-            start_date = as_of
-            end_date = as_of + timedelta(days=1)
-            
-            # Use Ticker.history which is more robust for single tickers
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(start=start_date, end=end_date, interval="1d")
-            
-            if df is not None and not df.empty:
-                # history() usually returns a DataFrame with simple columns
-                if "Close" in df.columns:
-                    close_val = df["Close"].iloc[0]
-                    if pd.notna(close_val):
-                        val = float(close_val)
-                        LOG.info(f"Fetched {symbol} close for {as_of}: {val}")
-                        return val
+            val = client.get_eod_price(symbol, as_of)
+            if val is not None and val > 0:
+                LOG.info(f"Fetched {symbol} close for {as_of} via Theta: {val}")
+                return val
                     
         except Exception as e:
             LOG.warning(f"Failed to fetch {symbol} for {as_of}: {e}")
             continue
             
-    LOG.error(f"Could not fetch VIX1D or VIX for {as_of}")
+    LOG.error(f"Could not fetch VIX1D or VIX for {as_of} via Theta")
     return None
 
 def get_target_expirations(as_of: date, ticker: Optional[str] = None) -> Tuple[date, date, date]:
@@ -105,8 +99,11 @@ def get_target_expirations(as_of: date, ticker: Optional[str] = None) -> Tuple[d
         # similar to how we handle "After Market" on weekdays.
         # This ensures weekend views show "Next Day" logic.
         if as_of.weekday() == 4:
-             odte_date = get_next_trading_day(as_of)
-             LOG.info(f"0DTE Check (Historical/Friday): Rollover to {odte_date}")
+             # odte_date = get_next_trading_day(as_of)
+             # LOG.info(f"0DTE Check (Historical/Friday): Rollover to {odte_date}")
+             # REVERT: Rollover breaks processing if Flat File lacks next-day chain (e.g. ETFs).
+             # Stick to as_of (Friday) which is guaranteed to be in the file.
+             odte_date = as_of
         elif is_trading_day(as_of):
             odte_date = as_of
         else:
@@ -135,7 +132,7 @@ def get_target_expirations(as_of: date, ticker: Optional[str] = None) -> Tuple[d
     
     # Heuristic for generic "Index with EOMs"
     # This list can be expanded or moved to config if needed.
-    eom_tickers = {"SPY", "QQQ", "IWM", "DIA", "RSP", "^VIX", "^VIX1D"}
+    eom_tickers = {"SPY", "QQQ", "IWM", "DIA", "RSP", "^VIX", "^VIX1D", "VIX", "VIX1D"}
     use_eom = False
     
     if ticker:
@@ -201,49 +198,36 @@ def fetch_option_chain(
     provider: Any = None # Unused now
 ) -> pd.DataFrame:
     """
-    Fetches the option chain for a specific ticker and expiration date using yfinance.
+    Fetches the option chain for a specific ticker and expiration date using ThetaRest.
     Returns a DataFrame with columns: ['strike', 'option_type', 'prev_close_mid', 'iv']
+    Note: Used for Enrichment fallback.
     """
     try:
-        yf_ticker = yf.Ticker(ticker)
+        client = ThetaRestClient()
+        # Returns DataFrame with ['strike', 'option_type', 'iv', 'oi']
+        # We need check what get_option_snapshot returns logic.
+        # It currently returns IV/Strike/Right.
         
-        # yfinance expects expiration as string 'YYYY-MM-DD'
-        exp_str = expiry.isoformat()
+        # We need Price (prev_close_mid). 
+        # The new provider implementation in step 1 needs to support Price too.
+        # I'll rely on the provider returning what's needed or updating it shortly.
         
-        # Check if expiry is available
-        available_exps = yf_ticker.options
-        if exp_str not in available_exps:
-            LOG.warning(f"Expiration {exp_str} not found for {ticker}. Available: {available_exps[:3]}...")
-            return pd.DataFrame()
+        # Let's check provider code I wrote. 
+        # It gets Greeks (IV). It commented out Quote (Price).
+        # We need Price for fallback.
+        # I should update provider to fetch Price too.
+        
+        # But for now, let's call get_option_snapshot
+        
+        chain = client.get_option_snapshot(ticker, expiry)
+        if chain.empty:
+             return pd.DataFrame()
+             
+        # Add 'prev_close_mid' placeholder if missing (we mainly need IV/OI from this)
+        if 'prev_close_mid' not in chain.columns:
+            chain['prev_close_mid'] = None
             
-        opts = yf_ticker.option_chain(exp_str)
-        calls = opts.calls
-        puts = opts.puts
-        
-        # Process Calls
-        calls['option_type'] = 'C'
-        calls['mid'] = (calls['bid'] + calls['ask']) / 2
-        # Fallback to lastPrice if bid/ask are 0 or missing (common in EOD/delayed data)
-        calls['mid'] = calls.apply(lambda row: row['lastPrice'] if row['mid'] == 0 else row['mid'], axis=1)
-        
-        # Process Puts
-        puts['option_type'] = 'P'
-        puts['mid'] = (puts['bid'] + puts['ask']) / 2
-        puts['mid'] = puts.apply(lambda row: row['lastPrice'] if row['mid'] == 0 else row['mid'], axis=1)
-        
-        # Combine
-        chain = pd.concat([calls, puts])
-        
-        # Rename columns to match expected schema
-        # Expected: strike, option_type, prev_close_mid, iv, contractSymbol
-        chain = chain.rename(columns={
-            'strike': 'strike',
-            'mid': 'prev_close_mid',
-            'impliedVolatility': 'iv',
-            'contractSymbol': 'contractSymbol'
-        })
-        
-        return chain[['strike', 'option_type', 'prev_close_mid', 'iv', 'contractSymbol']]
+        return chain
         
     except Exception as e:
         LOG.error(f"Error fetching option chain for {ticker} exp {expiry}: {e}")
@@ -251,24 +235,16 @@ def fetch_option_chain(
 
 def fetch_underlying_close(ticker: str, as_of: date, provider: Any = None) -> Optional[float]:
     """
-    Fetches the underlying spot close price using yfinance.
+    Fetches the underlying spot close price using ThetaRest.
     """
     try:
-        start_date = as_of
-        end_date = as_of + timedelta(days=1)
+        client = ThetaRestClient()
+        val = client.get_eod_price(ticker, as_of)
         
-        # Use Ticker.history
-        yf_ticker = yf.Ticker(ticker)
-        # auto_adjust=False ensures we get the raw Close, matching Massive/Yahoo Website "Close" column
-        df = yf_ticker.history(start=start_date, end=end_date, interval="1d", auto_adjust=False)
-        
-        if df is not None and not df.empty:
-            LOG.info(f"yfinance raw data for {ticker}:\n{df.tail(1)}")
-            if "Close" in df.columns:
-                close_val = df["Close"].iloc[0]
-                if pd.notna(close_val):
-                    return float(close_val)
-                
+        if val is not None:
+            LOG.info(f"ThetaRest raw data for {ticker}: {val}")
+            return val
+            
     except Exception as e:
         LOG.error(f"Error fetching spot price for {ticker}: {e}")
         

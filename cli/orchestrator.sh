@@ -115,6 +115,10 @@ ${MIE_CMD} update-expected-moves --ticker @config --lookback 5 --include-weekly-
 ${MIE_CMD} build-expected-moves-snapshots --tickers @config >> "${LOG_FILE}" 2>&1
 log "update-expected-moves completed."
 
+log "Running update-expected-moves-v2 (Static)..."
+${MIE_CMD} update-expected-moves-v2 >> "${LOG_FILE}" 2>&1
+log "update-expected-moves-v2 completed."
+
 log "Running analyze-expected-moves-reliability..."
 ${MIE_CMD} analyze-expected-moves-reliability >> "${LOG_FILE}" 2>&1
 log "analyze-expected-moves-reliability completed."

@@ -5,7 +5,7 @@ export type CalcMode = 'sigma' | 'breakeven';
 
 export const ExpectedMovesV2Page = () => {
     const [ticker, setTicker] = useState('SPY');
-    const [calcMode, setCalcMode] = useState<CalcMode>('sigma');
+    const [calcMode, setCalcMode] = useState<CalcMode>('breakeven');
 
     return (
         <div className="p-6 space-y-6 bg-slate-950 min-h-screen flex flex-col">
@@ -26,21 +26,19 @@ export const ExpectedMovesV2Page = () => {
                     <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg p-1">
                         <button
                             onClick={() => setCalcMode('sigma')}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
-                                calcMode === 'sigma'
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${calcMode === 'sigma'
                                     ? 'bg-cyan-600 text-white shadow-md'
                                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                            }`}
+                                }`}
                         >
                             1-Sigma
                         </button>
                         <button
                             onClick={() => setCalcMode('breakeven')}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
-                                calcMode === 'breakeven'
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${calcMode === 'breakeven'
                                     ? 'bg-amber-600 text-white shadow-md'
                                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                            }`}
+                                }`}
                         >
                             Breakeven
                         </button>

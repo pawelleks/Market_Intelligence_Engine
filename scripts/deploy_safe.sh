@@ -88,6 +88,7 @@ rsync -avz --delete \
     --exclude 'logs' \
     --exclude '/data' \
     --exclude '/_backups' \
+    --exclude '/public/data' \
     ./ "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/"
 
 # --- Step 3: Env Update ---
@@ -99,10 +100,10 @@ for KEY in "${REQUIRED_KEYS[@]}"; do
     if [ -z "$VAL" ]; then
          echo "WARNING: $KEY missing locally. Skipping update (Remote might have it)."
     else
-         SAFE_VAL=$(printf %q "$VAL")
+         SAFE_VAL="${VAL//\$/\\$}"
          ENV_UPDATES+="
          if grep -q \"^$KEY=\" .env; then sed -i \"/^$KEY=/d\" .env; fi
-         echo \"$KEY=$SAFE_VAL\" >> .env
+         echo \"$KEY='$SAFE_VAL'\" >> .env
          "
     fi
 done

@@ -714,6 +714,7 @@ function AppContent() {
             <Route path="/analysis/expected-moves" element={<ProtectedLayout><ExpectedMovesPage /></ProtectedLayout>} />
             <Route path="/analysis/realtime-flow" element={<ProtectedLayout><RealTimeFlowPage /></ProtectedLayout>} />
             <Route path="/analysis/expected-moves-v2" element={<ProtectedLayout><ExpectedMovesV2Page /></ProtectedLayout>} />
+            <Route path="/option-flow" element={<ProtectedLayout><OptionFlowPage /></ProtectedLayout>} />
             <Route path="/analysis/implied-probability" element={<ProtectedLayout><ImpliedProbabilityPage /></ProtectedLayout>} />
 
             <Route path="/analysis/expected-moves-massive" element={<ProtectedLayout><ExpectedMovesPageMassive /></ProtectedLayout>} />

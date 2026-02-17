@@ -1,53 +1,20 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 
-// --- Types ---
-
-interface TradeData {
-    time: number;
-    timestamp: string;
-    root: string;
-    strike: number;
-    right: 'C' | 'P';
-    exp: string;
-    price: number;
-    size: number;
-    value: number;
-    condition: string;
-    sweep: boolean;
-    sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-    spot: number;
-    ms_of_day: number;
-}
-
-interface TickerStats {
-    call_vol: number;
-    put_vol: number;
-    put_call_vol_ratio: number;
-    call_prem: number;
-    put_prem: number;
-    put_call_prem_ratio: number;
-    net_flow: number;
-}
-
-interface StatsUpdate {
-    [ticker: string]: TickerStats;
-}
-
 // --- Components (Inline replacements for missing UI lib) ---
 
-const Card = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+const Card = ({ children, className }) => (
     <div className={`rounded-lg border shadow-sm ${className}`}>
         {children}
     </div>
 );
 
-const Badge = ({ children, className, variant }: { children: React.ReactNode, className?: string, variant?: string }) => (
+const Badge = ({ children, className, variant }) => (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${className}`}>
         {children}
     </span>
 );
 
-const StatsCard = ({ title, value, subtext, color = "text-white" }: { title: string, value: string, subtext?: string, color?: string }) => (
+const StatsCard = ({ title, value, subtext, color = "text-white" }) => (
     <Card className="p-4 bg-slate-900 border-slate-800">
         <div className="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">{title}</div>
         <div className={`text-2xl font-bold ${color}`}>{value}</div>
@@ -55,7 +22,7 @@ const StatsCard = ({ title, value, subtext, color = "text-white" }: { title: str
     </Card>
 );
 
-const SentimentGauge = ({ bullishPct }: { bullishPct: number }) => (
+const SentimentGauge = ({ bullishPct }) => (
     <Card className="p-4 bg-slate-900 border-slate-800 flex flex-col justify-center">
         <div className="flex justify-between items-center mb-2">
             <span className="text-xs text-slate-400 font-medium uppercase">Flow Sentiment</span>
@@ -82,13 +49,13 @@ const AVAILABLE_TICKERS = ["SPY", "SPX", "QQQ", "IWM"];
 
 export default function OptionFlowPage() {
     // State
-    const [selectedTickers, setSelectedTickers] = useState<string[]>(["SPY", "QQQ"]);
-    const [minPremium, setMinPremium] = useState<number>(100000);
-    const [trades, setTrades] = useState<TradeData[]>([]);
-    const [stats, setStats] = useState<StatsUpdate>({});
+    const [selectedTickers, setSelectedTickers] = useState(["SPY", "QQQ"]);
+    const [minPremium, setMinPremium] = useState(100000);
+    const [trades, setTrades] = useState([]);
+    const [stats, setStats] = useState({});
     const [isConnected, setIsConnected] = useState(false);
 
-    const wsRef = useRef<WebSocket | null>(null);
+    const wsRef = useRef(null);
 
     // Stats Aggregation (Computed from current selection stats)
     const aggregateStats = useMemo(() => {
@@ -113,12 +80,15 @@ export default function OptionFlowPage() {
 
     // WebSocket Connection
     useEffect(() => {
+        console.log("DEBUG: OptionFlowPage Mount Effect");
         // Determine API URL (handle dev proxy automatically or explicit env)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.hostname;
         // Assume standardized port or proxy
         const port = window.location.port ? `:${window.location.port}` : '';
         const wsUrl = `${protocol}//${host}${port}/api/ws/option-flow`;
+
+        console.log("DEBUG: Connecting to WS:", wsUrl);
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -139,12 +109,18 @@ export default function OptionFlowPage() {
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
+                // console.log("DEBUG: WS Message", msg.type);
 
                 if (msg.type === "STATS_UPDATE") {
                     setStats(prev => ({ ...prev, ...msg.data }));
                 } else if (msg.type === "SNAPSHOT_TRADES") {
                     setTrades(msg.trades.slice(-500)); // Limit initial size
                 } else if (msg.type === "TRADE") {
+                    // Filter out Stock/Index price updates (keep only Options)
+                    if (msg.asset_type !== "OPTION") {
+                        return;
+                    }
+
                     // Detect Sentiment if missing (Basic Logic)
                     if (!msg.sentiment || msg.sentiment === "NEUTRAL") {
                         // Simple fallback: Calls=Bullish, Puts=Bearish (Visual Aid Only)
@@ -173,7 +149,7 @@ export default function OptionFlowPage() {
     }, []); // Only run once on mount
 
     // Filter Update Logic
-    const sendFilterUpdate = (tickers: string[], premium: number) => {
+    const sendFilterUpdate = (tickers, premium) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
                 action: "filter",
@@ -184,7 +160,7 @@ export default function OptionFlowPage() {
     };
 
     // Handlers
-    const toggleTicker = (ticker: string) => {
+    const toggleTicker = (ticker) => {
         const newSelection = selectedTickers.includes(ticker)
             ? selectedTickers.filter(t => t !== ticker)
             : [...selectedTickers, ticker];
@@ -193,7 +169,7 @@ export default function OptionFlowPage() {
         sendFilterUpdate(newSelection, minPremium);
     };
 
-    const handlePremiumChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePremiumChange = (e) => {
         const newVal = parseInt(e.target.value);
         setMinPremium(newVal);
     };
@@ -203,19 +179,19 @@ export default function OptionFlowPage() {
     }
 
     // Helper Formatters
-    const fmtMoney = (val: number) => {
+    const fmtMoney = (val) => {
+        val = Number(val) || 0;
         if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
         if (val >= 1000) return `$${(val / 1000).toFixed(1)}K`;
         return `$${val.toFixed(0)}`;
     };
 
-    const fmtTime = (ts: number) => {
+    const fmtTime = (ts) => {
         return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     };
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 p-6 font-sans">
-
             {/* HEADER & FILTERS */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
@@ -237,8 +213,8 @@ export default function OptionFlowPage() {
                                 key={t}
                                 onClick={() => toggleTicker(t)}
                                 className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${selectedTickers.includes(t)
-                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
-                                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                                     }`}
                             >
                                 {t}
@@ -334,15 +310,21 @@ export default function OptionFlowPage() {
                                         ? 'bg-green-950/10 hover:bg-green-900/20 text-green-100'
                                         : 'bg-red-950/10 hover:bg-red-900/20 text-red-100';
 
+                                    // Safety Helpers
+                                    const safeSpot = Number(trade.spot) || 0;
+                                    const safePrice = Number(trade.price) || 0;
+                                    const safeValue = Number(trade.value) || 0;
+                                    const safeTime = trade.time ? fmtTime(trade.time) : '--:--';
+
                                     return (
                                         <tr key={`${trade.time}-${i}`} className={`border-b border-slate-800/50 ${rowColor} transition-colors`}>
                                             <td className="p-2 align-middle font-mono text-xs text-slate-400">
-                                                {fmtTime(trade.time)}
+                                                {safeTime}
                                             </td>
                                             <td className="p-2 align-middle font-bold">{trade.root}</td>
                                             <td className="p-2 align-middle text-xs">{trade.exp}</td>
                                             <td className="p-2 align-middle font-mono">{trade.strike}</td>
-                                            <td className="p-2 align-middle text-slate-400 text-xs">{trade.spot.toFixed(2)}</td>
+                                            <td className="p-2 align-middle text-slate-400 text-xs">{safeSpot.toFixed(2)}</td>
                                             <td className="p-2 align-middle">
                                                 <Badge variant="outline" className={`text-[10px] h-5 border-0 font-bold ${trade.right === 'C' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'
                                                     }`}>
@@ -350,9 +332,9 @@ export default function OptionFlowPage() {
                                                 </Badge>
                                             </td>
                                             <td className="p-2 align-middle text-right font-mono">{trade.size}</td>
-                                            <td className="p-2 align-middle text-right font-mono text-slate-300">${trade.price.toFixed(2)}</td>
+                                            <td className="p-2 align-middle text-right font-mono text-slate-300">${safePrice.toFixed(2)}</td>
                                             <td className="p-2 align-middle text-right font-bold text-white">
-                                                {fmtMoney(trade.value)}
+                                                {fmtMoney(safeValue)}
                                             </td>
                                             <td className="p-2 align-middle">
                                                 {trade.sweep && (
@@ -367,7 +349,6 @@ export default function OptionFlowPage() {
                     </table>
                 </div>
             </div>
-
         </div>
     );
 }

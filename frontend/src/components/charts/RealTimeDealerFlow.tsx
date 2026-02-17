@@ -13,7 +13,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
     const [gexStatus, setGexStatus] = useState<string>('');
     const [currentPrice, setCurrentPrice] = useState<number | null>(null);
     const [horizon, setHorizon] = useState<'total' | 'eow' | 'next5'>('total');
-    const [dataSource, setDataSource] = useState<'alpaca_iex' | 'theta'>('theta');
+    const [dataSource, setDataSource] = useState<'theta'>('theta');
 
     // Refs for chart + series (survive re-renders, persist across horizon changes)
     const chartRef = useRef<any>(null);
@@ -283,16 +283,17 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         }
     }, [horizon, applyPriceLines, currentPrice]);
 
+
+
     // ===== WEBSOCKET: depends ONLY on ticker =====
-    // Uses unified /ws/quotes endpoint (Alpaca for ETFs, Theta for indices)
+    // Uses unified /ws/quotes endpoint
     useEffect(() => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/ws/quotes`;
 
-        // Determine expected data source based on ticker
-        const ETF_TICKERS = ['SPY', 'QQQ', 'IWM'];
-        const expectedSource = ETF_TICKERS.includes(ticker.toUpperCase()) ? 'alpaca_iex' : 'theta';
-        setDataSource(expectedSource as 'alpaca_iex' | 'theta');
+        // Always use Theta
+        const expectedSource = 'theta';
+        setDataSource('theta');
         let ws: WebSocket | null = null;
         let reconnectTimeout: ReturnType<typeof setTimeout>;
         let livenessInterval: ReturnType<typeof setInterval>;
@@ -392,15 +393,9 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
                     </h3>
                     <div className="flex items-center gap-2">
                         <p className="text-xs text-slate-400">Streaming {ticker} via</p>
-                        {dataSource === 'alpaca_iex' ? (
-                            <span className="text-xs bg-green-600/20 text-green-400 px-2 py-0.5 rounded border border-green-600/30">
-                                Alpaca IEX (Real-Time)
-                            </span>
-                        ) : (
-                            <span className="text-xs bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded border border-blue-600/30">
-                                ThetaData
-                            </span>
-                        )}
+                        <span className="text-xs bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded border border-blue-600/30">
+                            ThetaData
+                        </span>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">

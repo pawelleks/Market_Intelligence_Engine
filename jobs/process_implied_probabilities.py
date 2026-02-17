@@ -506,6 +506,22 @@ def generate_projection_heatmap(
 
     grid_z = np.clip(grid_z, 0.0, 1.0)
 
+    # 5. Enforce Monotonicity (Prob > X must decrease as X increases)
+    # This removes "circles" and "islands" caused by interpolation noise.
+    # We iterate over each time slice (day) and ensure strict decreasing order.
+    # usage: np.minimum.accumulate on the reversed array, then reverse back.
+    # (Since strikes increase, Prob(Price > Strike) should decrease)
+    for t_idx in range(grid_z.shape[1]):
+        col = grid_z[:, t_idx]
+        # We want decreasing, so we enforce that p[i] <= p[i-1]
+        # Equivalent to: p[i] = min(p[i], p[i-1]) ...
+        # np.minimum.accumulate works on forward iteration for "non-increasing" if we match logic.
+        # But accumulate does min(current, running_min).
+        # We start from bottom (low strike, high prob) to top (high strike, low prob).
+        # So we want to ensure p[i] is never higher than p[i-1].
+        # actually, simply accumulate min is sufficient if we go from low strike to high strike.
+        grid_z[:, t_idx] = np.minimum.accumulate(col)
+
     result["heatmap"] = {
         "days": grid_days.tolist(),
         "strikes": grid_strikes.tolist(),

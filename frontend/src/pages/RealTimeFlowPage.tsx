@@ -61,7 +61,7 @@ export const RealTimeFlowPage = () => {
                         </li>
                         <li className="flex justify-between">
                             <span className="text-slate-500">Source</span>
-                            <span className="text-emerald-400">Alpaca IEX + ThetaData</span>
+                            <span className="text-emerald-400">ThetaData (Real-Time)</span>
                         </li>
                     </ul>
                 </div>

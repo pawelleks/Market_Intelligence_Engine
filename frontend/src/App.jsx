@@ -48,6 +48,7 @@ import LiquidityImpulsePage from './pages/LiquidityImpulsePage';
 import NfpRecessionPage from './pages/NfpRecessionPage';
 import LeiPage from './pages/LeiPage';
 import CoiPage from './pages/CoiPage';
+import OptionFlowPage from './pages/OptionFlowPage';
 import LagPage from './pages/LagPage';
 import BusinessCyclePage from './pages/BusinessCyclePage';
 import MinskyPage from './pages/MinskyPage';

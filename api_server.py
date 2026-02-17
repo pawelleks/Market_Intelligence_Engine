@@ -44,7 +44,6 @@ from mie_lib.analytics.volume_regime import calculate_volume_regime, generate_vo
 
 # Real-time Engine Imports
 from mie_lib.realtime.theta_streamer import ThetaStreamer
-from mie_lib.realtime.alpaca_streamer import AlpacaStreamer
 # from mie_lib.realtime.theta_engine import ThetaStreamer as ThetaEngine
 from datetime import datetime
 from mie_lib.utils.probability_math import BreedenLitzenberger
@@ -61,22 +60,14 @@ ETF_TICKERS = {"SPY", "QQQ", "IWM"}
 # Indices + ETFs: Use ThetaData for ALL
 INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX", "SPY", "QQQ", "IWM"}
 
-
 def get_quote_source(ticker: str) -> str:
-    """
-    Determines which data source to use for a given ticker.
-    
-    Returns:
-        "alpaca" for ETFs (SPY, QQQ, IWM) - real-time IEX quotes
-        "theta" for indices (SPX, VIX, etc.) - ThetaData TCP stream
-    """
     ticker = ticker.upper()
     return "theta"
 
 
 # Global Streamer Instances
 # AlpacaStreamer DISABLED
-# alpaca_streamer = AlpacaStreamer(tickers=list(ETF_TICKERS))
+
 
 # ThetaStreamer for Indices (only source)
 theta_streamer = ThetaStreamer(tickers=list(INDEX_TICKERS))
@@ -108,7 +99,7 @@ async def lifespan(app: FastAPI):
     print(f"  - ThetaData: {', '.join(INDEX_TICKERS)}")
     
     # Run both streamers in background tasks
-    # alpaca_task = asyncio.create_task(alpaca_streamer.start())
+    # print(f"  - Alpaca IEX: {', '.join(ETF_TICKERS)}")
     theta_task = asyncio.create_task(theta_streamer.start())
 
     # Seed static Expected Moves JSON if missing or stale (>24h)
@@ -133,7 +124,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("Stopping Real-Time Data Streamers...")
-    # await alpaca_streamer.stop()
+
     await theta_streamer.stop()
     
     # Wait for tasks to finish (optional but good practice)
@@ -217,6 +208,7 @@ from mie_lib.api.routers.lag_index import router as lag_index_router
 app.include_router(lag_index_router)
 from mie_lib.api.routers.macro_lab import router as macro_lab_router
 app.include_router(macro_lab_router)
+
 from mie_lib.api.routers.economic_pipeline import router as economic_pipeline_router
 app.include_router(economic_pipeline_router, prefix="/api/v1")
 from mie_lib.api.routers.economic_calendar import router as economic_calendar_router
@@ -1062,7 +1054,6 @@ async def websocket_quotes(websocket: WebSocket):
     Unified WebSocket endpoint for real-time quotes.
     
     Merges streams from:
-    - AlpacaStreamer (SPY, QQQ, IWM) - real-time IEX
     - ThetaStreamer (SPX, VIX, etc.) - ThetaData TCP
     
     Message format:
@@ -1072,17 +1063,16 @@ async def websocket_quotes(websocket: WebSocket):
         "price": 475.23,
         "size": 100,
         "timestamp": "2024-02-12T14:30:00.123Z",
-        "source": "alpaca_iex" | "theta"
+        "source": "theta"
     }
     """
     await websocket.accept()
     queue = asyncio.Queue()
     
-    # Register with BOTH streamers
-    alpaca_streamer.listeners.append(queue)
+    # Register with ThetaStreamer (Alpaca is disabled)
     theta_streamer.listeners.append(queue)
     
-    LOG.info("WebSocket /ws/quotes connected (Alpaca + Theta)")
+    LOG.info("WebSocket /ws/quotes connected (Theta Only)")
     
     try:
         while True:
@@ -1093,9 +1083,145 @@ async def websocket_quotes(websocket: WebSocket):
     except Exception as e:
         LOG.error(f"WebSocket quotes error: {e}")
     finally:
-        # Cleanup: remove from both streamer listeners
-        if queue in alpaca_streamer.listeners:
-            alpaca_streamer.listeners.remove(queue)
+        # Cleanup: remove from listener
+        if queue in theta_streamer.listeners:
+            theta_streamer.listeners.remove(queue)
+            try: theta_streamer.listeners.remove(queue)
+            except: pass
+
+
+@app.websocket("/api/ws/option-flow")
+async def websocket_option_flow(websocket: WebSocket):
+    """
+    WebSocket endpoint for the Option Flow Page.
+    Capabilities:
+    - Live Option Trade Stream (filtered by tickers and premium)
+    - Ticker Subscription Handshake
+    - Daily Stats Updates
+    - Historical Catch-up
+    """
+    await websocket.accept()
+    import time as time_mod
+    
+    # 1. Init Listener Queue
+    queue = asyncio.Queue(maxsize=1000)
+    theta_streamer.listeners.append(queue)
+    
+    # Connection State
+    tickers = set(["SPX", "SPY", "QQQ", "IWM"]) # Default All
+    min_premium = 100000.0 # Default $100k
+    
+    async def send_stats_update():
+        """Periodic stats push (1s)."""
+        while True:
+            await asyncio.sleep(1.0)
+            
+            # Aggregate stats for subscribed tickers
+            payload = {"type": "STATS_UPDATE", "data": {}}
+            for t in tickers:
+                s = theta_streamer.day_stats.get(t)
+                if s:
+                    # Calculate Sentiment Ratios
+                    call_vol = s["call_vol"]
+                    put_vol = s["put_vol"]
+                    total_vol = call_vol + put_vol
+                    
+                    call_prem = s["call_prem"]
+                    put_prem = s["put_prem"]
+                    total_prem = call_prem + put_prem
+                    
+                    payload["data"][t] = {
+                        "call_vol": call_vol,
+                        "put_vol": put_vol,
+                        "put_call_vol_ratio": round(put_vol / call_vol, 2) if call_vol > 0 else 0,
+                        "call_prem": call_prem,
+                        "put_prem": put_prem,
+                        "put_call_prem_ratio": round(put_prem / call_prem, 2) if call_prem > 0 else 0,
+                        "net_flow": s["net_flow"]
+                    }
+            
+            try:
+                await websocket.send_json(payload)
+            except:
+                break
+
+    stats_task = asyncio.create_task(send_stats_update())
+
+    try:
+        # Send Initial Snapshot (Stats + Recent Trades)
+        # 1. Stats
+        initial_stats = {"type": "STATS_UPDATE", "data": {}}
+        for t in tickers:
+            s = theta_streamer.day_stats.get(t)
+            if s:
+                initial_stats["data"][t] = s # Send raw dict, frontend can parse
+        await websocket.send_json(initial_stats)
+        
+        # 2. History (Filtered)
+        history = []
+        for trade in theta_streamer.recent_trades:
+            if trade["root"] in tickers and trade.get("value", 0) >= min_premium:
+                history.append(trade)
+        
+        if history:
+             await websocket.send_json({"type": "SNAPSHOT_TRADES", "trades": history})
+
+        while True:
+            # Race between receiving websocket control messages (filter update) and queue data
+            # using asyncio.wait for both tasks
+            
+            # Listener Task
+            get_trade_task = asyncio.create_task(queue.get())
+            # Receiver Task
+            receive_msg_task = asyncio.create_task(websocket.receive_json())
+            
+            done, pending = await asyncio.wait(
+                [get_trade_task, receive_msg_task], 
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            for task in pending:
+                task.cancel()
+
+            if receive_msg_task in done:
+                # Handle Client Message (Filter Update)
+                try:
+                    msg = receive_msg_task.result()
+                    action = msg.get("action")
+                    
+                    if action == "filter":
+                        if "tickers" in msg:
+                            tickers = set(msg["tickers"])
+                        if "min_premium" in msg:
+                            min_premium = float(msg["min_premium"])
+                        
+                        # Resend Snapshot logic could go here if UX requires immediate refresh
+                        # For now, just applies to new stream
+                        pass
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:
+                    LOG.error(f"WS Input Error: {e}")
+
+            if get_trade_task in done:
+                # Handle New Trade
+                trade = get_trade_task.result()
+                
+                # Filter
+                if trade.get("root") not in tickers:
+                    continue
+                if trade.get("asset_type") == "OPTION":
+                    if trade.get("value", 0) < min_premium:
+                        continue
+                
+                await websocket.send_json(trade)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        LOG.error(f"Option Flow WS Error: {e}")
+    finally:
+        stats_task.cancel()
         if queue in theta_streamer.listeners:
             theta_streamer.listeners.remove(queue)
 

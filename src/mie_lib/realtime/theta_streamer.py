@@ -53,6 +53,15 @@ class ThetaStreamer:
         # Flow history: ticker -> deque of {time, price, flow}
         self.flow_history: Dict[str, deque] = {t: deque(maxlen=5000) for t in tickers}
         
+        # NEW: Trade History and Day Stats for Option Flow Page
+        self.recent_trades = deque(maxlen=1000)
+        # ticker -> {call_vol, put_vol, call_prem, put_prem, net_flow}
+        self.day_stats = defaultdict(lambda: {
+            "call_vol": 0, "put_vol": 0, 
+            "call_prem": 0.0, "put_prem": 0.0, 
+            "net_flow": 0.0
+        })
+        
         # Determine Host (Docker vs Local)
         self.theta_host = os.getenv("THETA_HOST", "theta_terminal")
         self.theta_rest_port = int(os.getenv("THETA_REST_PORT", "25510"))
@@ -246,25 +255,33 @@ class ThetaStreamer:
         Updates state and broadcasts formatted message.
         """
         # 1. Update State
+        # Safer extraction
+        is_call = getattr(msg.contract, 'isCall', False)
+        right = "C" if is_call else "P"
+        strike = getattr(msg.contract, 'strike', 0)
+        exp = str(getattr(msg.contract, 'exp', ''))
+        
         self._update_state(
              msg.contract.root, 
              msg.trade.price, 
              msg.trade.size, 
-             "C" if msg.contract.isCall else "P",
+             right,
              "OPTION" if is_option else "STOCK"
         )
         
         # 2. Get Updated Flow
-        updated_flow = self.state.get(msg.contract.root, {}).get("net_flow", 0.0)
+        updated_state = self.state.get(msg.contract.root, {})
+        updated_flow = updated_state.get("net_flow", 0.0)
+        spot_price = updated_state.get("price", 0.0)
 
         # 3. Format Message
         ts_now = datetime.now()
         data = {
             "type": "TRADE",
             "root": msg.contract.root,
-            "strike": msg.contract.strike,
-            "right": "C" if msg.contract.isCall else "P",
-            "exp": str(msg.contract.exp),
+            "strike": strike,
+            "right": right,
+            "exp": exp,
             "price": msg.trade.price,
             "size": msg.trade.size,
             "condition": cond_name,
@@ -272,8 +289,42 @@ class ThetaStreamer:
             "timestamp": ts_now.isoformat(),
             "time": int(ts_now.timestamp()), # Frontend expects Unix Int
             "asset_type": "OPTION" if is_option else "STOCK",
-            "hiro_flow": updated_flow
+            "hiro_flow": updated_flow,
+            "spot": spot_price
         }
+
+        if is_option:
+            premium = msg.trade.price * msg.trade.size * 100
+            data["value"] = premium
+            data["sweep"] = "SWEEP" in cond_name or "ISO" in cond_name # Check flags
+            
+            # Sentiment Logic:
+            # We don't have 'side' explicitly from basic stream in all plans.
+            # But thetadata usually provides it. Let's try to get it, or infer.
+            # Assuming 'aggressor_side' or similar if available, or using tick test fallback.
+            # For now, simple Bullish/Bearish based on Right + Delta (if we had it)
+            # Actually, standard flow color:
+            # Bid side (Sold) = Bearish for Calls, Bullish for Puts?
+            # No, typically:
+            # Green = Bought at Ask (Bullish if Call, Bearish if Put - wait, usually Green means 'Aggressive Buy')
+            # Red = Sold at Bid (Aggressive Sell)
+            
+            # Let's try to use 'side' if available on the msg object
+            # The library `StreamMsg` might not have it easily accessible without casting.
+            # We will default to Neutral/White if unknown.
+            data["sentiment"] = "NEUTRAL"
+            
+            # Update Day Stats
+            stats = self.day_stats[msg.contract.root]
+            if right == "C":
+                stats["call_vol"] += msg.trade.size
+                stats["call_prem"] += premium
+            else:
+                stats["put_vol"] += msg.trade.size
+                stats["put_prem"] += premium
+            
+            # Store in History
+            self.recent_trades.append(data)
         
         self.broadcast_sync(data)
 

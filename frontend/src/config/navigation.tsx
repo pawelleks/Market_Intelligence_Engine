@@ -63,6 +63,7 @@ export const NAV_DATA = {
                 { label: 'Expected Moves', to: '/analysis/expected-moves', icon: Target },
                 { label: 'Expected Moves V2', to: '/analysis/expected-moves-v2', icon: Zap },
                 { label: 'Implied Probability', to: '/analysis/implied-probability', icon: TrendingUp },
+                { label: 'Real-Time Option Flow', to: '/option-flow', icon: Zap },
                 { label: 'Real-Time Dealer Flow', to: '/analysis/realtime-flow', icon: Zap },
 
                 { label: 'EM Reliability', to: '/analysis/reliability', icon: ShieldCheck },

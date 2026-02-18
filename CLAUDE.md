@@ -123,6 +123,23 @@ def get_latest_gex(ticker: str):
 
 **Location**: `ARCHITECTURE.md` or dedicated calculation reference document
 
+### 6. Resource Isolation & Concurrency (CRITICAL)
+
+**Rule**: BATCH processes and REAL-TIME requests MUST NOT compete for the same file handles or blocking network sockets.
+
+**Enforcement**:
+- **Read-Only Live Access**: REAL-TIME endpoints/modules MUST open data files (Parquet/CSV) in **read-only mode**. They are FORBIDDEN from writing to `data/` directories.
+- **ThetaData Multiplexing**: All REAL-TIME requests to ThetaData (Port 25510) MUST use an `AsyncClient` with a connection pool. Do NOT open/close new sockets per request.
+- **The "Safety Valve"**: If a BATCH job is writing to a specific `{ticker}.parquet` file, the REAL-TIME API must serve the *previous* cached version or a 202 Accepted + "Processing" status rather than waiting for the file lock to release.
+- **Process Decoupling**: STREAMING data MUST be piped through a dedicated `Queue` or `Redis` pub/sub. Do NOT allow a streaming React page to trigger a direct Python subprocess that writes to disk.
+
+**Violation Detection**:
+- Use of `open(file, 'w')` or `df.to_parquet()` inside a `REAL-TIME` classified module.
+- Synchronous `time.sleep()` in any FastAPI endpoint (use `await asyncio.sleep()`).
+- Direct file manipulation in any module using `theta_expected_moves_engine.py`.
+
+**Rationale**: This prevents "Pipeline Deadlock" where a heavy daily calculation freezes the live UI or causes streaming connections to drop.
+
 ---
 
 ## Documentation Standards

@@ -105,16 +105,12 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
             .then(data => {
                 if (cancelled) return;
-                console.log("[EM_DEBUG] Static Fetch Data:", data);
-                console.log("[EM_DEBUG] Ticker:", ticker);
                 const em = data?.[ticker] ?? null;
-                console.log("[EM_DEBUG] Resolved EM:", em);
                 setStaticEm(em);
                 staticEmRef.current = em;
                 setStaticEmLoading(false);
             })
-            .catch((e) => {
-                console.error("[EM_DEBUG] Static Fetch Failed:", e);
+            .catch(() => {
                 if (!cancelled) setStaticEmLoading(false);
             });
         return () => { cancelled = true; };
@@ -833,10 +829,9 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                     </tr>
                                 );
 
-                                // --- Dynamic Row (Live Intraday) — only during regular session ---
-                                // Outside regular hours, option chains aren't trading so EM values
-                                // would be stale (previous close) recentered on live price — inaccurate.
-                                if (marketStatus.sessionType === 'regular') {
+                                // --- Dynamic Row (Live Intraday) ---
+                                // Show whenever we have a live price, as chart lines update in pre-market too.
+                                if (lastPrice && lastPrice > 0) {
                                     const sTenorForLive = staticEm ? (staticEm as any)[row.staticKey] : null;
                                     const dMove = sTenorForLive
                                         ? (calcMode === 'breakeven' ? sTenorForLive.breakeven_move : sTenorForLive.sigma_move)

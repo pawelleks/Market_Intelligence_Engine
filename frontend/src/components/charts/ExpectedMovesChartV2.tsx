@@ -387,58 +387,10 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                 }
             }
 
-            // 2b. Also fetch live EM (slower, but provides fresh live-computed data)
-            const fetchEmWithRetry = async (): Promise<any> => {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-                try {
-                    const r = await fetch(`/api/v1/expected_moves/theta/latest/${ticker}`, {
-                        signal: controller.signal
-                    });
-                    if (r.ok) {
-                        const d = await r.json();
-                        if (d && !d.error && (d["0dte_range"] || d["weekly_range"] || d["monthly_range"])) return d;
-                    }
-                } catch {
-                    // Timeout or network error — static EM is the fallback
-                } finally {
-                    clearTimeout(timeoutId);
-                }
-                return null;
-            };
-            try {
-                const data = await fetchEmWithRetry();
-                if (cancelled) return; // Ticker changed — discard stale result
-                setEmLoading(false);
-                if (data) {
-                    setEmData(data);
-
-                    // Build live move data
-                    const liveMoves: typeof emMovesRef.current = [];
-                    for (const cfg of emConfigs) {
-                        const range = data[cfg.eodKey];
-                        if (range) {
-                            const move = calcMode === 'breakeven'
-                                ? (range.breakeven_move ?? range.plus_minus)
-                                : (range.sigma_move ?? range.plus_minus);
-                            if (move && move > 0) {
-                                liveMoves.push({ key: cfg.eodKey, move, highColor: cfg.highColor, lowColor: cfg.lowColor, style: cfg.style, label: cfg.label });
-                            }
-                        }
-                    }
-
-                    // Update chart lines with live EM data (replaces static lines if they existed)
-                    if (liveMoves.length > 0) {
-                        const centerPrice = formatted.length > 0
-                            ? (chartType === 'Candles' ? formatted[formatted.length - 1].close : formatted[formatted.length - 1].value)
-                            : data.current_price;
-                        createEmLines(liveMoves, centerPrice);
-                    }
-                }
-            } catch (e) {
-                if (!cancelled) setEmLoading(false);
-                console.warn("EM fetch failed (expected when market closed):", (e as Error).message);
-            }
+            // 2b. Live EM fetch DISABLED for now (causing chart glitches/inconsistency).
+            // Relying on Static EM (EOD) + Dynamic Recentering via WebSocket.
+            // This ensures stability of the chart lines.
+            setEmLoading(false);
         };
 
         initData();

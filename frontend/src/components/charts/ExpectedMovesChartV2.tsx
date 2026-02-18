@@ -104,13 +104,19 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         fetch('/api/v1/expected_moves/static/latest')
             .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
             .then(data => {
-                if (cancelled) return; // Ticker changed — discard stale result
+                if (cancelled) return;
+                console.log("[EM_DEBUG] Static Fetch Data:", data);
+                console.log("[EM_DEBUG] Ticker:", ticker);
                 const em = data?.[ticker] ?? null;
+                console.log("[EM_DEBUG] Resolved EM:", em);
                 setStaticEm(em);
                 staticEmRef.current = em;
                 setStaticEmLoading(false);
             })
-            .catch(() => { if (!cancelled) setStaticEmLoading(false); });
+            .catch((e) => {
+                console.error("[EM_DEBUG] Static Fetch Failed:", e);
+                if (!cancelled) setStaticEmLoading(false);
+            });
         return () => { cancelled = true; };
     }, [ticker]);
 

@@ -80,7 +80,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     // Refs for dynamic EM price lines (updated on each live price tick)
     const emPriceLineRefs = useRef<any[]>([]);
     // Store EM move amounts for dynamic recalculation: {key, move, highColor, lowColor, style, label}
-    const emMovesRef = useRef<{key: string, move: number, highColor: string, lowColor: string, style: any, label: string}[]>([]);
+    const emMovesRef = useRef<{ key: string, move: number, highColor: string, lowColor: string, style: any, label: string }[]>([]);
     // Ref mirror for lastPrice (avoids stale closures in effects)
     const lastPriceRef = useRef<number | null>(null);
 
@@ -193,9 +193,8 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         const initData = async () => {
             // 1. History — use Parquet for 1d, ThetaData stream for intraday
             setDataError(null); // Clear previous errors on resolution switch
+            let formatted: any[] = [];
             try {
-                let formatted: any[] = [];
-
                 if (resolution === '1d') {
                     // Daily: try ThetaData REST first (fresh data), fall back to Parquet
                     let dailyLoaded = false;
@@ -321,10 +320,10 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             }
 
             // 2. Expected Moves Levels — try static first (instant), then live as fallback/enhancement
-            const createEmLines = (moveData: {key: string, move: number, highColor: string, lowColor: string, style: any, label: string}[], centerPrice: number) => {
+            const createEmLines = (moveData: { key: string, move: number, highColor: string, lowColor: string, style: any, label: string }[], centerPrice: number) => {
                 // Remove old lines
                 for (const line of emPriceLineRefs.current) {
-                    try { mainSeries.removePriceLine(line); } catch {}
+                    try { mainSeries.removePriceLine(line); } catch { }
                 }
                 emPriceLineRefs.current = [];
 
@@ -490,7 +489,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
 
         // Remove any existing EM lines and create new ones
         for (const line of emPriceLineRefs.current) {
-            try { seriesRef.current.removePriceLine(line); } catch {}
+            try { seriesRef.current.removePriceLine(line); } catch { }
         }
         emPriceLineRefs.current = [];
 
@@ -519,7 +518,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
 
         // Ref to track the current accumulating bar to prevent "resetting" high/low wicks
         // We initialize it with null.
-        const currentBarRef = { current: null as { time: number, open: number, high: number, low: number, close: number } | null };
+        const currentBarRef = { current: null as { time: number | string, open: number, high: number, low: number, close: number } | null };
 
         const connect = () => {
             setConnectionStatus('Connecting...');
@@ -580,7 +579,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                         if (emMovesRef.current.length > 0) {
                             // Remove old EM lines
                             for (const line of emPriceLineRefs.current) {
-                                try { seriesRef.current.removePriceLine(line); } catch {}
+                                try { seriesRef.current.removePriceLine(line); } catch { }
                             }
                             emPriceLineRefs.current = [];
 
@@ -686,31 +685,28 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                 <div className="flex items-center justify-between p-3 border-b border-slate-800/50">
                     <div className="flex items-center gap-4">
                         <h2 className="text-slate-100 font-bold flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full ${
-                                connectionStatus === 'Live' ? 'bg-cyan-500 animate-pulse' :
+                            <span className={`w-2 h-2 rounded-full ${connectionStatus === 'Live' ? 'bg-cyan-500 animate-pulse' :
                                 connectionStatus === 'Market Closed' ? 'bg-amber-500' :
-                                'bg-red-500'
-                            }`}></span>
+                                    'bg-red-500'
+                                }`}></span>
                             Theta Expected Moves V2
                         </h2>
 
                         {/* Calc Mode Badge */}
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            calcMode === 'breakeven'
-                                ? 'bg-amber-900/50 text-amber-400 border border-amber-700/50'
-                                : 'bg-cyan-900/50 text-cyan-400 border border-cyan-700/50'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${calcMode === 'breakeven'
+                            ? 'bg-amber-900/50 text-amber-400 border border-amber-700/50'
+                            : 'bg-cyan-900/50 text-cyan-400 border border-cyan-700/50'
+                            }`}>
                             {calcMode === 'breakeven' ? 'Breakeven (~50%)' : '1-Sigma (~68%)'}
                         </span>
 
                         {/* Market Status Badge */}
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            marketStatus.isOpen
-                                ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-700/50'
-                                : marketStatus.sessionType === 'pre_market' || marketStatus.sessionType === 'after_hours'
-                                    ? 'bg-amber-900/30 text-amber-400 border border-amber-700/50'
-                                    : 'bg-slate-800 text-slate-500 border border-slate-700/50'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${marketStatus.isOpen
+                            ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-700/50'
+                            : marketStatus.sessionType === 'pre_market' || marketStatus.sessionType === 'after_hours'
+                                ? 'bg-amber-900/30 text-amber-400 border border-amber-700/50'
+                                : 'bg-slate-800 text-slate-500 border border-slate-700/50'
+                            }`}>
                             {marketStatus.status}
                         </span>
 

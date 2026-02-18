@@ -16,13 +16,16 @@ from mie_lib.analytics.markov.markov_engine import MarkovConfig # Used for defau
 from mie_lib.utils.paths import hmm_std_out_dir 
 from mie_lib.analytics.hmm.hmm_engine import HMMConfig # Used for HMM configuration defaults
 
-# Data Freshness Imports
-from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
-from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
 from mie_lib.utils.paths import features_parquet_path, options_latest_json_path, options_expected_moves_path
-from mie_lib.services.audit_logger import AUDIT_FILE_PATH # Import path
+from mie_lib.services.audit_logger import AUDIT_FILE_PATH
+from mie_lib.utils.trading_calendar import is_up_to_date, coerce_to_date
+import logging
 import json
 import yfinance as yf
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+LOG = logging.getLogger("api_server")
 
 # Price Viewer Imports
 from mie_lib.core.state_classification import classify_tri_state

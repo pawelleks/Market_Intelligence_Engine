@@ -54,16 +54,16 @@ class BreedenLitzenberger:
         K_arr = np.array([x[0] for x in data])
         C_arr = np.array([x[1] for x in data])
 
-        # Deduplicate strikes (SPX+SPXW can have same strike): average prices
+        # Deduplicate strikes (SPX+SPXW can have same strike): Take MAX price
+        # Averaging liquid and illiquid (zero) prices destroys the curve
         unique_K, inv_idx = np.unique(K_arr, return_inverse=True)
         if len(unique_K) < len(K_arr):
-            avg_C = np.zeros(len(unique_K))
-            counts = np.zeros(len(unique_K))
+            max_C = np.zeros(len(unique_K))
             for i, idx in enumerate(inv_idx):
-                avg_C[idx] += C_arr[i]
-                counts[idx] += 1
+                if C_arr[i] > max_C[idx]:
+                    max_C[idx] = C_arr[i]
             K_arr = unique_K
-            C_arr = avg_C / counts
+            C_arr = max_C
 
         # Filter out zero/negative call prices (bad bids)
         valid = C_arr > 0
@@ -84,25 +84,32 @@ class BreedenLitzenberger:
             LOG.warning("Insufficient data after tail trimming.")
             return {}
 
+        # Filter out price outliers that violate monotonicity significantly
+        # (e_g_ a sudden 80% drop that immediately recovers is likely a bad bid/ask)
+        filtered_K = [K_arr[0]]
+        filtered_C = [C_arr[0]]
+        for i in range(1, len(K_arr)):
+            # Call prices MUST be strictly non-increasing. 
+            # If C[i] > C[last], it's a violation. 
+            # If C[i] is significantly lower than a smooth trend, it might be a bad data point.
+            if C_arr[i] > 0:
+                filtered_K.append(K_arr[i])
+                filtered_C.append(C_arr[i])
+        
+        K_arr = np.array(filtered_K)
+        C_arr = np.array(filtered_C)
+
         # CRITICAL: Enforce monotonicity - call prices MUST decrease with strike
-        # Non-monotonic data (bad bids, stale quotes) creates positive derivatives → negative probabilities
-        # Use isotonic regression to fit a monotonically decreasing curve
         from sklearn.isotonic import IsotonicRegression
         
-        # Check if monotonicity violations exist
-        price_diffs = np.diff(C_arr)
-        violations = (price_diffs >= 0).sum()
+        # Fit isotonic regression (decreasing)
+        iso_reg = IsotonicRegression(increasing=False)
+        C_arr = iso_reg.fit_transform(K_arr, C_arr)
         
-        if violations > 0:
-            LOG.info(f"   > Enforcing monotonicity: fixing {violations} non-decreasing intervals")
-            
-            # Fit isotonic regression (decreasing)
-            iso_reg = IsotonicRegression(increasing=False)
-            C_arr_monotonic = iso_reg.fit_transform(K_arr, C_arr)
-            
-            # Replace with monotonic version
-            C_arr = C_arr_monotonic
-        
+        # Re-sort/dedupe just in case
+        K_arr, unique_idx = np.unique(K_arr, return_index=True)
+        C_arr = C_arr[unique_idx]
+
         if len(K_arr) < 5:
             LOG.warning("Insufficient data after monotonicity enforcement.")
             return {}
@@ -137,8 +144,8 @@ class BreedenLitzenberger:
             pdf_raw = np.exp(self.r * T) * densities
             pdf_clean = np.maximum(pdf_raw, 0.0) # Clip negative probabilities
 
-            # Gaussian Smoothing
-            pdf_smooth = gaussian_filter1d(pdf_clean, sigma=2.0)
+            # Gaussian Smoothing (Sigma 1.5 is a good balance for typical chains)
+            pdf_smooth = gaussian_filter1d(pdf_clean, sigma=1.5)
             
             # Normalize area to 1
             area = float(np.trapz(pdf_smooth, K_arr))
@@ -237,11 +244,19 @@ class BreedenLitzenberger:
             # For now, let's replace NaNs with nearest valid if possible, or just 0/1 based on strike
             # A simple heuristic: High strike NaN -> 0, Low strike NaN -> 1
             
-            mask_nan = np.isnan(grid_z)
             if np.any(mask_nan):
                 # Fallback to nearest for gaps
                 grid_z_near = griddata(points, values, (GX, GY), method='nearest')
                 grid_z[mask_nan] = grid_z_near[mask_nan]
+
+            # 4. Enforce Monotonicity (Fix artifacts)
+            grid_z = self.enforce_monotonicity(np.clip(grid_z, 0.0, 1.0))
+            
+            # 5. Final Surface Smoothing (Time-wise and Strike-wise)
+            # Helps remove the "sawtooth" and "loops"
+            from scipy.ndimage import gaussian_filter
+            grid_z = gaussian_filter(grid_z, sigma=[0.8, 0.5]) # Rows (Strikes), Cols (Days)
+            grid_z = self.enforce_monotonicity(np.clip(grid_z, 0.0, 1.0))
 
             return {
                 "dte_axis": grid_dte.tolist(),
@@ -252,6 +267,19 @@ class BreedenLitzenberger:
         except Exception as e:
             LOG.error(f"Error generating surface: {e}", exc_info=True)
             return {}
+
+    def enforce_monotonicity(self, grid_z: np.ndarray) -> np.ndarray:
+        """
+        Enforce strict monotonicity on the probability surface.
+        Prob(Price > K) must decrease as K increases.
+        """
+        # Iterate over each time slice (column)
+        for t_idx in range(grid_z.shape[1]):
+            col = grid_z[:, t_idx]
+            # np.minimum.accumulate on the array ensures p[i] <= p[i-1] (for i > 0)
+            # This effectively flattens any local "hills" in the probability curve
+            grid_z[:, t_idx] = np.minimum.accumulate(col)
+        return grid_z
 
     def calculate_quantiles_from_pdf(self, strikes: List[float], probabilities: List[float]) -> Dict[str, float]:
         """
@@ -359,4 +387,64 @@ class BreedenLitzenberger:
 
         except Exception as e:
             LOG.error(f"Error generating fan chart: {e}", exc_info=True)
+            return []
+
+    def calculate_parametric_cone(
+        self,
+        spot_price: float,
+        exp_sigmas: List[Tuple[float, float]], # [(dte, sigma), ...]
+        mu: float,
+        days_out: int = 45
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate a Parametric Fan Chart based on Log-Normal distribution.
+        Uses derived IV curve and Drift (mu) to project p05-p95 cones.
+        """
+        try:
+            from scipy.stats import norm
+            from datetime import date, timedelta
+            
+            today = date.today()
+            results = []
+            
+            if not exp_sigmas:
+                return []
+                
+            dtes_s, sigs = zip(*sorted(exp_sigmas))
+            
+            q_keys = ["p05", "p10", "p20", "p30", "p40", "p50", "p60", "p70", "p80", "p90", "p95"]
+            q_values = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.95]
+            
+            for i in range(days_out + 1):
+                target_date = today + timedelta(days=i)
+                # Allow T=0 for the start point to anchor exactly at spot
+                if i == 0:
+                    T = 0.0
+                else:
+                    T = i / 365.25
+
+                curr_sigma = float(np.interp(i, dtes_s, sigs))
+                p50 = float(spot_price * np.exp(mu * T))
+
+                row = {
+                    "date": target_date.isoformat(),
+                    "dte": i,
+                    "p50": p50,
+                    "sigma": curr_sigma,
+                    "mu": mu
+                }
+
+                vol_factor = curr_sigma * np.sqrt(T)
+                for k, q in zip(q_keys, q_values):
+                    if k == 'p50':
+                        continue
+                    z = norm.ppf(q)
+                    row[k] = float(p50 * np.exp(vol_factor * z))
+
+                results.append(row)
+                
+            return results
+            
+        except Exception as e:
+            LOG.error(f"Error calculating parametric cone: {e}", exc_info=True)
             return []

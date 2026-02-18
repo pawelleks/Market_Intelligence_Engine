@@ -249,7 +249,35 @@ def main():
         ("monthly", monthly_date, dte_m),
     ]
 
+    import time
+
+    # Retry configuration for startup race condition
+    max_retries = 12  # Try for ~2 minutes (exponential backoff will cap)
+    retry_delay = 2.0
+    
     with httpx.Client() as client:
+        # Check connection before starting loop
+        connected = False
+        for i in range(max_retries):
+            try:
+                # Simple health check using list_expirations or just a root check
+                resp = client.get(f"{THETA_URL}/v2/list/expirations?root=SPY", timeout=5.0)
+                if resp.status_code == 200:
+                    connected = True
+                    print(">>> Connected to Theta Terminal successfully.")
+                    break
+            except Exception as e:
+                print(f"   > Connection attempt {i+1}/{max_retries} failed: {e}")
+            
+            if i < max_retries - 1:
+                print(f"   > Waiting {retry_delay}s before retry...")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 1.5, 10.0) # Cap at 10s
+        
+        if not connected:
+            print(">>> ERROR: Could not connect to Theta Terminal after multiple retries. Exiting.")
+            return
+
         results = {}
         for root in TICKERS:
             price = get_price(client, root)

@@ -315,7 +315,7 @@ export const ImpliedProbabilityPage = () => {
                             forwardPrice={currentFwd}
                             spotPrice={displayPrice}
                             expectedMove={emData?.[selectedAsset]?.monthly?.breakeven_move}
-                            skew={coneData?.sentiment?.drift_gap ? coneData.sentiment.drift_gap * 100 : undefined}
+                            skew={typeof coneData?.sentiment?.iv_skew === 'number' ? coneData.sentiment.iv_skew * 100 : undefined}
                             dte={30} // Using Monthly logic (~30 DTE)
                             loading={loading}
                         />

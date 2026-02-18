@@ -1,6 +1,6 @@
 # LEI COI - Prediction Analysis Report
 
-**Generated**: 2026-02-16 08:29  
+**Generated**: 2026-02-18 03:02  
 **Analysis Period**: 1960-01-31 00:00:00 to 2026-02-28 00:00:00  
 **Data Coverage**: 66.1 years
 
@@ -116,6 +116,6 @@ This model ranks in the **top 3** of all tested models.
 
 ---
 
-**Report Generated**: 2026-02-16 08:29:26  
+**Report Generated**: 2026-02-18 03:02:59  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

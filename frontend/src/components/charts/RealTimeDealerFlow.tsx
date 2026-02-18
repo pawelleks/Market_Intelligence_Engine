@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, CrosshairMode, LineStyle, LineSeries } from 'lightweight-charts';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 interface RealTimeDealerFlowProps {
     ticker: string;
@@ -287,89 +288,49 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
 
     // ===== WEBSOCKET: depends ONLY on ticker =====
     // Uses unified /ws/quotes endpoint
-    useEffect(() => {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/ws/quotes`;
+    // ===== WEBSOCKET: depends ONLY on ticker =====
+    // Uses unified /ws/quotes endpoint
+    const handleWebSocketMessage = useCallback((data: any) => {
+        if (data.error) return;
+        if (data.root && data.root !== ticker) return;
 
-        // Always use Theta
-        const expectedSource = 'theta';
-        setDataSource('theta');
-        let ws: WebSocket | null = null;
-        let reconnectTimeout: ReturnType<typeof setTimeout>;
-        let livenessInterval: ReturnType<typeof setInterval>;
+        if (data.source) setDataSource(data.source);
 
-        const connect = () => {
-            setConnectionStatus('Connecting...');
-            ws = new WebSocket(wsUrl);
+        const time = data.time || data.timestamp_ms || Math.floor(Date.now() / 1000);
+        const price = data.price;
+        const flow = data.hiro_flow;
 
-            ws.onopen = () => {
-                setConnectionStatus('Connected');
-                lastMessageTime.current = Date.now();
-            };
+        if (!price || price === 0) return;
 
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.error) return;
+        lastMessageTime.current = Date.now();
 
-                    // Filter: only process messages for current ticker
-                    if (data.root && data.root !== ticker) return;
+        if (priceSeriesRef.current) {
+            priceSeriesRef.current.update({ time, value: price });
+        }
+        if (flowSeriesRef.current && flow !== undefined) {
+            flowSeriesRef.current.update({ time, value: flow });
+        }
 
-                    // Update data source if available
-                    if (data.source) {
-                        setDataSource(data.source);
-                    }
-
-                    const time = data.time || data.timestamp_ms || Math.floor(Date.now() / 1000);
-                    const price = data.price;
-                    const flow = data.hiro_flow;
-
-                    if (!price || price === 0) return;
-
-                    lastMessageTime.current = Date.now();
-                    setConnectionStatus('Connected');
-
-                    // Update chart series via refs (always points to current chart)
-                    if (priceSeriesRef.current) {
-                        priceSeriesRef.current.update({ time, value: price });
-                    }
-                    if (flowSeriesRef.current && flow !== undefined) {
-                        flowSeriesRef.current.update({ time, value: flow });
-                    }
-
-                    // Throttle React state updates for sidebar
-                    const now = Date.now();
-                    if (now - lastPriceUpdate.current > 1000) {
-                        setCurrentPrice(price);
-                        lastPriceUpdate.current = now;
-                    }
-                } catch { /* ignore parse errors */ }
-            };
-
-            ws.onclose = () => {
-                setConnectionStatus('Disconnected');
-                reconnectTimeout = setTimeout(connect, 3000);
-            };
-        };
-
-        connect();
-
-        livenessInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                if (Date.now() - lastMessageTime.current > 10000) {
-                    setConnectionStatus('Stalled (No Data)');
-                } else {
-                    setConnectionStatus('Connected');
-                }
-            }
-        }, 1000);
-
-        return () => {
-            if (ws) ws.close();
-            clearTimeout(reconnectTimeout);
-            clearInterval(livenessInterval);
-        };
+        const now = Date.now();
+        if (now - lastPriceUpdate.current > 1000) {
+            setCurrentPrice(price);
+            lastPriceUpdate.current = now;
+        }
     }, [ticker]);
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/quotes`;
+
+    const { status: wsStatus } = useWebSocket({
+        url: wsUrl,
+        onMessage: handleWebSocketMessage,
+        shouldConnect: true,
+        reconnectInterval: 3000
+    });
+
+    useEffect(() => {
+        setConnectionStatus(wsStatus);
+    }, [wsStatus]);
 
     // GEX Sidebar data
     const sidebarData = useMemo(() => {

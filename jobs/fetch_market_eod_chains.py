@@ -74,123 +74,155 @@ def get_target_date() -> date:
     return target
 
 
-def fetch_bulk_snapshot(root: str, exp: int = 0) -> List[Dict[str, Any]]:
+def fetch_bulk_snapshot_oi(root: str, exp: int = 0) -> List[Dict[str, Any]]:
     """
-    Fetch bulk option snapshot for a root via ThetaData REST API.
-    exp=0 means ALL expirations.
+    Fetch bulk open interest snapshot for a root via ThetaData REST API.
     """
-    url = f"{THETA_TERMINAL_URL}/v2/bulk_snapshot/option/quote?root={root}&exp={exp}"
-    LOG.info(f"  Requesting bulk snapshot: {url}")
+    url = f"{THETA_TERMINAL_URL}/v2/bulk_snapshot/option/open_interest?root={root}&exp={exp}"
+    LOG.info(f"  Requesting bulk OI snapshot: {url}")
     
     try:
         with urllib.request.urlopen(url) as response:
             if response.status != 200:
                 LOG.error(f"  Failed: HTTP {response.status}")
                 return []
-            
             data = json.loads(response.read())
-    except urllib.error.URLError as e:
-        LOG.error(f"  Connection error: {e}")
-        return []
     except Exception as e:
-        LOG.error(f"  Error fetching bulk data: {e}")
+        LOG.error(f"  Error fetching bulk OI data: {e}")
         return []
 
-    # Parse response
-    # JSON structure:
-    # {
-    #   "header": { "format": ["ms_of_day", "bid_size", "bid_exchange", "bid", ... ] },
-    #   "response": [
-    #       { "contract": {...}, "ticks": [[...values...]] },
-    #       ...
-    #   ]
-    # }
-    
     header_fmt = data.get("header", {}).get("format", [])
-    if not header_fmt:
-        LOG.error("  No header format found in response")
+    if not header_fmt or "open_interest" not in header_fmt:
         return []
         
-    # Map column names to indices
-    try:
-        idx_bid = header_fmt.index("bid")
-        idx_ask = header_fmt.index("ask")
-    except ValueError:
-        LOG.error(f"  Required columns 'bid'/'ask' not found in header: {header_fmt}")
-        return []
-    
+    idx_oi = header_fmt.index("open_interest")
     parsed_rows = []
     
     for item in data.get("response", []):
         contract = item.get("contract", {})
         ticks = item.get("ticks", [])
-        
-        if not contract or not ticks:
-            continue
+        if not contract or not ticks: continue
             
-        # Extract contract details
-        # expiration is usually YYYYMMDD as integer
         exp_int = contract.get("expiration")
         strike_fixed = contract.get("strike", 0)
         right = contract.get("right")
         
-        if not exp_int or not right:
-            continue
-
-        # Convert date integer to string YYYY-MM-DD
+        if not exp_int or not right: continue
         exp_str = str(exp_int)
-        if len(exp_str) == 8:
-            expiration = f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}"
-        else:
-            expiration = exp_str
-            
-        # Convert strike (fixed point implied 1000ths usually? e.g. 5375000 = 5375.000)
-        # API docs say strike is in millicents? No, typically ThetaData v2 is 1/10th cent (1000 divisor)?
-        # Let's assume standard divisor of 1000 for strikes > 10000 logic previously seen
-        # wait, previous script: s / 1000 if s > 10000
+        expiration = f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}" if len(exp_str) == 8 else exp_str
         strike = strike_fixed / 1000.0
         
-        # Get latest tick (last one in list?)
-        # Snapshot typically implies one tick per contract, but 'ticks' is a list.
-        # usually it's just one list inside ticks: [ [col1, col2...] ]
-        if len(ticks) > 0:
-            latest_tick = ticks[-1]
-            
-            bid = latest_tick[idx_bid]
-            ask = latest_tick[idx_ask]
-            
-            parsed_rows.append({
-                "root": root,
-                "expiration": expiration,
-                "strike": strike,
-                "right": right,
-                "bid": bid,
-                "ask": ask
-            })
-            
-    LOG.info(f"  Parsed {len(parsed_rows)} contracts for {root}")
+        oi = ticks[-1][idx_oi]
+        parsed_rows.append({
+            "root": root, "expiration": expiration, "strike": strike, "right": right,
+            "open_interest": oi
+        })
     return parsed_rows
 
 
-def process_dataframe(data: List[Dict[str, Any]]) -> pd.DataFrame:
+def fetch_bulk_eod(root: str, target_date: date) -> List[Dict[str, Any]]:
     """
-    Convert list of dicts to DataFrame and calculate mid_price.
+    Fetch bulk EOD data (Volume, OHLC, Quote) for a root via ThetaData REST API.
     """
-    if not data:
+    fmt_date = target_date.strftime("%Y%m%d")
+    url = f"{THETA_TERMINAL_URL}/v2/bulk_hist/option/eod?root={root}&exp=0&start_date={fmt_date}&end_date={fmt_date}"
+    LOG.info(f"  Requesting bulk EOD hist: {url}")
+    
+    try:
+        with urllib.request.urlopen(url) as response:
+            if response.status != 200:
+                LOG.error(f"  Failed: HTTP {response.status}")
+                return []
+            data = json.loads(response.read())
+    except Exception as e:
+        LOG.error(f"  Error fetching bulk EOD data: {e}")
+        return []
+
+    header_fmt = data.get("header", {}).get("format", [])
+    if not header_fmt: return []
+        
+    try:
+        idx_bid = header_fmt.index("bid")
+        idx_ask = header_fmt.index("ask")
+        idx_vol = header_fmt.index("volume")
+        idx_close = header_fmt.index("close")
+    except ValueError:
+        LOG.error(f"  Required columns missing in header: {header_fmt}")
+        return []
+    
+    parsed_rows = []
+    for item in data.get("response", []):
+        contract = item.get("contract", {})
+        ticks = item.get("ticks", [])
+        if not contract or not ticks: continue
+            
+        exp_int = contract.get("expiration")
+        strike_fixed = contract.get("strike", 0)
+        right = contract.get("right")
+        
+        if not exp_int or not right: continue
+        exp_str = str(exp_int)
+        expiration = f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}" if len(exp_str) == 8 else exp_str
+        strike = strike_fixed / 1000.0
+        
+        latest_tick = ticks[-1]
+        parsed_rows.append({
+            "root": root, "expiration": expiration, "strike": strike, "right": right,
+            "bid": latest_tick[idx_bid],
+            "ask": latest_tick[idx_ask],
+            "close": latest_tick[idx_close],
+            "volume": latest_tick[idx_vol]
+        })
+            
+    LOG.info(f"  Parsed {len(parsed_rows)} EOD contracts for {root}")
+    return parsed_rows
+
+
+def process_dataframe(eod_data: List[Dict[str, Any]], oi_data: List[Dict[str, Any]]) -> pd.DataFrame:
+    """
+    Join EOD and OI data into a single DataFrame.
+    """
+    if not eod_data:
         return pd.DataFrame()
         
-    df = pd.DataFrame(data)
+    df_eod = pd.DataFrame(eod_data)
+    df_oi = pd.DataFrame(oi_data) if oi_data else pd.DataFrame(columns=["root", "expiration", "strike", "right", "open_interest"])
     
-    # coerce numeric
-    df["bid"] = pd.to_numeric(df["bid"], errors="coerce")
-    df["ask"] = pd.to_numeric(df["ask"], errors="coerce")
+    # Merge on contract key
+    if not df_oi.empty:
+        df = pd.merge(df_eod, df_oi, on=["root", "expiration", "strike", "right"], how="left")
+    else:
+        df = df_eod
+        df["open_interest"] = 0
     
-    # Calculate mid_price
-    df["mid_price"] = (df["bid"] + df["ask"]) / 2.0
+    # Coerce numeric
+    for col in ["bid", "ask", "close", "volume", "open_interest"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     
-    # Fill NaN mid_price with 0 or drop? 
-    # Usually better to keep but can filter out zero-bids if needed
-    # Previous script extracted 'close' if bid/ask missing. Here we only asked for Quote.
+    # Calculate mid_price robustly
+    def calc_mid(row):
+        bid = row.get("bid", 0)
+        ask = row.get("ask", 0)
+        close = row.get("close", 0)
+        
+        # If we have both quotes, use them
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+        
+        # If we have a closing trade price, it's often better than a zero bid or empty quote
+        if close > 0:
+            return close
+            
+        # Fallback to single quote if the other is zero
+        if ask > 0:
+            return ask * 0.98 # Conservative estimate below offer
+        if bid > 0:
+            return bid * 1.02 # Conservative estimate above bid
+            
+        return 0.0
+
+    df["mid_price"] = df.apply(calc_mid, axis=1)
     
     return df
 
@@ -205,22 +237,24 @@ def fetch_symbol(symbol: str, target_date: date) -> bool:
     filename = f"chain_{symbol}_{target_date.strftime('%Y-%m-%d')}.parquet"
     output_path = OUTPUT_DIR / filename
     
-    if output_path.exists():
-        # Optional: Check if file is small/empty?
-        # For now, skip if exists to avoid overwriting good data
-        LOG.info(f"Output exists: {output_path}. Skipping.")
-        return True
+    # Force overwrite if we want to upgrade existing stale files
+    # if output_path.exists():
+    #     LOG.info(f"Output exists: {output_path}. Skipping.")
+    #     return True
         
     roots = SYMBOL_ROOTS.get(symbol, [symbol])
-    all_data = []
+    all_eod = []
+    all_oi = []
     
     for root in roots:
-        data = fetch_bulk_snapshot(root, exp=0) # 0 = All expirations
-        if data:
-            all_data.extend(data)
+        eod = fetch_bulk_eod(root, target_date)
+        if eod: all_eod.extend(eod)
+        
+        oi = fetch_bulk_snapshot_oi(root, exp=0)
+        if oi: all_oi.extend(oi)
             
-    if all_data:
-        df = process_dataframe(all_data)
+    if all_eod:
+        df = process_dataframe(all_eod, all_oi)
         
         # Ensure directory exists
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

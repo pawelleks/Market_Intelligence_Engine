@@ -3,7 +3,7 @@ import asyncio
 import logging
 import json
 import traceback
-from datetime import datetime
+from datetime import datetime, date as dt_date
 from typing import List, Optional, Dict
 from collections import defaultdict, deque
 
@@ -17,12 +17,19 @@ except ImportError:
 
 # Enums (Handle strict import errors for partial versions)
 try:
-    from thetadata import StreamMsgType, OptionReqType, OptionRight, SecurityType
+    from thetadata import StreamMsgType, OptionReqType, OptionRight, SecType
+    # Fallback for older/newer versions of the library that use SecurityType
+    try:
+        from thetadata import SecurityType
+    except ImportError:
+        SecurityType = SecType
 except ImportError:
     # Define dummy enums if missing or package is old
     class StreamMsgType:
         TRADE = "TRADE"
         QUOTE = "QUOTE"
+        PING = "PING"
+        STREAM_DEAD = "STREAM_DEAD"
     class OptionReqType:
         QUOTE = 101
         OHLC = 102
@@ -30,10 +37,11 @@ except ImportError:
     class OptionRight:
         CALL = "C"
         PUT = "P"
-    class SecurityType:
+    class SecType:
         OPTION = "OPTION"
         STOCK = "STOCK"
         INDEX = "INDEX"
+    SecurityType = SecType
 
 LOG = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -103,23 +111,27 @@ class ThetaStreamer:
                 launch=False, 
                 host=self.theta_host,
                 port=11000,           # TCP Command Port
-                streaming_port=10000,
-                timeout=5
+                streaming_port=10000,  # Experiment: Try 10000 based on netstat
+                timeout=10
             )
 
-            # 1. Connect to Command Port
-            LOG.info("Connecting to Theta Terminal Command Port...")
-            self.client.connect()
+            # 1. Connect to Command Port (Blocking)
+            LOG.info(f"Connecting to Theta Terminal Command Port (11000) at {self.theta_host}...")
+            await self.loop.run_in_executor(None, self.client.connect)
+            LOG.info("Connected to Command Port successfully.")
             
-            # 2. Start the background stream thread
-            LOG.info("Connecting to Theta Terminal Stream Port...")
+            # 2. Start the background stream thread (Non-blocking)
+            LOG.info("Connecting to Theta Terminal Stream Port (11001)...")
             self.streaming_thread = self.client.connect_stream(self._on_stream_msg)
+            LOG.info("Stream connection thread started.")
             
-            # Wait a moment for connection
+            # Wait a moment for connection stability
             await asyncio.sleep(2)
             
-            # Subscribe
+            # 3. Subscribe to all necessary streams
+            LOG.info("Starting subscription phase...")
             await self._subscribe_all()
+            LOG.info("Subscription phase complete.")
 
             # Keep alive loop
             asyncio.create_task(self._monitor_stream())
@@ -156,32 +168,29 @@ class ThetaStreamer:
         """
         try:
             # DEBUG: Log every message type to confirm liveness
-            delta_val = getattr(msg, 'delta', 'N/A')
-            LOG.info(f"STREAM MSG RECEIVED: Type={msg.type} Root={getattr(msg.contract, 'root', 'N/A')} Delta={delta_val}")
+            m_type = str(msg.type)
+            if "PING" not in m_type:
+                LOG.info(f"STREAM EVENT: Type={m_type} Msg={msg}")
             
-            if msg.type == StreamMsgType.TRADE:
+            # Robust Type Detection for StreamMsgType.TRADE
+            # thetadata lib often uses IntEnum, where TRADE=1 or similar.
+            is_trade = "TRADE" in m_type or (hasattr(msg.type, "name") and msg.type.name == "TRADE") or (isinstance(msg.type, int) and msg.type == 1)
+
+            if is_trade:
                 # --- ASSET TYPE DETECTION ---
-                # Detect if this is an OPTION or STOCK/INDEX trade
-                # We need to support both since we subbed to both.
-                # Use string conversion to avoid Enum mismatch if library is old/missing
                 raw_sec_type = getattr(msg.contract, "security_type", "UNKNOWN")
                 sec_type_str = str(raw_sec_type)
                 
-                # DEBUG: Audit Security Type
-                LOG.info(f"AUDIT TYPE: {msg.contract.root} -> {sec_type_str} Price={msg.trade.price}") 
-                
-                is_option = sec_type_str == "OPTION" or sec_type_str == "SecurityType.OPTION"
-                is_stock = sec_type_str in ("STOCK", "INDEX", "SecurityType.STOCK", "SecurityType.INDEX")
+                is_option = "OPTION" in sec_type_str
+                is_stock = "STOCK" in sec_type_str or "INDEX" in sec_type_str
 
                 # --- OUTLIER FILTERING ---
-                # Check condition code to exclude "LATE", "OUT_OF_SEQUENCE", etc.
-                # Allowed: REGULAR, AUTOMATIC_EXECUTION, INTERMARKET_SWEEP, FORM_T, CROSS_TRADE
                 cond_name = str(msg.trade.condition.name)
-                # Whitelist of standard/good matches - STRICTER LIST
-                # Exclude FORM_T (Sold Out of Sequence) and ensure only active market prints
+                # Allowed standard/good matches
                 ALLOWED_CONDS = {
                     "REGULAR", "AUTOMATIC_EXECUTION", "INTERMARKET_SWEEP", 
-                    "CROSS_TRADE", "YELLOW_FLAG_REGULAR", "ISO_ELIGIBLE"
+                    "CROSS_TRADE", "YELLOW_FLAG_REGULAR", "ISO_ELIGIBLE",
+                    "SQUARE_OFF" # Added for some closing trades
                 }
                 
                 if cond_name not in ALLOWED_CONDS:
@@ -212,7 +221,7 @@ class ThetaStreamer:
                 if is_stock:
                     LOG.info(f"STOCK UPDATE: {symbol_price_key} @ {current_price} (Cond: {cond_name})")
                 elif is_option:
-                    # LOG.debug(f"OPTION UPDATE: {symbol_price_key} Strike: {msg.contract.strike} Price: {current_price}")
+                    LOG.info(f"OPTION UPDATE: {symbol_price_key} Strike: {msg.contract.strike} Price: {current_price}")
                     pass
 
                 # Extract Trade Data
@@ -244,6 +253,8 @@ class ThetaStreamer:
 
             elif msg.type == StreamMsgType.QUOTE:
                  # TODO: Add Quote Handling
+                 # DEBUG: Log first quote to confirm stream
+                 # LOG.info(f"QUOTE RECEIVED: {msg}")
                  pass
 
         except Exception as e:
@@ -787,31 +798,55 @@ class ThetaStreamer:
         if not self.client:
             return
             
-        LOG.info(f"Subscribing to {len(self.tickers)} tickers...")
-        
-        # 1. Subscribe to ALL OPTION TRADES (market-wide) for HIRO Flow
-        # This is the official method that doesn't require root/exp/strike
+        # 1. Subscribe to ALL OPTION TRADES (market-wide)
+        LOG.info("Subscribing to FULL OPTION TRADE STREAM...")
         try:
-            req_id = self.client.req_full_trade_stream_opt()
+            req_id = await self.loop.run_in_executor(None, self.client.req_full_trade_stream_opt)
             LOG.info(f"Subscribed to FULL OPTION TRADE STREAM (id={req_id})")
         except Exception as e:
             LOG.error(f"Failed to subscribe to full option stream: {e}")
         
-        # 2. Subscribe to STOCK/INDEX price streams for chart price line
-        # These need root-specific subscriptions
+        # DEBUG: Subscribe to specific SPY Option to test stream (Exp: 2026-02-20 Fri, Strike: 685)
+        try:
+             # Strike in millis (685000 = 685.00)
+             spy_opt_req = await self.loop.run_in_executor(
+                 None,
+                 lambda: self.client.req_trade_stream_opt(
+                     root="SPY", 
+                     exp=dt_date(2026, 2, 20), 
+                     strike=685000, 
+                     right=OptionRight.CALL
+                 )
+             )
+             LOG.info(f"Subscribed to TEST SPY OPTION (id={spy_opt_req})")
+             
+             # DEBUG: Subscribe to QUOTES too
+             spy_quote_req = await self.loop.run_in_executor(
+                 None,
+                 lambda: self.client.req_quote_stream_opt(
+                     root="SPY", 
+                     exp=dt_date(2026, 2, 20), 
+                     strike=685000, 
+                     right=OptionRight.CALL
+                 )
+             )
+             LOG.info(f"Subscribed to TEST SPY QUOTE (id={spy_quote_req})")
+        except Exception as e:
+             LOG.error(f"Failed to subscribe to TEST SPY OPTION: {e}")
+        
+        # 2. Subscribe to specific stock roots ONLY for index prices
         for ticker in self.tickers:
             try:
-                # Use official method with exp=date(1,1,1), strike=0, right='C' for root-level
-                # The library's _format_date handles date(1,1,1) as a null/wildcard
-                from datetime import date
-                from thetadata import OptionRight
-                
-                # Use a minimal date that the library formats as "0" or wildcard
-                null_date = date(1, 1, 1)  # Year 1, month 1, day 1
-                req_id = self.client.req_trade_stream_opt(root=ticker, exp=null_date, strike=0, right=OptionRight.CALL)
-                LOG.info(f"Subscribed to {ticker} option trade stream (id={req_id})")
+                # Sub to Stock Trades (for price line)
+                if ticker not in ("SPX", "VIX", "NDX", "RUT"):
+                    LOG.info(f"Subscribing to STOCK root {ticker}...")
+                    stock_req = await self.loop.run_in_executor(
+                        None,
+                        lambda t=ticker: self.client.req_trade_stream_opt(root=t, exp=dt_date(1, 1, 1), strike=0, right=OptionRight.CALL)
+                    )
+                    LOG.info(f"Subscribed to {ticker} STOCK trade stream (id={stock_req})")
             except Exception as e:
-                LOG.error(f"Failed to subscribe to {ticker}: {e}")
+                LOG.error(f"Failed to subscribe to {ticker} stock: {e}")
 
     # DEPRECATED: Old manual TCP bypass method
     # def req_trade_stream_root_bypass(self, root: str):
@@ -989,17 +1024,48 @@ class ThetaStreamer:
 
             await asyncio.sleep(2)
 
+    async def _get_next_expiration(self, root: str) -> Optional[str]:
+        """Helper: Find nearest valid expiration date for root. Returns YYYYMMDD string."""
+        import httpx
+        from datetime import date
+        
+        base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
+        try:
+             async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{base_url}/v2/list/expirations",
+                    params={"root": root},
+                    timeout=5.0
+                )
+                if resp.status_code != 200:
+                    return None
+                
+                data = resp.json()
+                exps = data.get("response", [])
+                if not exps:
+                    return None
+                
+                # Filter for today or future
+                today_int = int(date.today().strftime("%Y%m%d"))
+                valid_exps = sorted([e for e in exps if e >= today_int])
+                
+                return str(valid_exps[0]) if valid_exps else None
+        except Exception as e:
+            LOG.warning(f"Failed to fetch expirations for {root}: {e}")
+            return None
+
     async def _poll_option_flow_loop(self):
         """
-        REST-based HIRO Flow Poller.
-        Polls bulk_snapshot/option/ohlc every 10s for each ticker's 0DTE expiry.
-        Tracks volume changes between polls and computes cumulative net premium flow.
-        Bypasses the broken thetadata streaming library.
+        REST-based HIRO Flow Poller & Synthetic Trade Generator.
+        Polls bulk_snapshot/option/ohlc every 10s for each ticker's nearest expiry.
+        Tracks volume changes between polls and:
+        1. Computes option net flow.
+        2. Generates SYNTHETIC_POLL trades for the frontend.
         """
         import httpx
         from datetime import date as dt_date
-
-        LOG.info("Starting Option Flow Poller (REST API)...")
+        
+        LOG.info("Starting Option Flow Poller & Synthetic Trade Generator (REST API)...")
         base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
 
         # Wait for price data to arrive first
@@ -1009,12 +1075,14 @@ class ThetaStreamer:
         prev_volumes: Dict[str, Dict[str, Dict]] = {}
 
         while self.active:
-            today_str = dt_date.today().strftime("%Y%m%d")
-
             for ticker in self.tickers:
-                # SPX options use SPXW root; skip VIX (no standard 0DTE)
-                if ticker == "VIX":
+                if ticker == "VIX": continue # VIX options are special, skip for now
+                
+                # Dynamic Expiration (Fixes 474 Errors)
+                exp_str = await self._get_next_expiration(ticker)
+                if not exp_str:
                     continue
+                
                 option_root = "SPXW" if ticker == "SPX" else ticker
 
                 try:
@@ -1022,27 +1090,17 @@ class ThetaStreamer:
                         async with httpx.AsyncClient() as client:
                             resp = await client.get(
                                 f"{base_url}/v2/bulk_snapshot/option/ohlc",
-                                params={"root": option_root, "exp": today_str},
+                                params={"root": option_root, "exp": exp_str},
                                 timeout=10.0,
                             )
-                            
-                        # Handle 472 (No Data)
-                        if resp.status_code == 472:
-                            continue
-                            
+                        
                         if resp.status_code != 200:
-                            LOG.warning(f"Flow Poll warning for {ticker}: HTTP {resp.status_code}")
+                            if resp.status_code != 472: # 472 = No Data
+                                LOG.warning(f"Flow Poll warning for {ticker} ({exp_str}): {resp.status_code}")
                             continue
                             
-                    except httpx.ReadTimeout:
-                        # Timeout means sidecar is busy/crashed. Don't spam error logs.
-                        LOG.warning(f"Flow polling timeout for {ticker}")
-                        continue
                     except Exception as e:
                         LOG.error(f"Option flow poll failed for {ticker}: {e}")
-                        continue
-
-                    if resp.status_code != 200:
                         continue
 
                     data = resp.json()
@@ -1070,31 +1128,74 @@ class ThetaStreamer:
                         key = f"{strike}_{right}"
                         current[key] = {"volume": volume, "close": close_price, "right": right}
 
-                    # Compute flow delta from volume changes
+                    # Compute flow delta & Synthesize Trades
                     prev = prev_volumes.get(ticker, {})
                     if prev:
                         delta_flow = 0.0
+                        trades_generated = 0
+                        
                         for key, curr_data in current.items():
                             prev_data = prev.get(key)
                             if prev_data and curr_data["close"] > 0:
                                 delta_vol = curr_data["volume"] - prev_data["volume"]
                                 if delta_vol > 0:
                                     premium = curr_data["close"] * delta_vol * 100
-                                    if curr_data["right"] == "C":
+                                    
+                                    # Info for Trade
+                                    is_call = (curr_data["right"] == "C")
+                                    if is_call:
                                         delta_flow += premium
                                     else:
                                         delta_flow -= premium
+                                        
+                                    # SYNTHETIC TRADE GENERATION
+                                    # Create a trade object consistent with stream 
+                                    trade_data = {
+                                        "type": "TRADE",
+                                        "root": ticker,
+                                        "strike": float(key.split('_')[0]),
+                                        "right": curr_data["right"],
+                                        "exp": f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}", 
+                                        "price": curr_data["close"],
+                                        "size": delta_vol,
+                                        "condition": "SYNTHETIC_POLL",
+                                        "ms_of_day": int(datetime.now().timestamp() * 1000) % 86400000,
+                                        "timestamp": datetime.now().isoformat(),
+                                        "time": int(datetime.now().timestamp()), # Unix Timestamp
+                                        "asset_type": "OPTION",
+                                        "value": premium,
+                                        "sweep": False,
+                                        "sentiment": "NEUTRAL",
+                                        "spot": self.state.get(ticker, {}).get("price", 0.0),
+                                        "hiro_flow": self.state.get(ticker, {}).get("net_flow", 0.0) # Will be stale until end of loop update
+                                    }
+                                    
+                                    # Update stats directly? 
+                                    # broadcast_sync will handle nothing but pushing to queue.
+                                    # frontend stats update every 1s might pick this up if day_stats are updated?
+                                    # Actually day_stats only updated in _update_and_broadcast which is called by stream.
+                                    # We should probably update day_stats here too?
+                                    
+                                    # Update Day Stats
+                                    stats = self.day_stats[ticker]
+                                    if is_call:
+                                        stats["call_vol"] += delta_vol
+                                        stats["call_prem"] += premium
+                                    else:
+                                        stats["put_vol"] += delta_vol
+                                        stats["put_prem"] += premium
+                                        
+                                    # Send to frontend
+                                    self.broadcast_sync(trade_data)
+                                    trades_generated += 1
 
                         # Update cumulative flow in state
                         if ticker not in self.state:
                             self.state[ticker] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
                         self.state[ticker]["net_flow"] += delta_flow
 
-                        if abs(delta_flow) > 0:
-                            LOG.info(
-                                f"HIRO FLOW {ticker}: delta=${delta_flow:,.0f} "
-                                f"cumulative=${self.state[ticker]['net_flow']:,.0f}"
-                            )
+                        if trades_generated > 0:
+                             LOG.info(f"Synthesized {trades_generated} trades for {ticker} (Delta Flow: ${delta_flow:,.0f})")
 
                     prev_volumes[ticker] = current
 

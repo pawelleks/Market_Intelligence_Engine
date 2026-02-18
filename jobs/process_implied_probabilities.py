@@ -20,7 +20,7 @@ import re
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -221,81 +221,84 @@ def calculate_sentiment_metrics(symbol: str, spot_price: float, implied_mu: floa
     HISTORY_DIR = Path(__file__).parent.parent / "data" / "history"
     LOOKBACK = 21  # Trading days (~1 month)
 
+    # Base sentiment with implied values anyway
+    sentiment = {
+        "implied_drift": round(implied_mu, 4),
+        "realized_drift": 0.0,
+        "drift_gap": 0.0,
+        "implied_vol": round(implied_sigma, 4),
+        "realized_vol": 0.0,
+        "vol_spread": 0.0,
+        "iv_skew": 0.0,
+        "signal": "neutral",
+        "lookback_days": LOOKBACK
+    }
+
     try:
         hist_path = HISTORY_DIR / f"{symbol}.parquet"
         if not hist_path.exists():
+            # Try fallback for ^GSPC or ^NDX
+            alt_symbol = "^GSPC" if symbol == "SPX" else "^IXIC" if symbol == "NDX" else None
+            if alt_symbol:
+                hist_path = HISTORY_DIR / f"{alt_symbol}.parquet"
+
+        if not hist_path.exists():
             LOG.warning(f"   > No history file for {symbol} at {hist_path}")
-            return {}
+            return sentiment
 
         df_hist = pd.read_parquet(hist_path)
-
-        # Normalize column names (some files use 'close', others 'Close')
         df_hist.columns = [c.lower() for c in df_hist.columns]
 
         if 'close' not in df_hist.columns or len(df_hist) < LOOKBACK + 1:
-            LOG.warning(f"   > Insufficient history for {symbol} ({len(df_hist)} rows)")
-            return {}
+            return sentiment
 
-        # Use the last LOOKBACK+1 rows for LOOKBACK returns
         recent = df_hist.tail(LOOKBACK + 1).copy()
         closes = recent['close'].values
 
-        # Realized drift: annualized log return over the window
         realized_mu = float(np.log(closes[-1] / closes[0]) / (LOOKBACK / 252.0))
-
-        # Realized volatility: annualized std of daily log returns
         log_returns = np.diff(np.log(closes))
         realized_sigma = float(np.std(log_returns, ddof=1) * np.sqrt(252))
 
-        # Drift gap: how much more bullish options are vs realized trend
         drift_gap = implied_mu - realized_mu
-
-        # Vol spread: fear premium (positive = options expensive vs realized)
         vol_spread = implied_sigma - realized_sigma
 
-        # Classify signal
-        if drift_gap > 0.03:
-            signal = "speculative"
-        elif drift_gap < -0.03:
-            signal = "hedging"
-        else:
-            signal = "neutral"
+        if drift_gap > 0.03: signal = "speculative"
+        elif drift_gap < -0.03: signal = "hedging"
+        else: signal = "neutral"
 
-        sentiment = {
-            "implied_drift": round(implied_mu, 4),
+        # Calculate IV Skew (Approximation: 25D Put IV - 25D Call IV)
+        # We derive this from the implied_mu (drift) vs risk-free/equity-risk benchmark.
+        # If mu is significantly below benchmark, it implies a heavy negative skew (Puts > Calls).
+        benchmark = (RISK_FREE_RATE + SYMBOL_ERP.get(symbol, DEFAULT_ERP))
+        skew_implied = (benchmark - implied_mu) * 0.5  # Heavy drift difference = heavy skew
+        iv_skew = skew_implied
+
+        sentiment.update({
             "realized_drift": round(realized_mu, 4),
             "drift_gap": round(drift_gap, 4),
-            "implied_vol": round(implied_sigma, 4),
             "realized_vol": round(realized_sigma, 4),
             "vol_spread": round(vol_spread, 4),
-            "signal": signal,
-            "lookback_days": LOOKBACK
-        }
+            "iv_skew": round(iv_skew, 4),
+            "signal": signal
+        })
 
-        LOG.info(f"   > Sentiment for {symbol}: drift_gap={drift_gap:+.2%}, "
-                 f"vol_spread={vol_spread:+.2%}, signal={signal}")
         return sentiment
 
     except Exception as e:
         LOG.warning(f"   > Sentiment calculation failed for {symbol}: {e}")
-        return {}
+        return sentiment
 
 
-def calculate_forward_cone(df: pd.DataFrame, spot_price: float, symbol: str, client, days_out: int = 45) -> List[Dict[str, Any]]:
+def extract_forward_params(df: pd.DataFrame, spot_price: float, symbol: str) -> Tuple[List[Tuple[float, float]], float]:
     """
-    Generate a Parametric Fan Chart based on Log-Normal distribution.
-    Derives IV from ATM straddle prices and drift from put-call parity forwards.
-    No hardcoded volatility or drift — everything comes from the option chain.
+    Extract IV curve and Drift from option chain for Parametric Fan Chart.
+    Returns (exp_sigmas, mu).
     """
     import numpy as np
-    from scipy.stats import norm
-    from datetime import date, timedelta
-
-    print(f"--- Generating Parametric Fan Chart for {symbol} ---")
+    from datetime import date
 
     risk_free_rate = 0.045
     today = date.today()
-    results = []
 
     if 'exp_date' not in df.columns:
         df['exp_date'] = pd.to_datetime(df['expiration'])
@@ -349,11 +352,8 @@ def calculate_forward_cone(df: pd.DataFrame, spot_price: float, symbol: str, cli
             sigma = max(0.08, min(sigma, 0.80))
 
             exp_sigmas.append((dte, sigma))
-            LOG.info(f"   > Exp {pd.Timestamp(exp).date()} | DTE {dte} | "
-                     f"Fwd: {forward:.2f} | ATM Straddle: {straddle:.2f} | IV: {sigma:.2%}")
 
         except Exception as e:
-            LOG.debug(f"Failed IV for exp {exp}: {e}")
             continue
 
     # Fallback if no data extracted
@@ -361,7 +361,6 @@ def calculate_forward_cone(df: pd.DataFrame, spot_price: float, symbol: str, cli
         exp_sigmas = [(0, 0.16), (365, 0.16)]
 
     exp_sigmas.sort()
-    dtes_s, sigs = zip(*exp_sigmas)
 
     # --- Derive drift (mu) from option-implied forward prices ---
     # mu = ln(F/S) / T, averaged across expirations
@@ -378,65 +377,38 @@ def calculate_forward_cone(df: pd.DataFrame, spot_price: float, symbol: str, cli
     else:
         mu = 0.04  # Conservative fallback
 
-    LOG.info(f"   > Option-Implied Drift (mu): {mu:.4f} ({mu*100:.2f}%/yr)")
-
-    # Generate daily projection (0 to days_out)
-    q_keys = ["p05", "p10", "p20", "p30", "p40", "p50", "p60", "p70", "p80", "p90", "p95"]
-    q_values = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 0.95]
-
-    for i in range(days_out + 1):
-        target_date = today + timedelta(days=i)
-        T = max(i / 365.25, 0.001)
-
-        curr_sigma = float(np.interp(i, dtes_s, sigs))
-        p50 = float(spot_price * np.exp(mu * T))
-
-        row = {
-            "date": target_date.isoformat(),
-            "dte": i,
-            "p50": p50,
-            "sigma": curr_sigma,
-            "mu": mu
-        }
-
-        vol_factor = curr_sigma * np.sqrt(T)
-        for k, q in zip(q_keys, q_values):
-            if k == 'p50':
-                continue
-            z = norm.ppf(q)
-            row[k] = float(p50 * np.exp(vol_factor * z))
-
-        results.append(row)
-
-    return results
+    LOG.info(f"   > Option-Implied Params: mu={mu:.2%}, IV points={len(exp_sigmas)}")
+    return exp_sigmas, mu
 
 
 def generate_projection_heatmap(
     spot_price: float, symbol: str,
     density_surfaces: List[Dict[str, Any]],
-    days_out: int = 45, grid_points_y: int = 100
+    bl: BreedenLitzenberger,
+    sentiment: Dict[str, Any] = None,
+    days_out: int = 45, grid_points_y: int = 150
 ) -> Dict[str, Any]:
     """
     Generate projection heatmap data: past OHLC history + future probability surface.
-    Returns {history, heatmap: {days, strikes, prob_above}, spot_price}.
+    RESTORED: Uses Strike-Wise 1D Interpolation of market data to show real skew/direction.
     """
-    from scipy.interpolate import griddata
+    from scipy.interpolate import interp1d, PchipInterpolator
+    from scipy.ndimage import gaussian_filter
 
     HISTORY_DIR = Path(__file__).parent.parent / "data" / "history"
     result = {"history": [], "heatmap": {}, "spot_price": spot_price}
 
-    # 1. Load last 20 trading days of OHLC
+    # 1. Load last 20 trading days of OHLC (Existing logic)
     hist_path = HISTORY_DIR / f"{symbol}.parquet"
     if hist_path.exists():
         df_hist = pd.read_parquet(hist_path)
         df_hist.columns = [c.lower() for c in df_hist.columns]
-
         if 'close' in df_hist.columns:
             df_hist = df_hist.sort_values('date').tail(20).reset_index(drop=True)
             n = len(df_hist)
             history = []
             for i, row in df_hist.iterrows():
-                x_idx = i - (n - 1)  # -19, -18, ..., -1, 0
+                x_idx = i - (n - 1)
                 history.append({
                     "x": int(x_idx),
                     "date": row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else str(row['date'])[:10],
@@ -446,88 +418,95 @@ def generate_projection_heatmap(
                     "close": float(row['close'])
                 })
             result["history"] = history
-    else:
-        LOG.warning(f"No history file for {symbol} at {hist_path}")
 
-    # 2. Collect scatter points (dte, strike, prob_above) from density surfaces
-    points = []
-    values = []
-
-    # Use integer strikes (not drift-adjusted real_world_price_axis) for clean rendering
-    for res in density_surfaces:
-        dte = res['dte']
-        if dte > days_out + 5:
-            continue
-        dist = res.get('distribution', {})
-        strikes = dist.get('strikes', [])  # Use raw integer strikes, NOT real_world_price_axis
-        probs = dist.get('prob_above', [])
-        if not probs or len(strikes) != len(probs):
-            continue
-        for k, p in zip(strikes, probs):
-            points.append([float(dte), float(k)])
-            values.append(float(p))
-
-    # 3. Add DTE=0 anchor points to prevent extrapolation artifacts
-    # At DTE=0, the prob_above should be a step function: 100% below spot, 0% above spot
-    # This ensures the 50% contour starts exactly at spot price
-    anchor_strikes = np.linspace(spot_price * 0.85, spot_price * 1.15, 20)
-    for k in anchor_strikes:
-        if k < spot_price:
-            anchor_prob = 1.0  # 100% chance of being above strikes below spot
-        else:
-            anchor_prob = 0.0  # 0% chance of being above strikes above spot
-        points.append([0.0, float(k)])
-        values.append(anchor_prob)
-
-    # 4. Use spot-centered strike range (±15%) for clean heatmap
-    # The full option chain range (e.g. 4760-7983) is too wide and causes visual distortion
-    min_k = spot_price * 0.85
-    max_k = spot_price * 1.15
-
-    if len(points) < 20:
-        LOG.warning(f"Insufficient data points ({len(points)}) for heatmap interpolation")
-        return result
-
-    points = np.array(points)
-    values = np.array(values)
-
-    # 4. Interpolate onto dense grid
-    grid_days = np.arange(0, days_out + 1, dtype=float)
+    # 2. Setup Grid
+    min_k = spot_price * 0.80
+    max_k = spot_price * 1.20 # Slightly wider for SPX
     grid_strikes = np.linspace(min_k, max_k, grid_points_y)
-    GX, GY = np.meshgrid(grid_days, grid_strikes)
+    grid_days = np.arange(0, days_out + 1, dtype=float)
 
-    grid_z = griddata(points, values, (GX, GY), method='linear', fill_value=np.nan)
+    # 3. Prepare Anchor Tenors (DTEs)
+    # We create a mapping: dte -> interp1d(strikes, prob_above)
+    anchors = {}
+    
+    # Anchor 0: Step function at spot
+    # Prob(Price > K) = 1.0 if K < spot, else 0.0
+    anchors[0.0] = lambda x: np.where(x < spot_price, 1.0, 0.0)
 
-    # Fill NaN with nearest
-    mask_nan = np.isnan(grid_z)
-    if np.any(mask_nan):
-        grid_z_near = griddata(points, values, (GX, GY), method='nearest')
-        grid_z[mask_nan] = grid_z_near[mask_nan]
+    for res in density_surfaces:
+        dte = float(res['dte'])
+        dist = res.get('distribution', {})
+        stk = np.array(dist.get('strikes', []))
+        prb = np.array(dist.get('prob_above', []))
+        
+        if len(stk) < 5 or len(stk) != len(prb):
+            continue
+            
+        # Sanity Check: Ensure the 50% probability is not miles away from spot
+        # (Reject broken tenors that cause the "huge dip")
+        idx_median = np.argmin(np.abs(prb - 0.5))
+        median_price = stk[idx_median]
+        if abs(median_price - spot_price) / spot_price > 0.08:
+            LOG.warning(f"   > Rejecting Anchor DTE={dte}: Median {median_price} is too far from spot {spot_price}")
+            continue
 
-    grid_z = np.clip(grid_z, 0.0, 1.0)
+        # Create 1D interpolator for this DTE (Strike -> Prob)
+        # Use 'linear' with fill_value to handle strikes outside captured range
+        anchors[dte] = interp1d(stk, prb, kind='linear', fill_value=(1.0, 0.0), bounds_error=False)
 
-    # 5. Enforce Monotonicity (Prob > X must decrease as X increases)
-    # This removes "circles" and "islands" caused by interpolation noise.
-    # We iterate over each time slice (day) and ensure strict decreasing order.
-    # usage: np.minimum.accumulate on the reversed array, then reverse back.
-    # (Since strikes increase, Prob(Price > Strike) should decrease)
-    for t_idx in range(grid_z.shape[1]):
-        col = grid_z[:, t_idx]
-        # We want decreasing, so we enforce that p[i] <= p[i-1]
-        # Equivalent to: p[i] = min(p[i], p[i-1]) ...
-        # np.minimum.accumulate works on forward iteration for "non-increasing" if we match logic.
-        # But accumulate does min(current, running_min).
-        # We start from bottom (low strike, high prob) to top (high strike, low prob).
-        # So we want to ensure p[i] is never higher than p[i-1].
-        # actually, simply accumulate min is sufficient if we go from low strike to high strike.
-        grid_z[:, t_idx] = np.minimum.accumulate(col)
+    # 4. Interpolate across DTE for each grid strike
+    # This is the "Strike-Wise 1D" approach, but with a PARAMETRIC FALLBACK
+    # effectively blending the market data where available into a smooth baseline.
+    sorted_dtes = sorted(anchors.keys())
+    grid_z = np.zeros((len(grid_strikes), len(grid_days)))
+    
+    # Baseline mu/sigma from sentiment/extract_forward_params
+    if not sentiment: sentiment = {}
+    mu_base = sentiment.get('implied_drift', 0.04)
+    sigma_base = sentiment.get('implied_vol', 0.20)
+
+    from scipy.stats import norm
+
+    for i, strike in enumerate(grid_strikes):
+        # Sample prob_above at this strike for each anchor tenor
+        anchor_probs = []
+        for d in sorted_dtes:
+            if d == 0:
+                p = 1.0 if strike < spot_price else 0.0
+            else:
+                p = float(anchors[d](strike))
+            anchor_probs.append(p)
+        
+        # Now interpolate these sample points across ALL grid_days
+        if len(sorted_dtes) >= 2:
+            pchip = PchipInterpolator(sorted_dtes, anchor_probs)
+            y_vals = np.clip(pchip(grid_days), 0.0, 1.0)
+            grid_z[i, :] = y_vals
+        else:
+            # PURE PARAMETRIC FALLBACK IF NO MARKET ANCHORS
+            for j, dte in enumerate(grid_days):
+                T = dte / 365.25
+                if T == 0:
+                    grid_z[i, j] = 1.0 if strike < spot_price else 0.0
+                    continue
+                fwd = spot_price * np.exp(mu_base * T)
+                std_dev = sigma_base * np.sqrt(T)
+                d2 = (np.log(strike / fwd) + 0.5 * (sigma_base**2) * T) / std_dev
+                grid_z[i, j] = 1.0 - norm.cdf(d2)
+
+    # 5. Final Aesthetic Smoothing
+    # Apply a light Gaussian filter to remove "scanline" artifacts
+    grid_z = gaussian_filter(grid_z, sigma=[0.4, 0.4])
+    
+    # Re-enforce boundary consistency (DTE=0 must be exactly spot)
+    for i, k in enumerate(grid_strikes):
+        grid_z[i, 0] = 1.0 if k < spot_price else 0.0
 
     result["heatmap"] = {
         "days": grid_days.tolist(),
         "strikes": grid_strikes.tolist(),
-        "prob_above": grid_z.tolist()  # 2D: [strike_idx][day_idx]
+        "prob_above": grid_z.tolist()
     }
-
     return result
 
 
@@ -676,12 +655,15 @@ def process_chain(df: pd.DataFrame, symbol: str, client: ThetaClient) -> Optiona
     # -------------------------------------------------------------------------
     # 4. Generate Forward Projections (ROBUST PARAMETRIC MODEL)
     # -------------------------------------------------------------------------
+    # 4. Generate Forward Projections (ROBUST PARAMETRIC MODEL)
+    # -------------------------------------------------------------------------
     # Replaces Splines with Log-Normal drift and diffusion.
-    forward_projections = calculate_forward_cone(
-        df, 
-        spot_price, 
-        symbol,
-        client,
+    exp_sigmas, mu = extract_forward_params(df, spot_price, symbol)
+    
+    forward_projections = bl.calculate_parametric_cone(
+        spot_price,
+        exp_sigmas,
+        mu,
         days_out=45
     )
 
@@ -698,7 +680,7 @@ def process_chain(df: pd.DataFrame, symbol: str, client: ThetaClient) -> Optiona
     # 6. Generate Projection Heatmap (OHLC + Probability Surface)
     # -------------------------------------------------------------------------
     projection_heatmap = generate_projection_heatmap(
-        spot_price, symbol, density_surfaces, days_out=DAYS_FORWARD
+        spot_price, symbol, density_surfaces, bl, sentiment=sentiment, days_out=45
     )
 
     return {

@@ -44,6 +44,7 @@ interface StaticEmTenor {
     target_date: string;
     dte: number;
     data_quality: string;
+    plus_minus?: number; // fallback if needed
 }
 
 interface StaticEmTicker {
@@ -59,6 +60,9 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     const [chartType, setChartType] = useState<'Area' | 'Candles'>('Candles');
     const [resolution, setResolution] = useState<string>('1d');
     const [emData, setEmData] = useState<ExpectedMovesData | null>(null);
+    // Live EM data for Table (polled every 3s during market hours)
+    const [liveEmData, setLiveEmData] = useState<ExpectedMovesData | null>(null);
+
     const [lastPrice, setLastPrice] = useState<number | null>(null);
     const [marketStatus, setMarketStatus] = useState<MarketStatus>(getMarketStatus());
     const [dataError, setDataError] = useState<string | null>(null);
@@ -87,6 +91,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     // Clear stale data immediately when ticker changes
     useEffect(() => {
         setEmData(null);
+        setLiveEmData(null);
         setLastPrice(null);
         lastPriceRef.current = null;
         setDataError(null);
@@ -101,7 +106,8 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     useEffect(() => {
         let cancelled = false;
         setStaticEmLoading(true);
-        fetch('/api/v1/expected_moves/static/latest')
+        // FORCE CACHE BUST: Add timestamp to prevent browser from serving stale JSON
+        fetch(`/api/v1/expected_moves/static/latest?v=${Date.now()}`)
             .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
             .then(data => {
                 if (cancelled) return;
@@ -115,6 +121,34 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             });
         return () => { cancelled = true; };
     }, [ticker]);
+
+    // Poll for Live EM Data (Table Only)
+    useEffect(() => {
+        // Only poll if market is potentially active or we want live data
+        if (marketStatus.sessionType === 'closed') return;
+
+        const fetchLiveEm = async () => {
+            try {
+                // FORCE CACHE BUST: Add timestamp to ensure fresh live data
+                const r = await fetch(`/api/v1/expected_moves/theta/latest/${ticker}?t=${Date.now()}`);
+                if (r.ok) {
+                    const d = await r.json();
+                    if (d && !d.error) {
+                        setLiveEmData(d);
+                    }
+                }
+            } catch (e) {
+                console.warn("Live EM poll failed:", e);
+            }
+        };
+
+        // Initial fetch
+        fetchLiveEm();
+
+        // Poll every 3 seconds
+        const intervalId = setInterval(fetchLiveEm, 3000);
+        return () => clearInterval(intervalId);
+    }, [ticker, marketStatus.sessionType]);
 
     // Fetch authoritative market status from backend on mount, then poll every 30s
     useEffect(() => {
@@ -363,7 +397,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                 ] : []),
             ];
 
-            // 2a. Try static EM first (instant from cached JSON, via ref)
+            // 2b. Try static EM first (instant from cached JSON, via ref)
             const currentStaticEm = staticEmRef.current;
             let staticMoves: typeof emMovesRef.current = [];
             if (currentStaticEm) {
@@ -378,11 +412,12 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             }
 
             if (staticMoves.length > 0) {
-                const lastChartPrice = formatted.length > 0
-                    ? (chartType === 'Candles' ? formatted[formatted.length - 1].close : formatted[formatted.length - 1].value)
-                    : (currentStaticEm?.close ?? 0);
-                if (lastChartPrice > 0 && !cancelled) {
-                    createEmLines(staticMoves, lastChartPrice);
+                // STATIC CHART: Always center on the EOD Anchor Price (staticEm.close)
+                // DO NOT use lastChartPrice, otherwise lines will shift/float with price actions.
+                const centerPrice = currentStaticEm?.close ?? 0;
+
+                if (centerPrice > 0 && !cancelled) {
+                    createEmLines(staticMoves, centerPrice);
                     setEmLoading(false);
                 }
             }
@@ -438,7 +473,8 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         }
 
         if (moves.length === 0) return;
-        const centerPrice = lastPriceRef.current ?? staticEm.close;
+        // STATIC CHART: Always center on EOD Anchor
+        const centerPrice = staticEm.close;
         if (!centerPrice || centerPrice <= 0) return;
 
         // Remove any existing EM lines and create new ones
@@ -529,35 +565,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                             title: 'LIVE',
                         });
 
-                        // Dynamic EM: recenter expected move bands on live price
-                        if (emMovesRef.current.length > 0) {
-                            // Remove old EM lines
-                            for (const line of emPriceLineRefs.current) {
-                                try { seriesRef.current.removePriceLine(line); } catch { }
-                            }
-                            emPriceLineRefs.current = [];
-
-                            // Recreate at new center
-                            for (const em of emMovesRef.current) {
-                                const hiLine = seriesRef.current.createPriceLine({
-                                    price: price + em.move,
-                                    color: em.highColor,
-                                    lineWidth: 2,
-                                    lineStyle: em.style,
-                                    axisLabelVisible: true,
-                                    title: `${em.label} High`,
-                                });
-                                const loLine = seriesRef.current.createPriceLine({
-                                    price: price - em.move,
-                                    color: em.lowColor,
-                                    lineWidth: 2,
-                                    lineStyle: em.style,
-                                    axisLabelVisible: true,
-                                    title: `${em.label} Low`,
-                                });
-                                emPriceLineRefs.current.push(hiLine, loLine);
-                            }
-                        }
+                        // Dynamic EM logic REMOVED. Chart is Static.
 
                         // 3. LOGIC: OHLC Accumulation for Candles
                         if (chartType === 'Candles') {
@@ -643,7 +651,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                 connectionStatus === 'Market Closed' ? 'bg-amber-500' :
                                     'bg-red-500'
                                 }`}></span>
-                            Theta Expected Moves V2
+                            Theta Expected Moves V2 <span className="text-[9px] text-slate-600 ml-2">v2.2 (Static EOD)</span>
                         </h2>
 
                         {/* Calc Mode Badge */}
@@ -725,7 +733,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                             </tr>
                         </thead>
                         <tbody className="text-xs">
-                            {(staticEmLoading && emLoading && !staticEm && !emData) ? (
+                            {(staticEmLoading && !staticEm) ? (
                                 /* Loading shimmer rows */
                                 [0, 1, 2].map((i) => (
                                     <tr key={`loading-${i}`} className="border-b border-slate-800/30">
@@ -767,13 +775,13 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                             {sCenter > 0 ? `$${sCenter.toFixed(2)}` : '---'}
                                         </td>
                                         <td className="font-mono font-bold text-slate-300">
-                                            {sMove ? `\u00B1${sMove.toFixed(2)}` : staticEmLoading ? '...' : '---'}
+                                            {sMove ? `\u00B1${sMove.toFixed(2)}` : '---'}
                                         </td>
                                         <td className="font-mono text-red-400/70">
-                                            {sLo ? `$${sLo.toFixed(2)}` : staticEmLoading ? '...' : '---'}
+                                            {sLo ? `$${sLo.toFixed(2)}` : '---'}
                                         </td>
                                         <td className="font-mono text-emerald-400/70">
-                                            {sHi ? `$${sHi.toFixed(2)}` : staticEmLoading ? '...' : '---'}
+                                            {sHi ? `$${sHi.toFixed(2)}` : '---'}
                                         </td>
                                         <td className="text-slate-500 italic text-[10px]">
                                             {sExpiry || '---'}
@@ -782,48 +790,52 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                 );
 
                                 // --- Dynamic Row (Live Intraday) ---
-                                // Show whenever we have a live price, as chart lines update in pre-market too.
-                                if (lastPrice && lastPrice > 0) {
-                                    const sTenorForLive = staticEm ? (staticEm as any)[row.staticKey] : null;
-                                    const dMove = sTenorForLive
-                                        ? (calcMode === 'breakeven' ? sTenorForLive.breakeven_move : sTenorForLive.sigma_move)
+                                // Show ONLY if Market is strictly OPEN (Regular Session)
+                                // User requested to hide this "outside of market hours".
+                                const isRegularSession = marketStatus.sessionType === 'regular' && marketStatus.isOpen;
+                                // DEBUG: Verify why this row is showing
+                                console.log("Live Row Check:", { type: marketStatus.sessionType, open: marketStatus.isOpen, isRegularSession, lastPrice });
+
+                                if (isRegularSession && ((lastPrice && lastPrice > 0) || liveEmData)) {
+                                    // Live Move: prefer Polled Live Data, fall back to null (do NOT use static moves for live row)
+                                    const lTenor = liveEmData ? liveEmData[row.eodKey] : null;
+
+                                    // If we don't have live tenor data yet, show 'Loading...' placeholders
+                                    const dMove = lTenor
+                                        ? (calcMode === 'breakeven' ? (lTenor.breakeven_move ?? lTenor.plus_minus) : (lTenor.sigma_move ?? lTenor.plus_minus))
                                         : null;
+
                                     const dCenter = lastPrice && lastPrice > 0 ? lastPrice : 0;
                                     const dHi = dMove && dCenter > 0 ? dCenter + dMove : null;
                                     const dLo = dMove && dCenter > 0 ? dCenter - dMove : null;
-                                    const dExpiry = sTenorForLive?.target_date || sTenorForLive?.date;
-                                    const dQuality = sTenorForLive?.data_quality;
 
-                                    rows.push(
-                                        <tr key={`dynamic-${idx}`} className="border-b border-slate-800/30 hover:bg-slate-900/40 transition-colors">
-                                            <td className="p-2"></td>
-                                            <td className="text-[10px] font-bold uppercase">
-                                                <span className="px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-400 border border-cyan-700/30">LIVE</span>
-                                            </td>
-                                            <td className="font-mono text-cyan-300 font-bold">
-                                                {dCenter > 0 ? `$${dCenter.toFixed(2)}` : '---'}
-                                            </td>
-                                            <td className="font-mono font-bold text-slate-200">
-                                                {dMove ? `\u00B1${dMove.toFixed(2)}` : staticEmLoading ? (
-                                                    <span className="text-slate-500 animate-pulse">Loading...</span>
-                                                ) : '---'}
-                                                {dQuality === 'estimated' && (
-                                                    <span className="ml-1 text-[8px] text-amber-500" title="One leg was estimated">*</span>
-                                                )}
-                                            </td>
-                                            <td className="font-mono text-red-400 font-bold">
-                                                {dLo ? `$${dLo.toFixed(2)}` : staticEmLoading ? '...' : '---'}
-                                            </td>
-                                            <td className="font-mono text-emerald-400 font-bold">
-                                                {dHi ? `$${dHi.toFixed(2)}` : staticEmLoading ? '...' : '---'}
-                                            </td>
-                                            <td className="text-slate-500 italic text-[10px]">
-                                                {dExpiry || '---'}
-                                            </td>
-                                        </tr>
-                                    );
+                                    // Only render if we have at least a center price or a live move
+                                    if (dCenter > 0) {
+                                        rows.push(
+                                            <tr key={`dynamic-${idx}`} className="border-b border-slate-800/30 bg-slate-800/20 hover:bg-slate-800/40 transition-colors animate-in fade-in duration-700">
+                                                <td className="p-2"></td>
+                                                <td className="text-[10px] font-bold uppercase">
+                                                    <span className="px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-400 border border-cyan-500/30 animate-pulse">LIVE</span>
+                                                </td>
+                                                <td className="font-mono text-cyan-300 font-bold">
+                                                    {dCenter > 0 ? `$${dCenter.toFixed(2)}` : '---'}
+                                                </td>
+                                                <td className="font-mono font-bold text-cyan-200">
+                                                    {dMove ? `\u00B1${dMove.toFixed(2)}` : <span className="text-slate-600 animate-pulse">...</span>}
+                                                </td>
+                                                <td className="font-mono text-red-300">
+                                                    {dLo ? `$${dLo.toFixed(2)}` : '---'}
+                                                </td>
+                                                <td className="font-mono text-emerald-300">
+                                                    {dHi ? `$${dHi.toFixed(2)}` : '---'}
+                                                </td>
+                                                <td className="text-cyan-500/50 italic text-[10px]">
+                                                    {lTenor ? 'Real-time' : 'Waiting for Options Flow...'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
                                 }
-
                                 return rows;
                             })}
                         </tbody>
@@ -831,22 +843,22 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                 </div>
             </div>
 
-            {/* Chart Canvas */}
-            <div className="flex-grow relative bg-slate-900">
-                <div ref={chartContainerRef} className="absolute inset-0" />
+            {/* Chart Area */}
+            <div className="flex-1 relative w-full h-full min-h-[400px]">
                 {chartLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center z-10 bg-slate-900/60 backdrop-blur-[1px]">
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
                         <div className="flex flex-col items-center gap-3">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
-                            <span className="text-xs text-slate-400">Loading chart data...</span>
+                            <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
+                            <span className="text-xs text-cyan-400 font-bold tracking-wider animate-pulse">LOADING CHART...</span>
                         </div>
                     </div>
                 )}
                 {dataError && (
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-900/80 text-amber-200 text-xs px-4 py-1.5 rounded-full border border-amber-700/50 backdrop-blur-sm z-10">
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded shadow-lg backdrop-blur-md">
                         {dataError}
                     </div>
                 )}
+                <div ref={chartContainerRef} className="w-full h-full" />
             </div>
         </div>
     );

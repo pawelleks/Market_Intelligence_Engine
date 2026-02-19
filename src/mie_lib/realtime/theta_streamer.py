@@ -46,6 +46,8 @@ except ImportError:
 LOG = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+from mie_lib.realtime.trade_processor import TradeProcessor
+
 class ThetaStreamer:
     """
     Manages real-time data streaming from Theta Terminal using the OFFICIAL TCP Client.
@@ -60,6 +62,9 @@ class ThetaStreamer:
         self.state = {} # Aggregated State for Polling
         # Flow history: ticker -> deque of {time, price, flow}
         self.flow_history: Dict[str, deque] = {t: deque(maxlen=5000) for t in tickers}
+        
+        # Trade Processor (Aggregation & Tagging)
+        self.processor = TradeProcessor(self._on_clean_trade)
         
         # NEW: Trade History and Day Stats for Option Flow Page
         self.recent_trades = deque(maxlen=1000)
@@ -79,6 +84,64 @@ class ThetaStreamer:
         self.client: Optional[ThetaClient] = None
         self.streaming_thread = None
         self.loop = None
+
+    async def _on_clean_trade(self, trade: Dict):
+        """
+        Callback from TradeProcessor when a trade is aggregated and tagged.
+        """
+        try:
+            root = trade["root"]
+            price = trade["price"]
+            size = trade["size"]
+            right = trade["right"]
+            
+            # 1. Update State (Net Flow)
+            if root not in self.state:
+                self.state[root] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
+
+            # Calculate Premium (Size * Price * 100)
+            premium = price * size * 100
+            
+            # Update Flow & Day Stats
+            if right == "C":
+                self.state[root]["net_flow"] += premium
+                self.day_stats[root]["call_vol"] += size
+                self.day_stats[root]["call_prem"] += premium
+            else:
+                self.state[root]["net_flow"] -= premium
+                self.day_stats[root]["put_vol"] += size
+                self.day_stats[root]["put_prem"] += premium
+                
+            self.day_stats[root]["net_flow"] = self.state[root]["net_flow"]
+            
+            # Enrich Trade Object with latest Flow & Spot
+            trade["val"] = premium
+            trade["value"] = premium
+            trade["hiro_flow"] = self.state[root]["net_flow"]
+            trade["asset_type"] = "OPTION"
+            
+            # 2. History
+            self.recent_trades.append(trade)
+            if root in self.flow_history:
+                self.flow_history[root].append({
+                    "time": int(datetime.now().timestamp()), # Seconds for chart
+                    "price": self.state[root].get("price", 0.0), # Use underlying price
+                    "flow": self.state[root]["net_flow"]
+                })
+                
+            # 3. Broadcast
+            for q in self.listeners:
+                if not q.full():
+                    q.put_nowait(trade)
+                    
+            # Log significant trades
+            if "SWEEP" in trade["tags"] or "BLOCK" in trade["tags"]:
+                try:
+                    LOG.info(f"BIG TRADE: {root} {trade['tags']} ${premium:,.0f}")
+                except: pass
+                
+        except Exception as e:
+            LOG.error(f"Broadcasting Error: {e}")
 
     async def start(self):
         """
@@ -167,99 +230,72 @@ class ThetaStreamer:
         WARNING: This runs in a separate thread.
         """
         try:
-            # DEBUG: Log every message type to confirm liveness
             m_type = str(msg.type)
-            if "PING" not in m_type:
-                LOG.info(f"STREAM EVENT: Type={m_type} Msg={msg}")
             
-            # Robust Type Detection for StreamMsgType.TRADE
-            # thetadata lib often uses IntEnum, where TRADE=1 or similar.
+            # Robust Type Detection
             is_trade = "TRADE" in m_type or (hasattr(msg.type, "name") and msg.type.name == "TRADE") or (isinstance(msg.type, int) and msg.type == 1)
+            is_quote = "QUOTE" in m_type or (hasattr(msg.type, "name") and msg.type.name == "QUOTE") or (isinstance(msg.type, int) and msg.type == 0)
 
-            if is_trade:
-                # --- ASSET TYPE DETECTION ---
-                raw_sec_type = getattr(msg.contract, "security_type", "UNKNOWN")
-                sec_type_str = str(raw_sec_type)
-                
-                is_option = "OPTION" in sec_type_str
-                is_stock = "STOCK" in sec_type_str or "INDEX" in sec_type_str
-
-                # --- OUTLIER FILTERING ---
-                cond_name = str(msg.trade.condition.name)
-                # Allowed standard/good matches
-                ALLOWED_CONDS = {
-                    "REGULAR", "AUTOMATIC_EXECUTION", "INTERMARKET_SWEEP", 
-                    "CROSS_TRADE", "YELLOW_FLAG_REGULAR", "ISO_ELIGIBLE",
-                    "SQUARE_OFF" # Added for some closing trades
-                }
-                
-                if cond_name not in ALLOWED_CONDS:
-                    return
-
-                # --- PRICE SANITY CHECK (Session-Aware Outlier Protection) ---
-                symbol_price_key = msg.contract.root
-                ticker_state = self.state.get(symbol_price_key, {})
-                last_known = ticker_state.get("price", 0.0)
-                last_update_ms = ticker_state.get("last_update_ms", 0)
-                current_price = msg.trade.price
-                now_ms = int(datetime.now().timestamp() * 1000)
-
-                if is_stock and last_known > 0:
-                    time_gap_ms = (now_ms - last_update_ms) if last_update_ms > 0 else float('inf')
-                    is_session_start = time_gap_ms > 30 * 60 * 1000  # >30 min gap = new session
-
-                    if not is_session_start:
-                        pct_diff = abs(current_price - last_known) / last_known
-                        # 5% threshold covers extended-hours volatility and overnight gaps
-                        if pct_diff > 0.05:
-                            LOG.warning(f"OUTLIER REJECTED: {symbol_price_key} {last_known}->{current_price} ({pct_diff*100:.1f}%)")
-                            return
+            if self.loop and self.active:
+                if is_trade:
+                    # Check Asset Type
+                    strike_val = getattr(msg.contract, "strike", 0)
+                    is_option = strike_val > 0
+                    
+                    if is_option:
+                        # Pass Option Trades to Processor (Aggregation)
+                        self.loop.call_soon_threadsafe(
+                            lambda: self.loop.create_task(self.processor.on_trade(msg))
+                        )
                     else:
-                        LOG.info(f"SESSION START: {symbol_price_key} accepting first price {current_price} (gap={time_gap_ms/1000:.0f}s)")
-                
-                # LOG ALL STOCK UPDATES FOR VERIFICATION
-                if is_stock:
-                    LOG.info(f"STOCK UPDATE: {symbol_price_key} @ {current_price} (Cond: {cond_name})")
-                elif is_option:
-                    LOG.info(f"OPTION UPDATE: {symbol_price_key} Strike: {msg.contract.strike} Price: {current_price}")
-                    pass
+                        # Update Stock Price directly (No aggregation needed for price line)
+                        self.loop.call_soon_threadsafe(
+                            self._update_stock_price, msg
+                        )
 
-                # Extract Trade Data
-                # Note: msg.contract might need null checks? Library usually valid.
-                data = {
-                    "type": "TRADE",
-                    "root": msg.contract.root,
-                    "strike": msg.contract.strike,
-                    "right": "C" if msg.contract.isCall else "P",
-                    "exp": str(msg.contract.exp), # YYYY-MM-DD
-                    "price": msg.trade.price,
-                    "size": msg.trade.size,
-                    "condition": cond_name,
-                    "ms_of_day": msg.trade.ms_of_day,
-                    "timestamp": datetime.now().isoformat(),
-                    "asset_type": "OPTION" if is_option else "STOCK"
-                }
-                
-                # Get latest state for Flow
-                current_flow = self.state.get(msg.contract.root, {}).get("net_flow", 0.0)
-                
-                # Push to Async Loop
-                # Push to Async Loop
-                if self.loop and self.active:
-                     self.loop.call_soon_threadsafe(
-                         self._update_and_broadcast,
-                         msg, cond_name, is_option, is_stock
-                     )
-
-            elif msg.type == StreamMsgType.QUOTE:
-                 # TODO: Add Quote Handling
-                 # DEBUG: Log first quote to confirm stream
-                 # LOG.info(f"QUOTE RECEIVED: {msg}")
-                 pass
+                elif is_quote:
+                    # Update Processor's NBBO State
+                    self.loop.call_soon_threadsafe(
+                        self.processor.on_quote, msg
+                    )
 
         except Exception as e:
             # Avoid logging too heavily in high-freq callback
-            print(f"Error in stream callback: {e}")
+            pass
+
+    def _update_stock_price(self, msg):
+        """Helper to update internal state for Underlying Price."""
+        try:
+            root = msg.contract.root
+            price = msg.trade.price
+            
+            if root not in self.state:
+                self.state[root] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
+            
+            # Simple outlier check (Session-aware)
+            last = self.state[root]["price"]
+            if last > 0:
+                pct = abs(price - last) / last
+                if pct > 0.05: return # Ignore >5% jumps
+            
+            now_ts = int(datetime.now().timestamp())
+            self.state[root]["price"] = price
+            self.state[root]["last_update_ms"] = now_ts * 1000
+            
+            # Broadcast Stock Update
+            msg = {
+                "type": "TRADE",
+                "root": root,
+                "price": price,
+                "asset_type": "STOCK",
+                "time": now_ts,
+                "timestamp": datetime.now().isoformat(),
+                "hiro_flow": self.state[root]["net_flow"]
+            }
+            for q in self.listeners:
+                if not q.full(): q.put_nowait(msg)
+        except:
+            pass
 
     def _update_and_broadcast(self, msg, cond_name, is_option, is_stock):
         """
@@ -1181,10 +1217,15 @@ class ThetaStreamer:
                                     if is_call:
                                         stats["call_vol"] += delta_vol
                                         stats["call_prem"] += premium
+                                        stats["net_flow"] += premium
                                     else:
                                         stats["put_vol"] += delta_vol
                                         stats["put_prem"] += premium
+                                        stats["net_flow"] -= premium
                                         
+                                    # Store in History (Critical for Snapshot on new connection)
+                                    self.recent_trades.append(trade_data)
+
                                     # Send to frontend
                                     self.broadcast_sync(trade_data)
                                     trades_generated += 1

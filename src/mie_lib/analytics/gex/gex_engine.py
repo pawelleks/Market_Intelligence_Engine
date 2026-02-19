@@ -108,7 +108,12 @@ class GEXEngine:
         Uses consistent Horizon logic (EOW, EOM, EOQ).
         """
         try:
-            yf_ticker = yf.Ticker(ticker)
+            # Handle Indices for yfinance (must start with ^)
+            yf_symbol = ticker
+            if ticker in ["SPX", "NDX", "RUT", "VIX", "DJX"]:
+                yf_symbol = f"^{ticker}"
+            
+            yf_ticker = yf.Ticker(yf_symbol)
             
             # 1. Get Spot Price
             spot = spot_override

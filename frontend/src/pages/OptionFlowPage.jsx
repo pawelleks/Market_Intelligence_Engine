@@ -22,26 +22,35 @@ const StatsCard = ({ title, value, subtext, color = "text-white" }) => (
     </Card>
 );
 
-const SentimentGauge = ({ bullishPct }) => (
-    <Card className="p-4 bg-slate-900 border-slate-800 flex flex-col justify-center">
-        <div className="flex justify-between items-center mb-2">
-            <span className="text-xs text-slate-400 font-medium uppercase">Flow Sentiment</span>
-            <span className={`text-sm font-bold ${bullishPct >= 50 ? 'text-green-400' : 'text-red-400'}`}>
-                {bullishPct.toFixed(0)}% Bullish
-            </span>
-        </div>
-        <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-            <div
-                className="bg-green-500 h-full transition-all duration-500"
-                style={{ width: `${bullishPct}%` }}
-            />
-        </div>
-        <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>Bearish</span>
-            <span>Bullish</span>
-        </div>
-    </Card>
-);
+const SentimentGauge = ({ bullishPct }) => {
+    // Determine dominant sentiment
+    const isBullish = bullishPct >= 50;
+    const value = isBullish ? bullishPct : (100 - bullishPct);
+    const label = isBullish ? "Bullish" : "Bearish";
+    const color = isBullish ? "text-green-400" : "text-red-400";
+    const barColor = isBullish ? "bg-green-500" : "bg-red-500";
+
+    return (
+        <Card className="p-4 bg-slate-900 border-slate-800 flex flex-col justify-center">
+            <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-slate-400 font-medium uppercase">Flow Sentiment</span>
+                <span className={`text-sm font-bold ${color}`}>
+                    {value.toFixed(0)}% {label}
+                </span>
+            </div>
+            <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div
+                    className={`${barColor} h-full transition-all duration-500`}
+                    style={{ width: `${value}%` }}
+                />
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                <span>0%</span>
+                <span>100%</span>
+            </div>
+        </Card>
+    );
+};
 
 // --- Main Page ---
 
@@ -75,7 +84,10 @@ export default function OptionFlowPage() {
         const totalPrem = callPrem + putPrem;
         const bullishPct = totalPrem > 0 ? (callPrem / totalPrem) * 100 : 50;
 
-        return { callPrem, putPrem, netFlow, bullishPct };
+        const callPct = totalPrem > 0 ? (callPrem / totalPrem) * 100 : 0;
+        const putPct = totalPrem > 0 ? (putPrem / totalPrem) * 100 : 0;
+
+        return { callPrem, putPrem, netFlow, bullishPct, callPct, putPct };
     }, [selectedTickers, stats]);
 
     // WebSocket Connection
@@ -261,12 +273,14 @@ export default function OptionFlowPage() {
                     title="Call Premium"
                     value={fmtMoney(aggregateStats.callPrem)}
                     color="text-green-400"
+                    subtext={`${aggregateStats.callPct.toFixed(0)}% of Total`}
                 />
 
                 <StatsCard
                     title="Put Premium"
                     value={fmtMoney(aggregateStats.putPrem)}
                     color="text-red-400"
+                    subtext={`${aggregateStats.putPct.toFixed(0)}% of Total`}
                 />
 
             </div>
@@ -280,66 +294,99 @@ export default function OptionFlowPage() {
                     <span className="text-xs text-slate-500">{trades.length} events capturing...</span>
                 </div>
 
+
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                    <table className="w-full caption-bottom text-sm">
-                        <thead className="[&_tr]:border-b border-slate-800 bg-slate-950 sticky top-0 z-10">
-                            <tr className="border-b transition-colors hover:bg-transparent data-[state=selected]:bg-muted border-slate-800">
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400 w-[80px]">Time</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400 w-[60px]">Ticker</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400">Expiration</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400">Strike</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400">Spot</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400">C/P</th>
-                                <th className="h-10 px-2 text-right align-middle font-medium text-slate-400">Size</th>
-                                <th className="h-10 px-2 text-right align-middle font-medium text-slate-400">Price</th>
-                                <th className="h-10 px-2 text-right align-middle font-medium text-slate-400">Value</th>
-                                <th className="h-10 px-2 text-left align-middle font-medium text-slate-400 w-[40px]"></th>
+                    <table className="w-full caption-bottom text-sm border-collapse">
+                        <thead className="bg-slate-950 sticky top-0 z-10 shadow-sm">
+                            <tr className="border-b border-slate-800 text-xs uppercase tracking-wider text-slate-500">
+                                <th className="h-10 px-3 text-left font-medium w-[80px]">Time</th>
+                                <th className="h-10 px-3 text-left font-medium w-[60px]">Ticker</th>
+                                <th className="h-10 px-3 text-left font-medium">Exp</th>
+                                <th className="h-10 px-3 text-left font-medium">Strike</th>
+                                <th className="h-10 px-3 text-left font-medium">Spot</th>
+                                <th className="h-10 px-3 text-left font-medium">Type</th>
+                                <th className="h-10 px-3 text-left font-medium">Tags</th>
+                                <th className="h-10 px-3 text-right font-medium">Size</th>
+                                <th className="h-10 px-3 text-right font-medium">Price</th>
+                                <th className="h-10 px-3 text-right font-medium">Value</th>
                             </tr>
                         </thead>
-                        <tbody className="[&_tr:last-child]:border-0">
+                        <tbody className="divide-y divide-slate-800/50">
                             {trades.length === 0 ? (
                                 <tr>
-                                    <td colSpan={10} className="p-4 text-center py-10 text-slate-500">
-                                        Waiting for trades matching filter (Min {fmtMoney(minPremium)})...
+                                    <td colSpan={10} className="p-8 text-center text-slate-500 italic">
+                                        Waiting for institutional flow (Min {fmtMoney(minPremium)})...
                                     </td>
                                 </tr>
                             ) : (
                                 trades.map((trade, i) => {
-                                    const isBullish = trade.sentiment === 'BULLISH';
-                                    const rowColor = isBullish
-                                        ? 'bg-green-950/10 hover:bg-green-900/20 text-green-100'
-                                        : 'bg-red-950/10 hover:bg-red-900/20 text-red-100';
+                                    // 1. Tags & Golden Logic
+                                    const tags = trade.tags || [];
+                                    const isSweep = tags.includes('SWEEP');
+                                    const isBlock = tags.includes('BLOCK');
+                                    const isSplit = tags.includes('SPLIT');
 
-                                    // Safety Helpers
+                                    const val = Number(trade.value) || 0;
+                                    const isGolden = val > 1_000_000 && isSweep;
+
+                                    // 2. Aggression / Side Coloring
+                                    // Side: ASK (Aggressive Buy), BID (Aggressive Sell), MID (Neutral)
+                                    const side = trade.side || 'MID';
+                                    const isCall = trade.right === 'C';
+
+                                    let rowTextClass = 'text-slate-300'; // Default
+
+                                    if (side === 'ASK') {
+                                        // Strong Aggression
+                                        rowTextClass = isCall ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
+                                    } else if (side === 'BID') {
+                                        // Passive / Selling into Bid
+                                        rowTextClass = isCall ? 'text-green-800/70' : 'text-red-800/70';
+                                    } else {
+                                        // Mid / Neutral
+                                        rowTextClass = isCall ? 'text-green-200/60' : 'text-red-200/60';
+                                    }
+
+                                    // Row Background (Golden or Standard)
+                                    const rowBg = isGolden
+                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 shadow-[inset_2px_0_0_0_#fbbf24]'
+                                        : 'hover:bg-slate-800/30';
+
+                                    // Safety
                                     const safeSpot = Number(trade.spot) || 0;
                                     const safePrice = Number(trade.price) || 0;
-                                    const safeValue = Number(trade.value) || 0;
                                     const safeTime = trade.time ? fmtTime(trade.time) : '--:--';
+                                    const count = trade.count || 1;
 
                                     return (
-                                        <tr key={`${trade.time}-${i}`} className={`border-b border-slate-800/50 ${rowColor} transition-colors`}>
-                                            <td className="p-2 align-middle font-mono text-xs text-slate-400">
-                                                {safeTime}
+                                        <tr key={`${trade.time}-${i}`} className={`transition-colors text-xs ${rowBg}`}>
+                                            <td className="p-3 font-mono text-slate-500">{safeTime}</td>
+                                            <td className={`p-3 font-bold ${rowTextClass}`}>{trade.root}</td>
+                                            <td className="p-3 text-slate-400">{trade.exp}</td>
+                                            <td className="p-3 font-mono text-slate-300">{trade.strike}</td>
+                                            <td className="p-3 font-mono text-slate-500">{safeSpot.toFixed(2)}</td>
+                                            <td className="p-3">
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${isCall
+                                                    ? 'bg-green-950/30 border-green-900 text-green-500'
+                                                    : 'bg-red-950/30 border-red-900 text-red-500'}`}>
+                                                    {isCall ? 'CALL' : 'PUT'}
+                                                </span>
                                             </td>
-                                            <td className="p-2 align-middle font-bold">{trade.root}</td>
-                                            <td className="p-2 align-middle text-xs">{trade.exp}</td>
-                                            <td className="p-2 align-middle font-mono">{trade.strike}</td>
-                                            <td className="p-2 align-middle text-slate-400 text-xs">{safeSpot.toFixed(2)}</td>
-                                            <td className="p-2 align-middle">
-                                                <Badge variant="outline" className={`text-[10px] h-5 border-0 font-bold ${trade.right === 'C' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'
-                                                    }`}>
-                                                    {trade.right === 'C' ? 'CALL' : 'PUT'}
-                                                </Badge>
+                                            <td className="p-3 flex gap-1 flex-wrap max-w-[120px]">
+                                                {isSweep && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-900/50 text-purple-300 border border-purple-800">SWEEP</span>}
+                                                {isBlock && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-900/50 text-blue-300 border border-blue-800">BLOCK</span>}
+                                                {isSplit && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-700 text-slate-300 border border-slate-600">SPLIT</span>}
                                             </td>
-                                            <td className="p-2 align-middle text-right font-mono">{trade.size}</td>
-                                            <td className="p-2 align-middle text-right font-mono text-slate-300">${safePrice.toFixed(2)}</td>
-                                            <td className="p-2 align-middle text-right font-bold text-white">
-                                                {fmtMoney(safeValue)}
+                                            <td
+                                                className="p-3 text-right font-mono text-slate-300 cursor-help"
+                                                title={`Aggregated from ${count} prints`}
+                                            >
+                                                {trade.size}
+                                                {count > 1 && <span className="text-[9px] text-slate-600 ml-0.5 align-top">x{count}</span>}
                                             </td>
-                                            <td className="p-2 align-middle">
-                                                {trade.sweep && (
-                                                    <span className="text-yellow-400 text-xs font-bold">SWEEP</span>
-                                                )}
+                                            <td className="p-3 text-right font-mono text-slate-400">${safePrice.toFixed(2)}</td>
+                                            <td className={`p-3 text-right font-bold font-mono ${isGolden ? 'text-amber-300' : 'text-slate-200'}`}>
+                                                {fmtMoney(val)}
                                             </td>
                                         </tr>
                                     );

@@ -38,7 +38,11 @@ class ThetaExpectedMovesEngine:
     Targets the previous trading day's close for Static EOD Anchors.
     """
 
-    def __init__(self, host: str = "theta_terminal", port: int = 25510):
+    
+    # Constants
+    INDEX_TICKERS = {"SPX", "NDX", "RUT", "VIX", "DJI"}
+
+    def __init__(self, host: str = "theta_terminal", port: int = 25510, use_mock: bool = False):
         self.theta_host = host
         self.theta_port = port
         self.base_url = f"http://{host}:{port}"
@@ -69,73 +73,85 @@ class ThetaExpectedMovesEngine:
         return target_date
 
     def get_spot_price(self, client: httpx.Client, ticker: str) -> Optional[float]:
-        """Fetch latest close from Theta Terminal REST API."""
-        LOG.info(f"Fetching close price for {ticker}...")
+        """Fetch latest LIVE price (snapshot)"""
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=7)
-            fmt_start = start_date.strftime('%Y%m%d')
-            fmt_end = end_date.strftime('%Y%m%d')
-
-            is_index = ticker.upper() in INDEX_TICKERS
-
+            # Determine URL based on asset type
+            is_index = ticker.upper() in self.INDEX_TICKERS
+            
             if is_index:
-                url = f"{self.base_url}/v2/hist/index/eod"
+                # 2026-02-18: Snapshot endpoint for indices (SPX) is unreliable (472).
+                # Use Historical Ticks instead (proven to work in theta_streamer).
+                from datetime import date
+                today_str = date.today().strftime("%Y%m%d")
+                url = f"{self.base_url}/v2/hist/index/price"
                 params = {
                     "root": ticker,
-                    "start_date": fmt_start,
-                    "end_date": fmt_end,
+                    "start_date": today_str,
+                    "end_date": today_str,
+                    "ivl": "0" # 0 = tick level (every price change)
                 }
             else:
-                url = f"{self.base_url}/v2/hist/stock/eod"
-                params = {
-                    "root": ticker,
-                    "start_date": fmt_start,
-                    "end_date": fmt_end,
-                }
+                url = f"{self.base_url}/v2/snapshot/stock/quote"
+                params = {"root": ticker}
 
-            response = client.get(url, params=params, timeout=10.0)
-            if response.status_code != 200:
-                LOG.error(f"Price API error {response.status_code} for {ticker}")
+            resp = client.get(url, params=params, timeout=5)
+            
+            if resp.status_code == 474:
                 return None
-
-            data = response.json()
-            if not isinstance(data, dict) or "response" not in data:
+            if resp.status_code != 200:
+                LOG.warning(f"Snapshot Price API error {resp.status_code} for {ticker}")
                 return None
-
-            candles = data["response"]
-            if not candles:
+            
+            data = resp.json()
+            if not data or "response" not in data:
                 return None
-
+            
+            header = data.get("header", {}).get("format", [])
+            items = data.get("response", [])
+            
+            if not items:
+                return None
+                
+            # Parse Index Response (Hist Price)
             if is_index:
-                # Index EOD — has proper OHLC with 'close' column
-                header = data.get("header", {}).get("format", [])
-                try:
-                    close_idx = header.index("close")
-                    date_idx = header.index("date") if "date" in header else -1
-                    if date_idx >= 0:
-                        candles.sort(key=lambda r: r[date_idx], reverse=True)
-                    price = float(candles[0][close_idx])
-                except (ValueError, IndexError):
-                    price = float(candles[0][5])  # fallback: close at index 5
-                LOG.info(f"Index {ticker} price: ${price:.2f}")
+                last_item = items[-1]
+                price = 0.0
+                if "price" in header:
+                    idx = header.index("price")
+                    price = float(last_item[idx])
+                elif "close" in header:
+                    idx = header.index("close")
+                    price = float(last_item[idx])
+                elif len(last_item) >= 2:
+                    price = float(last_item[1])
+                
+                LOG.info(f"Live {ticker} price (Tick): ${price}")
                 return price
-            else:
-                # Stock: use header to find close and date columns
-                header = data.get("header", {}).get("format", [])
-                try:
-                    close_idx = header.index("close")
-                    date_idx = header.index("date") if "date" in header else 0
-                    # Sort by date descending — take the most recent trading day
-                    candles.sort(key=lambda r: r[date_idx], reverse=True)
-                    price = float(candles[0][close_idx])
-                except (ValueError, IndexError):
-                    price = float(candles[-1][4])  # Fallback to index 4
-                LOG.info(f"Stock {ticker} price: ${price:.2f}")
-                return price
+
+            # Parse Stock Response (Snapshot Quote)
+            item = items[0] 
+            tick = item
+            
+            bid = 0.0
+            ask = 0.0
+            
+            if "bid" in header and "ask" in header:
+                idx_bid = header.index("bid")
+                idx_ask = header.index("ask")
+                
+                if isinstance(item, list):
+                    bid = float(item[idx_bid]) if item[idx_bid] else 0.0
+                    ask = float(item[idx_ask]) if item[idx_ask] else 0.0
+                
+            if bid > 0 and ask > 0:
+                mid = (bid + ask) / 2.0
+                LOG.info(f"Live {ticker} price (Mid): ${mid}")
+                return mid
+            
+            return None
 
         except Exception as e:
-            LOG.error(f"Failed to fetch price for {ticker}: {e}")
+            LOG.error(f"Error getting spot price for {ticker}: {e}")
             return None
 
     def get_atm_straddle(self, client: httpx.Client, option_root: str, exp_date: date, spot_price: float) -> Optional[Dict[str, Any]]:

@@ -155,6 +155,33 @@ def _load_scope_tickers(scope_key: str) -> list[str]:
     except Exception:
         return []
 
+# --- GEX BUILDER ---
+def _handle_build_gex(args):
+    """
+    Builds Daily GEX Profile for specified tickers.
+    """
+    from mie_lib.analytics.gex.gex_engine import GEXEngine
+    
+    tickers = []
+    if args.ticker:
+        tickers = [t.upper() for t in args.ticker.split(",") if t.strip()]
+    else:
+        # Default to Scope or Core
+        tickers = _load_scope_tickers("GEX")
+        if not tickers:
+            tickers = ["SPX", "SPY", "QQQ", "IWM"]
+            
+    print(f"Starting GEX Build for {len(tickers)} tickers: {tickers}")
+    
+    engine = GEXEngine()
+    for t in tickers:
+        try:
+            print(f"Building GEX for {t}...")
+            engine.fetch_and_calculate_gex(t)
+            print(f"  > Done: {t}")
+        except Exception as e:
+            print(f"  > Failed {t}: {e}")
+
 
 
 def _run(cmd: list[str]):

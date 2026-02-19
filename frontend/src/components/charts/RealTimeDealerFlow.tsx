@@ -43,8 +43,20 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         }
         priceLineRefs.current = [];
 
-        if (!profile.length) return { min: Infinity, max: -Infinity };
+        // 1. Determine Range Center (Spot)
+        // If refPrice is invalid (0), try getting it from profile median
+        let centerPrice = refPrice;
+        if (!centerPrice && profile.length > 0) {
+            centerPrice = (profile[0].strike + profile[profile.length - 1].strike) / 2;
+        }
+        if (!centerPrice) return { min: Infinity, max: -Infinity };
 
+        // 2. Define "Focus Range" (e.g., +/- 1.5% from Spot) to zoom in
+        const rangePct = 0.015; // 1.5% range
+        let minLimit = centerPrice * (1 - rangePct);
+        let maxLimit = centerPrice * (1 + rangePct);
+
+        // 3. Find Walls WITHIN this range (or just outside to be helpful)
         const prefix = hz === 'total' ? 'total' : hz === 'next5' ? 'next5' : 'eow';
         const cKey = `${prefix}_call_gex`;
         const pKey = `${prefix}_put_gex`;
@@ -58,9 +70,13 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         for (const row of profile) {
             const c = row[cKey] ?? row.total_call_gex ?? 0;
             const p = row[pKey] ?? row.total_put_gex ?? 0;
+            // Global Wall Search (we will show them even if outside range, maybe clamped?)
+            // Actually, light chart auto-scale works best if we give it the min/max we WANT to see.
+            // Let's just find walls to draw lines.
             if (c > maxCallGex) { maxCallGex = c; callWallStrike = row.strike; }
             if (p < minPutGex) { minPutGex = p; putWallStrike = row.strike; }
 
+            // Zero Gamma
             const net = row[netKey] ?? row.total_net_gex ?? 0;
             if (prevNet !== 0 && ((prevNet < 0 && net >= 0) || (prevNet > 0 && net <= 0))) {
                 flips.push(row.strike);
@@ -69,17 +85,17 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         }
 
         const zeroGamma = flips.length > 0
-            ? flips.reduce((a, b) => Math.abs(b - refPrice) < Math.abs(a - refPrice) ? b : a)
+            ? flips.reduce((a, b) => Math.abs(b - centerPrice) < Math.abs(a - centerPrice) ? b : a)
             : 0;
 
+        // Draw Lines (only if reasonably close, e.g. within 2x range, otherwise noise)
+        // Or just draw them all, the chart scale will clip them.
         if (callWallStrike) priceLineRefs.current.push(priceSeries.createPriceLine({ price: callWallStrike, color: '#EF4444', lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: 'Call Wall' }));
         if (putWallStrike) priceLineRefs.current.push(priceSeries.createPriceLine({ price: putWallStrike, color: '#22C55E', lineWidth: 2, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: 'Put Wall' }));
         if (zeroGamma) priceLineRefs.current.push(priceSeries.createPriceLine({ price: zeroGamma, color: '#F97316', lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'Vol Trigger' }));
 
-        // Track global min/max for Y-axis scaling
-        let globalMin = Infinity, globalMax = -Infinity;
-        if (callWallStrike) { globalMax = Math.max(globalMax, callWallStrike); globalMin = Math.min(globalMin, callWallStrike); }
-        if (putWallStrike) { globalMax = Math.max(globalMax, putWallStrike); globalMin = Math.min(globalMin, putWallStrike); }
+        // Current Price Line (White)
+        priceLineRefs.current.push(priceSeries.createPriceLine({ price: centerPrice, color: '#F8FAFC', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: 'CURRENT' }));
 
         // Expected Moves
         const exps = emTickers?.[ticker]?.expirations;
@@ -87,8 +103,6 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             const addEM = (expKey: string, label: string, style: LineStyle) => {
                 const exp = exps[expKey];
                 if (exp?.upper_range && exp?.lower_range) {
-                    globalMax = Math.max(globalMax, exp.upper_range);
-                    globalMin = Math.min(globalMin, exp.lower_range);
                     priceLineRefs.current.push(priceSeries.createPriceLine({ price: exp.upper_range, color: '#EF4444', lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: `${label} High` }));
                     priceLineRefs.current.push(priceSeries.createPriceLine({ price: exp.lower_range, color: '#22C55E', lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: `${label} Low` }));
                 }
@@ -97,15 +111,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             addEM('WEEKLY', 'Weekly', LineStyle.Dashed);
         }
 
-        // Fallback to GEX profile range
-        if (globalMin === Infinity && profile.length > 0) {
-            profile.forEach((p: any) => { globalMax = Math.max(globalMax, p.strike); globalMin = Math.min(globalMin, p.strike); });
-            const h = globalMax - globalMin;
-            globalMax += h * 0.05;
-            globalMin -= h * 0.05;
-        }
-
-        return { min: globalMin, max: globalMax };
+        return { min: minLimit, max: maxLimit };
     }, [ticker]);
 
     // ===== CHART CREATION: depends ONLY on ticker =====
@@ -136,7 +142,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             rightPriceScale: {
                 borderColor: '#334155',
                 visible: true,
-                scaleMargins: { top: 0, bottom: 0 },
+                scaleMargins: { top: 0.1, bottom: 0.1 },
                 autoScale: true,
             },
             leftPriceScale: {
@@ -256,7 +262,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             priceSeriesRef.current = null;
             flowSeriesRef.current = null;
         };
-    }, [ticker]); // Chart lifecycle: ONLY ticker
+    }, [ticker]);
 
     // ===== HORIZON CHANGE: just recalculate price lines, don't recreate chart =====
     useEffect(() => {
@@ -284,12 +290,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         }
     }, [horizon, applyPriceLines, currentPrice]);
 
-
-
     // ===== WEBSOCKET: depends ONLY on ticker =====
-    // Uses unified /ws/quotes endpoint
-    // ===== WEBSOCKET: depends ONLY on ticker =====
-    // Uses unified /ws/quotes endpoint
     const handleWebSocketMessage = useCallback((data: any) => {
         if (data.error) return;
         if (data.root && data.root !== ticker) return;
@@ -297,24 +298,44 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         if (data.source) setDataSource(data.source);
 
         const time = data.time || data.timestamp_ms || Math.floor(Date.now() / 1000);
-        const price = data.price;
-        const flow = data.hiro_flow;
 
-        if (!price || price === 0) return;
+        // STRICT PRICE LOGIC:
+        // 1. If it's a STOCK/INDEX trade, trust 'price'.
+        // 2. If it's an OPTION trade, invalidating 'price' (it's premium).
+        // 3. For OPTION trades, ONLY use 'spot' if > 0.
+
+        let priceToUpdate = null;
+
+        const isStockOrIndex = (data.asset_type === 'STOCK' || data.asset_type === 'INDEX');
+        const isOption = (data.asset_type === 'OPTION');
+
+        if (isStockOrIndex) {
+            priceToUpdate = data.price;
+        } else if (isOption) {
+            // For options, NEVER use data.price (that's premium)
+            if (data.spot && data.spot > 0) {
+                priceToUpdate = data.spot;
+            }
+        }
+
+        const flow = data.hiro_flow;
 
         lastMessageTime.current = Date.now();
 
-        if (priceSeriesRef.current) {
-            priceSeriesRef.current.update({ time, value: price });
-        }
-        if (flowSeriesRef.current && flow !== undefined) {
-            flowSeriesRef.current.update({ time, value: flow });
+        // Update Price Series ONLY if we have a valid UNDERLYING price
+        if (priceToUpdate && priceToUpdate > 0 && priceSeriesRef.current) {
+            priceSeriesRef.current.update({ time, value: priceToUpdate });
+
+            const now = Date.now();
+            if (now - lastPriceUpdate.current > 500) { // Throttle React state updates
+                setCurrentPrice(priceToUpdate);
+                lastPriceUpdate.current = now;
+            }
         }
 
-        const now = Date.now();
-        if (now - lastPriceUpdate.current > 1000) {
-            setCurrentPrice(price);
-            lastPriceUpdate.current = now;
+        // Update Flow Series (always allowed if flow present)
+        if (flowSeriesRef.current && flow !== undefined) {
+            flowSeriesRef.current.update({ time, value: flow });
         }
     }, [ticker]);
 

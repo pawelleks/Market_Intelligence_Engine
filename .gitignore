@@ -25,3 +25,4 @@ data/logs/
 
 # Sensitive Documentation (User Only)
 docs/Security.md
+deploy_staging.sh

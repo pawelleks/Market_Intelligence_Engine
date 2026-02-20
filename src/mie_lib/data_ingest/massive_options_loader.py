@@ -239,7 +239,7 @@ class MassiveOptionsLoader:
         and saves the smaller extract to the main data_dir.
         """
         full_path = self.full_dir / f"options_{date_str}.csv"
-        target_path = self.data_dir / f"options_{date_str}.csv"
+        target_path = self.data_dir / f"options_{date_str}.parquet"
         
         if not full_path.exists():
             logger.error(f"Full snapshot not found at {full_path}. Cannot extract.")
@@ -248,57 +248,41 @@ class MassiveOptionsLoader:
         try:
             logger.info(f"Extracting data for {len(tickers)} tickers from {full_path}...")
             
-            # Use chunks to handle large files efficiently if needed, 
-            # but for 3-5GB pd.read_csv usually works if machine has 16GB RAM.
-            # Given user feedback, file might be manageable.
-            
-            # Using similar logic to load_day_aggregates but strictly for extraction
-            # We reuse load_day_aggregates logic by "mocking" the file location? 
-            # OR just implement filtering here.
-            
-            # Optimized read: Use iterator if memory is concern, but let's try direct load first as per previous success.
-            # Actually, let's just use read_csv with iterator if we want to be safe.
-            
-            # We need to filter by 'option_ticker' or 'underlying'.
-            # The Full file has 'ticker' column usually (Massive).
-            
             chunks = pd.read_csv(full_path, chunksize=500000)
             
             cleaned_tickers = [t.upper().lstrip('^') for t in tickers]
-            # Regex for O:TICKER... or TICKER...
-            # Note: Massive files often use 'ticker' column for the option ticker string.
-             
             # Pattern to match ANY of the tickers
-            # ^(O:)?(SPY|QQQ)\d
             pattern = r'^(?:O:)?(' + '|'.join(map(re.escape, cleaned_tickers)) + r')\d'
             
-            header_written = False
+            all_filtered = []
             total_rows = 0
             
-            with open(target_path, 'w') as f_out:
-                for chunk in chunks:
-                    if 'ticker' in chunk.columns and 'option_ticker' not in chunk.columns:
-                        chunk = chunk.rename(columns={'ticker': 'option_ticker'})
-                        
-                    # Filter
-                    filtered = chunk[chunk['option_ticker'].str.match(pattern, na=False)]
+            for chunk in chunks:
+                if 'ticker' in chunk.columns and 'option_ticker' not in chunk.columns:
+                    chunk = chunk.rename(columns={'ticker': 'option_ticker'})
+                    
+                # Filter
+                filtered = chunk[chunk['option_ticker'].str.match(pattern, na=False)].copy()
+                
+                if not filtered.empty:
+                    # Extract underlying for compatibility/verification
+                    filtered['underlying_ticker'] = filtered['option_ticker'].str.replace(r'^O:', '', regex=True).str.extract(r'^([A-Z\^]+)')[0]
+                    
+                    # Only keep rows that match our specific list 
+                    filtered = filtered[filtered['underlying_ticker'].isin(cleaned_tickers)]
                     
                     if not filtered.empty:
-                        # Extract underlying for compatibility/verification
-                        # (Optional, but good for downstream consumption)
-                        filtered['underlying_ticker'] = filtered['option_ticker'].str.replace(r'^O:', '', regex=True).str.extract(r'^([A-Z\^]+)')[0]
-                        
-                        # Only keep rows that match our specific list 
-                        # (The regex is broad, this is precise)
-                        filtered = filtered[filtered['underlying_ticker'].isin(cleaned_tickers)]
-                        
-                        if not filtered.empty:
-                            filtered.to_csv(f_out, header=not header_written, index=False)
-                            header_written = True
-                            total_rows += len(filtered)
-                            
-            logger.info(f"Extraction complete. Saved {total_rows} rows to {target_path}")
-            return True
+                        all_filtered.append(filtered)
+                        total_rows += len(filtered)
+            
+            if all_filtered:
+                final_df = pd.concat(all_filtered, ignore_index=True)
+                final_df.to_parquet(target_path, engine='pyarrow', compression='snappy', index=False)
+                logger.info(f"Extraction complete. Saved {total_rows} rows to {target_path}")
+                return True
+            else:
+                logger.warning(f"No matching data found for tickers in {full_path}")
+                return False
             
         except Exception as e:
             logger.error(f"Extraction failed: {e}")

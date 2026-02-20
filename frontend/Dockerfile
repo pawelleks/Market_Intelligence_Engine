@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install dependencies first for caching
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm config set strict-ssl false && npm install
 
 # Copy source
 COPY . .

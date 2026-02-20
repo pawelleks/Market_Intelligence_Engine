@@ -47,6 +47,13 @@ LOG = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 from mie_lib.realtime.trade_processor import TradeProcessor
+from mie_lib.realtime import db
+import time
+from threading import Lock
+
+# Module-level cache for historical data responses: key -> {data: list, timestamp: float}
+HISTORY_CACHE = {}
+CACHE_LOCK = Lock()
 
 class ThetaStreamer:
     """
@@ -84,6 +91,63 @@ class ThetaStreamer:
         self.client: Optional[ThetaClient] = None
         self.streaming_thread = None
         self.loop = None
+
+        # Warm up day_stats from SQLite so stats survive server restarts
+        self._rebuild_day_stats_from_db()
+
+    def _rebuild_day_stats_from_db(self):
+        """
+        Replays today's trades from SQLite into self.day_stats so that the
+        stats panel is accurate immediately after a server restart.
+        Replicates the exact same accumulation logic used in _on_clean_trade.
+        """
+        try:
+            trades = db.get_trades_since_open()
+            if not trades:
+                LOG.info("_rebuild_day_stats_from_db: no trades in DB for today, stats start at zero.")
+                return
+
+            replayed = 0
+            for trade in trades:
+                try:
+                    root = trade.get("root", "")
+                    if not root:
+                        continue
+
+                    right = trade.get("right", "")
+                    # size field: _on_clean_trade uses 'size'; raw_json may also have 'trade_size'
+                    size = int(trade.get("size") or trade.get("trade_size") or 0)
+                    # premium field: stored as 'value' after enrichment in _on_clean_trade
+                    premium = float(trade.get("value") or trade.get("val") or 0.0)
+
+                    if not right or size == 0 or premium == 0.0:
+                        continue
+
+                    if right == "C":
+                        self.day_stats[root]["call_vol"] += size
+                        self.day_stats[root]["call_prem"] += premium
+                        self.day_stats[root]["net_flow"] += premium
+                    else:
+                        self.day_stats[root]["put_vol"] += size
+                        self.day_stats[root]["put_prem"] += premium
+                        self.day_stats[root]["net_flow"] -= premium
+
+                    replayed += 1
+                except Exception as inner_e:
+                    LOG.warning(f"_rebuild_day_stats_from_db: skipped malformed trade: {inner_e}")
+
+            LOG.info(
+                f"_rebuild_day_stats_from_db: replayed {replayed}/{len(trades)} trades from SQLite."
+            )
+            for ticker, s in self.day_stats.items():
+                LOG.info(
+                    f"  {ticker}: call_vol={s['call_vol']} put_vol={s['put_vol']} "
+                    f"call_prem=${s['call_prem']:,.0f} put_prem=${s['put_prem']:,.0f} "
+                    f"net_flow=${s['net_flow']:,.0f}"
+                )
+
+        except Exception as e:
+            LOG.error(f"_rebuild_day_stats_from_db failed: {e}")
 
     async def _on_clean_trade(self, trade: Dict):
         """
@@ -133,6 +197,9 @@ class ThetaStreamer:
             for q in self.listeners:
                 if not q.full():
                     q.put_nowait(trade)
+                    
+            # 4. Persistence (SQLite)
+            db.insert_trade(trade)
                     
             # Log significant trades
             if "SWEEP" in trade["tags"] or "BLOCK" in trade["tags"]:
@@ -255,9 +322,13 @@ class ThetaStreamer:
 
                 elif is_quote:
                     # Update Processor's NBBO State
-                    self.loop.call_soon_threadsafe(
-                        self.processor.on_quote, msg
-                    )
+                    self.processor.on_quote(msg)
+
+                else:
+                    # Log other message types for debugging if stream is behaving weirdly
+                    # but only every now and then to avoid spam.
+                    if int(time.time()) % 10 == 0:
+                         LOG.debug(f"DEBUG_STREAM: received non-trade/quote msg type={m_type}")
 
         except Exception as e:
             # Avoid logging too heavily in high-freq callback
@@ -452,18 +523,23 @@ class ThetaStreamer:
     # Index tickers that require /v2/hist/index/price instead of /v2/hist/stock/ohlc
     INDEX_TICKERS = {"SPX", "VIX", "NDX", "RUT", "DJX"}
 
-    def get_intraday_history(self, ticker: str, resolution: str = "1m") -> list:
+    def get_intraday_history(self, ticker: str, resolution: str = "1m", start_date=None, end_date=None) -> list:
         """
         Fetches intraday or daily history via Theta Terminal REST API.
         Uses the REST endpoint directly (not the buggy thetadata v0.9.11 Python lib).
         Handles both stock (SPY, QQQ, IWM) and index (SPX) tickers with correct endpoints.
         Resolutions: 1m, 5m, 15m, 30m, 1h, 4h, 1d.
+        Caching is implemented to prevent redundant calls.
         """
         import httpx
         from datetime import date, timedelta
         import pytz
 
         is_index = ticker.upper() in self.INDEX_TICKERS
+
+        # 1. Coerce Dates
+        s_date = self._coerce_date(start_date)
+        e_date = self._coerce_date(end_date)
 
         # Resolution Mapping (interval_ms, lookback_days)
         res_map = {
@@ -476,29 +552,91 @@ class ThetaStreamer:
             "1d": (86400000, 730),
         }
 
-        interval_ms, lookback_days = res_map.get(resolution, (60000, 1))
-        end_date = date.today()
-        start_date = end_date - timedelta(days=lookback_days)
+        interval_ms, default_lookback = res_map.get(resolution, (60000, 1))
 
+        # Determine ET constants for default range and TTL logic
+        et_tz = pytz.timezone("America/New_York")
+        et_now = datetime.now(et_tz)
+        et_today = et_now.date()
+
+        # If no dates provided, use default lookback
+        if not s_date or not e_date:
+            e_date = et_today
+            s_date = e_date - timedelta(days=default_lookback)
+
+        # 2. Cache Check
+        cache_key = f"{ticker}:{resolution}:{s_date}:{e_date}"
+        with CACHE_LOCK:
+            entry = HISTORY_CACHE.get(cache_key)
+            if entry:
+                age = time.time() - entry["timestamp"]
+                
+                # TTL Logic:
+                # 1. Historical (not today): 24 hours
+                if e_date < et_today:
+                    ttl = 86400
+                # 2. Daily: 5 minutes
+                elif resolution == "1d":
+                    ttl = 300
+                # 3. Intraday: 60 seconds
+                else:
+                    ttl = 60
+                
+                if age < ttl:
+                    return entry["data"]
+
+        # 3. Fetch from ThetaREST
         base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
-
         try:
             if is_index:
-                return self._fetch_index_history(
-                    base_url, ticker, start_date, end_date, resolution, interval_ms
+                history = self._fetch_index_history(
+                    base_url, ticker, s_date, e_date, resolution, interval_ms
                 )
             elif resolution == "1d":
-                return self._fetch_stock_daily(
-                    base_url, ticker, start_date, end_date
+                history = self._fetch_stock_daily(
+                    base_url, ticker, s_date, e_date
                 )
             else:
-                return self._fetch_stock_intraday(
-                    base_url, ticker, start_date, end_date, interval_ms
+                history = self._fetch_stock_intraday(
+                    base_url, ticker, s_date, e_date, interval_ms
                 )
+            
+            # Store in cache
+            if history:
+                with CACHE_LOCK:
+                    HISTORY_CACHE[cache_key] = {
+                        "data": history,
+                        "timestamp": time.time()
+                    }
+            return history
+
         except Exception as e:
             LOG.error(f"Failed to fetch history for {ticker} ({resolution}): {e}")
             LOG.error(traceback.format_exc())
             return []
+
+    def _coerce_date(self, val):
+        """Helper to convert various inputs into a date object."""
+        if not val: return None
+        if isinstance(val, (dt_date, datetime)): 
+            return val.date() if isinstance(val, datetime) else val
+        
+        # ISO string? (YYYY-MM-DD or full ISO)
+        try:
+            if len(val) >= 10:
+                return datetime.fromisoformat(val[:10]).date()
+        except: pass
+        
+        # Unix timestamp?
+        try:
+            ts = float(val)
+            # Detect milliseconds (standard Unix is < 1e11)
+            if ts > 1_000_000_000_000: # ms
+                ts /= 1000.0
+            return datetime.fromtimestamp(ts).date()
+        except: pass
+        
+        return None
 
     def _fetch_stock_daily(self, base_url: str, ticker: str, start_date, end_date) -> list:
         """Fetch daily stock OHLC via /v2/hist/stock/eod (purpose-built for daily data)."""
@@ -1060,35 +1198,34 @@ class ThetaStreamer:
 
             await asyncio.sleep(2)
 
-    async def _get_next_expiration(self, root: str) -> Optional[str]:
-        """Helper: Find nearest valid expiration date for root. Returns YYYYMMDD string."""
+    async def _get_next_expirations(self, root: str, max_exps: int = 4) -> list:
+        """Helper: Return up to `max_exps` nearest valid expiration dates for root.
+        Returns list of YYYYMMDD strings, sorted ascending."""
         import httpx
         from datetime import date
-        
+
         base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
         try:
-             async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     f"{base_url}/v2/list/expirations",
                     params={"root": root},
                     timeout=5.0
                 )
                 if resp.status_code != 200:
-                    return None
-                
+                    return []
+
                 data = resp.json()
                 exps = data.get("response", [])
                 if not exps:
-                    return None
-                
-                # Filter for today or future
+                    return []
+
                 today_int = int(date.today().strftime("%Y%m%d"))
                 valid_exps = sorted([e for e in exps if e >= today_int])
-                
-                return str(valid_exps[0]) if valid_exps else None
+                return [str(e) for e in valid_exps[:max_exps]]
         except Exception as e:
             LOG.warning(f"Failed to fetch expirations for {root}: {e}")
-            return None
+            return []
 
     async def _poll_option_flow_loop(self):
         """
@@ -1113,15 +1250,16 @@ class ThetaStreamer:
         while self.active:
             for ticker in self.tickers:
                 if ticker == "VIX": continue # VIX options are special, skip for now
-                
-                # Dynamic Expiration (Fixes 474 Errors)
-                exp_str = await self._get_next_expiration(ticker)
-                if not exp_str:
-                    continue
-                
-                option_root = "SPXW" if ticker == "SPX" else ticker
 
-                try:
+                # Fetch up to 10 expirations so we cover 0DTE through ~2wks (SPXW) or ~3mo (SPY/etc)
+                option_root = "SPXW" if ticker == "SPX" else ticker
+                exp_list = await self._get_next_expirations(option_root, max_exps=10)
+                if not exp_list:
+                    exp_list = await self._get_next_expirations(ticker, max_exps=10)  # fallback to ticker name
+                if not exp_list:
+                    continue
+
+                for exp_str in exp_list:
                     try:
                         async with httpx.AsyncClient() as client:
                             resp = await client.get(
@@ -1129,119 +1267,137 @@ class ThetaStreamer:
                                 params={"root": option_root, "exp": exp_str},
                                 timeout=10.0,
                             )
-                        
+
                         if resp.status_code != 200:
-                            if resp.status_code != 472: # 472 = No Data
+                            if resp.status_code != 472:  # 472 = No Data
                                 LOG.warning(f"Flow Poll warning for {ticker} ({exp_str}): {resp.status_code}")
                             continue
-                            
-                    except Exception as e:
-                        LOG.error(f"Option flow poll failed for {ticker}: {e}")
-                        continue
 
-                    data = resp.json()
-                    header = data.get("header", {}).get("format", [])
-                    if "close" not in header or "volume" not in header:
-                        continue
-
-                    idx_close = header.index("close")
-                    idx_volume = header.index("volume")
-
-                    # Build current volume snapshot
-                    current: Dict[str, Dict] = {}
-                    for item in data.get("response", []):
-                        contract = item.get("contract", {})
-                        ticks = item.get("ticks", [])
-                        if not contract or not ticks:
+                        data = resp.json()
+                        header = data.get("header", {}).get("format", [])
+                        if "close" not in header or "volume" not in header:
                             continue
 
-                        strike = contract.get("strike", 0) / 1000.0
-                        right = contract.get("right", "")
-                        tick = ticks[-1]
-                        volume = int(tick[idx_volume])
-                        close_price = float(tick[idx_close])
+                        idx_close = header.index("close")
+                        idx_volume = header.index("volume")
 
-                        key = f"{strike}_{right}"
-                        current[key] = {"volume": volume, "close": close_price, "right": right}
+                        # Build current volume snapshot — key includes exp to avoid cross-expiry collisions
+                        current: Dict[str, Dict] = {}
+                        for item in data.get("response", []):
+                            contract = item.get("contract", {})
+                            ticks = item.get("ticks", [])
+                            if not contract or not ticks:
+                                continue
 
-                    # Compute flow delta & Synthesize Trades
-                    prev = prev_volumes.get(ticker, {})
-                    if prev:
-                        delta_flow = 0.0
-                        trades_generated = 0
-                        
-                        for key, curr_data in current.items():
-                            prev_data = prev.get(key)
-                            if prev_data and curr_data["close"] > 0:
+                            strike = contract.get("strike", 0) / 1000.0
+                            right = contract.get("right", "")
+                            tick = ticks[-1]
+                            volume = int(tick[idx_volume])
+                            close_price = float(tick[idx_close])
+
+                            key = f"{exp_str}_{strike}_{right}"
+                            current[key] = {"volume": volume, "close": close_price, "right": right}
+
+                        # Compute flow delta & Synthesize Trades — keyed per ticker+expiry
+                        vol_key = f"{ticker}_{exp_str}"
+                        prev = prev_volumes.get(vol_key, {})
+                        if prev:
+                            delta_flow = 0.0
+                            trades_generated = 0
+
+                            for key, curr_data in current.items():
+                                prev_data = prev.get(key)
+                                if not prev_data or curr_data["close"] <= 0:
+                                    continue
                                 delta_vol = curr_data["volume"] - prev_data["volume"]
-                                if delta_vol > 0:
-                                    premium = curr_data["close"] * delta_vol * 100
-                                    
-                                    # Info for Trade
-                                    is_call = (curr_data["right"] == "C")
-                                    if is_call:
-                                        delta_flow += premium
+                                if delta_vol <= 0:
+                                    continue
+
+                                premium = curr_data["close"] * delta_vol * 100
+                                is_call = (curr_data["right"] == "C")
+                                if is_call:
+                                    delta_flow += premium
+                                else:
+                                    delta_flow -= premium
+
+                                # Heuristic Tags
+                                tags = []
+                                if delta_vol >= 200:
+                                    tags.append("BLOCK")
+                                elif delta_vol >= 30 and premium >= 150_000:
+                                    tags.append("SWEEP")
+
+                                # Heuristic Side from price movement
+                                prev_close = prev_data.get("close", 0.0)
+                                if prev_close > 0:
+                                    if curr_data["close"] > prev_close * 1.001:
+                                        synthetic_side = "ASK"
+                                    elif curr_data["close"] < prev_close * 0.999:
+                                        synthetic_side = "BID"
                                     else:
-                                        delta_flow -= premium
-                                        
-                                    # SYNTHETIC TRADE GENERATION
-                                    # Create a trade object consistent with stream 
-                                    trade_data = {
-                                        "type": "TRADE",
-                                        "root": ticker,
-                                        "strike": float(key.split('_')[0]),
-                                        "right": curr_data["right"],
-                                        "exp": f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}", 
-                                        "price": curr_data["close"],
-                                        "size": delta_vol,
-                                        "condition": "SYNTHETIC_POLL",
-                                        "ms_of_day": int(datetime.now().timestamp() * 1000) % 86400000,
-                                        "timestamp": datetime.now().isoformat(),
-                                        "time": int(datetime.now().timestamp()), # Unix Timestamp
-                                        "asset_type": "OPTION",
-                                        "value": premium,
-                                        "sweep": False,
-                                        "sentiment": "NEUTRAL",
-                                        "spot": self.state.get(ticker, {}).get("price", 0.0),
-                                        "hiro_flow": self.state.get(ticker, {}).get("net_flow", 0.0) # Will be stale until end of loop update
-                                    }
-                                    
-                                    # Update stats directly? 
-                                    # broadcast_sync will handle nothing but pushing to queue.
-                                    # frontend stats update every 1s might pick this up if day_stats are updated?
-                                    # Actually day_stats only updated in _update_and_broadcast which is called by stream.
-                                    # We should probably update day_stats here too?
-                                    
-                                    # Update Day Stats
-                                    stats = self.day_stats[ticker]
-                                    if is_call:
-                                        stats["call_vol"] += delta_vol
-                                        stats["call_prem"] += premium
-                                        stats["net_flow"] += premium
-                                    else:
-                                        stats["put_vol"] += delta_vol
-                                        stats["put_prem"] += premium
-                                        stats["net_flow"] -= premium
-                                        
-                                    # Store in History (Critical for Snapshot on new connection)
-                                    self.recent_trades.append(trade_data)
+                                        synthetic_side = "MID"
+                                else:
+                                    synthetic_side = "MID"
 
-                                    # Send to frontend
-                                    self.broadcast_sync(trade_data)
-                                    trades_generated += 1
+                                # Format exp from YYYYMMDD to YYYY-MM-DD
+                                exp_fmt = f"{exp_str[:4]}-{exp_str[4:6]}-{exp_str[6:]}"
 
-                        # Update cumulative flow in state
-                        if ticker not in self.state:
-                            self.state[ticker] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
-                        self.state[ticker]["net_flow"] += delta_flow
+                                # Parse strike from key (format: expstr_strike_right)
+                                key_parts = key.split("_")
+                                strike_val = float(key_parts[1]) if len(key_parts) >= 3 else 0.0
 
-                        if trades_generated > 0:
-                             LOG.info(f"Synthesized {trades_generated} trades for {ticker} (Delta Flow: ${delta_flow:,.0f})")
+                                trade_data = {
+                                    "type": "TRADE",
+                                    "root": ticker,
+                                    "strike": strike_val,
+                                    "right": curr_data["right"],
+                                    "exp": exp_fmt,
+                                    "price": curr_data["close"],
+                                    "size": delta_vol,
+                                    "condition": "SYNTHETIC_POLL",
+                                    "ms_of_day": int(datetime.now().timestamp() * 1000) % 86400000,
+                                    "timestamp": int(datetime.now().timestamp() * 1000),
+                                    "time": int(datetime.now().timestamp()),
+                                    "asset_type": "OPTION",
+                                    "value": premium,
+                                    "sweep": bool(tags) and tags[0] == "SWEEP",
+                                    "sentiment": "BULLISH" if is_call else "BEARISH",
+                                    "tags": tags,
+                                    "side": synthetic_side,
+                                    "spot": self.state.get(ticker, {}).get("price", 0.0),
+                                    "hiro_flow": self.state.get(ticker, {}).get("net_flow", 0.0),
+                                }
 
-                    prev_volumes[ticker] = current
+                                # Update Day Stats
+                                stats = self.day_stats[ticker]
+                                if is_call:
+                                    stats["call_vol"] += delta_vol
+                                    stats["call_prem"] += premium
+                                    stats["net_flow"] += premium
+                                else:
+                                    stats["put_vol"] += delta_vol
+                                    stats["put_prem"] += premium
+                                    stats["net_flow"] -= premium
 
-                except Exception as e:
-                    LOG.error(f"Option flow poll failed for {ticker}: {e}")
+                                self.recent_trades.append(trade_data)
+                                db.insert_trade(trade_data)
+                                self.broadcast_sync(trade_data)
+                                trades_generated += 1
+
+                            # Update cumulative net flow in state
+                            if ticker not in self.state:
+                                self.state[ticker] = {"price": 0.0, "net_flow": 0.0, "last_update_ms": 0}
+                            self.state[ticker]["net_flow"] += delta_flow
+
+                            if trades_generated > 0:
+                                LOG.info(f"Synthesized {trades_generated} trades for {ticker} exp={exp_str} (Delta Flow: ${delta_flow:,.0f})")
+
+                        prev_volumes[vol_key] = current
+
+                    except Exception as e:
+                        LOG.error(f"Option flow poll failed for {ticker} ({exp_str}): {e}")
+
+
 
             await asyncio.sleep(10)
 

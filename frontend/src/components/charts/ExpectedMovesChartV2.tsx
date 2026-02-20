@@ -87,6 +87,10 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
     const emMovesRef = useRef<{ key: string, move: number, highColor: string, lowColor: string, style: any, label: string }[]>([]);
     // Ref mirror for lastPrice (avoids stale closures in effects)
     const lastPriceRef = useRef<number | null>(null);
+    // Fix 1: Component-level bar ref — survives WS reconnects so daily open is preserved
+    const currentBarRef = useRef<{ time: number | string, open: number, high: number, low: number, close: number } | null>(null);
+    // Stores last historical bar to seed currentBarRef on WS reconnect (Fix 1)
+    const lastHistBarRef = useRef<any>(null);
 
     // Clear stale data immediately when ticker changes
     useEffect(() => {
@@ -145,8 +149,8 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         // Initial fetch
         fetchLiveEm();
 
-        // Poll every 3 seconds
-        const intervalId = setInterval(fetchLiveEm, 3000);
+        // Fix 3: Poll every 30 seconds — live EM is table-only, not chart-critical
+        const intervalId = setInterval(fetchLiveEm, 30_000);
         return () => clearInterval(intervalId);
     }, [ticker, marketStatus.sessionType]);
 
@@ -227,6 +231,19 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
 
         // Fetch History & Levels
         const initData = async () => {
+            // Fix 5: Kick off static EM fetch in parallel with history if ref is empty
+            if (!staticEmRef.current) {
+                fetch(`/api/v1/expected_moves/static/latest?v=${Date.now()}`)
+                    .then(r => r.json())
+                    .then(d => {
+                        if (!cancelled && d?.[ticker]) {
+                            staticEmRef.current = d[ticker];
+                            setStaticEm(d[ticker]);
+                        }
+                    })
+                    .catch(() => { });
+            }
+
             // 1. History — use Parquet for 1d, ThetaData stream for intraday
             setDataError(null); // Clear previous errors on resolution switch
             let formatted: any[] = [];
@@ -292,7 +309,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                 }
                             }
                         } catch { /* retry */ }
-                        if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // wait 2s before retry
+                        // Fix 4: Removed 2s hardcoded retry delay — retry immediately
                     }
                 }
 
@@ -304,6 +321,8 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                     mainSeries.setData(formatted);
                     const last = formatted[formatted.length - 1];
                     const price = chartType === 'Candles' ? last.close : last.value;
+                    // Fix 1: Store last historical bar so WS reconnect can seed currentBarRef
+                    lastHistBarRef.current = chartType === 'Candles' ? last : { time: last.time, open: price, high: price, low: price, close: price };
                     setLastPrice(price);
                     lastPriceRef.current = price;
 
@@ -506,15 +525,19 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
         let ws: WebSocket | null = null;
         let reconnectTimeout: ReturnType<typeof setTimeout>;
 
-        // Ref to track the current accumulating bar to prevent "resetting" high/low wicks
-        // We initialize it with null.
-        const currentBarRef = { current: null as { time: number | string, open: number, high: number, low: number, close: number } | null };
+        // currentBarRef is now at component scope (Fix 1) — no local redeclaration here
 
         const connect = () => {
             setConnectionStatus('Connecting...');
             ws = new WebSocket(wsUrl);
 
-            ws.onopen = () => { setConnectionStatus('Live'); };
+            ws.onopen = () => {
+                setConnectionStatus('Live');
+                // Fix 1: Seed currentBarRef from last historical bar on reconnect — preserves daily open
+                if (lastHistBarRef.current && !currentBarRef.current) {
+                    currentBarRef.current = { ...lastHistBarRef.current };
+                }
+            };
 
             ws.onmessage = (event) => {
                 try {
@@ -793,8 +816,7 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
                                 // Show ONLY if Market is strictly OPEN (Regular Session)
                                 // User requested to hide this "outside of market hours".
                                 const isRegularSession = marketStatus.sessionType === 'regular' && marketStatus.isOpen;
-                                // DEBUG: Verify why this row is showing
-                                console.log("Live Row Check:", { type: marketStatus.sessionType, open: marketStatus.isOpen, isRegularSession, lastPrice });
+                                // Fix 6: Removed stray console.log that fired on every WS tick
 
                                 if (isRegularSession && ((lastPrice && lastPrice > 0) || liveEmData)) {
                                     // Live Move: prefer Polled Live Data, fall back to null (do NOT use static moves for live row)

@@ -1,0 +1,381 @@
+version: "1.0"
+description: "Single Source of Truth for MIE Daily Pipeline"
+
+stages:
+  # --- Phase 1: Ingestion ---
+  - id: update_raw
+    name: "Update Raw Data"
+    mode: BATCH
+    command: update-raw
+    args: []
+    depends_on: []
+    outputs: ["data/raw/*.parquet", "data/raw/*.csv"]
+    inputs: []
+    retry: 1
+    timeout_minutes: 30
+    on_failure: fail
+
+  - id: fetch_massive_snapshot
+    name: "Download Daily Options (Flat File)"
+    mode: BATCH
+    command: fetch-massive-snapshot
+    args: []
+    depends_on: [] # Independent of raw update
+    outputs: ["data/raw/massive/options/full/options_*.csv"]
+    inputs: []
+    retry: 3
+    timeout_minutes: 60
+    on_failure: fail
+
+  - id: extract_massive_snapshot
+    name: "Extract Options Tickers"
+    mode: BATCH
+    command: extract-massive-snapshot
+    args: ["--tickers", "@config"]
+    depends_on: ["fetch_massive_snapshot"]
+    outputs: ["data/raw/massive/options/options_*.parquet"]
+    inputs: ["data/raw/massive/options/full/options_*.csv"]
+    retry: 0
+    timeout_minutes: 45
+    on_failure: fail
+
+  # --- Phase 2: Feature Engineering ---
+  - id: build_features
+    name: "Update Features"
+    mode: BATCH
+    command: build-features
+    args: ["--mode", "update", "--lookback", "90"]
+    depends_on: ["update_raw"]
+    outputs: ["data/features/*.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 20
+    on_failure: fail
+
+  # --- Phase 3: Analytics & Scanners ---
+  - id: build_minervini
+    name: "Minervini Scanner"
+    mode: BATCH
+    command: build-minervini-daily
+    args: ["--tickers", "@config"]
+    depends_on: ["build_features"]
+    outputs: ["data/analytics/scanner/minervini_latest.json"]
+    inputs: ["data/features/*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: build_markov_grid
+    name: "Markov Grid"
+    mode: BATCH
+    command: build-markov-grid
+    args: ["--state-modes", "binary,tri", "--thresholds", "0,5,10,15,20,25,30,35,40,45,50", "--windows", "1Y,2Y,5Y,10Y,15Y,MAX", "--orders", "1,2"]
+    depends_on: ["build_features"]
+    outputs: ["data/analytics/markov/**/*.parquet"]
+    inputs: ["data/features/*.parquet"]
+    retry: 0
+    timeout_minutes: 60
+    on_failure: warn
+
+  - id: build_markov_snapshots
+    name: "Markov Snapshots"
+    mode: BATCH
+    command: build-markov-snapshots
+    args: ["--allow-missing"]
+    depends_on: ["build_markov_grid"]
+    outputs: ["data/analytics/markov/snapshots/*.json"]
+    inputs: ["data/analytics/markov/grid/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: build_hmm_daily
+    name: "HMM Grid"
+    mode: BATCH
+    command: build-hmm-daily
+    args: ["--tickers", "@config"]
+    depends_on: ["build_features"]
+    outputs: ["data/analytics/hmm/**/*.parquet", "data/analytics/hmm/**/*.json"]
+    inputs: ["data/features/*.parquet"]
+    retry: 0
+    timeout_minutes: 30
+    on_failure: warn
+
+  - id: build_hmm_snapshots
+    name: "HMM Snapshots"
+    mode: BATCH
+    command: build-hmm-snapshots
+    args: ["--allow-missing"]
+    depends_on: ["build_hmm_daily"]
+    outputs: ["data/analytics/hmm/snapshots/*.json"]
+    inputs: ["data/analytics/hmm/*.pkl"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: backtest_hmm
+    name: "Backtest HMM"
+    mode: BATCH
+    command: backtest-hmm
+    args: ["--tickers", "@config"]
+    depends_on: ["build_hmm_daily"]
+    outputs: ["data/analytics/hmm/backtest/*.json"]
+    inputs: ["data/analytics/hmm/*.pkl"]
+    retry: 0
+    timeout_minutes: 15
+    on_failure: warn
+
+  - id: build_gex_daily
+    name: "GEX"
+    mode: BATCH
+    command: build-gex-daily
+    args: ["--tickers", "@config"]
+    depends_on: ["extract_massive_snapshot", "update_raw"]
+    outputs: ["data/analytics/gex/*.json", "data/analytics/gex/*.parquet"]
+    inputs: ["data/raw/massive/options/options_*.parquet", "data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 20
+    on_failure: warn
+
+  - id: archive_gex_daily
+    name: "GEX History Archive"
+    mode: BATCH
+    command: archive-gex-daily
+    args: ["--tickers", "SPY"]
+    depends_on: ["build_gex_daily"]
+    outputs: ["data/analytics/gex/archive/*.parquet"]
+    inputs: ["data/analytics/gex/*.json"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  # --- Phase 4: Expected Moves ---
+  - id: update_expected_moves
+    name: "Expected Moves"
+    mode: BATCH
+    command: update-expected-moves
+    args: ["--ticker", "@config", "--lookback", "5", "--include-weekly-reference"]
+    depends_on: ["extract_massive_snapshot", "update_raw"]
+    outputs: ["data/analytics/options/latest.json"]
+    inputs: ["data/raw/massive/options/options_*.parquet"]
+    retry: 0
+    timeout_minutes: 15
+    on_failure: fail
+
+  - id: build_expected_moves_snapshots
+    name: "Expected Moves History Snapshots"
+    mode: BATCH
+    command: build-expected-moves-snapshots
+    args: ["--tickers", "@config"]
+    depends_on: ["update_expected_moves"]
+    outputs: ["data/analytics_snapshots/options/**/*.parquet", "data/analytics_snapshots/options/**/*.json"]
+    inputs: ["data/analytics/options/latest.json"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: update_expected_moves_v2
+    name: "Expected Moves V2"
+    mode: BATCH
+    command: update-expected-moves-v2
+    args: []
+    depends_on: [] # Independent (uses Theta API)
+    outputs: ["public/data/expected_moves_static.json"]
+    inputs: [] # Theta API
+    retry: 3
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: analyze_expected_moves_reliability
+    name: "Expected Moves Reliability"
+    mode: BATCH
+    command: analyze-expected-moves-reliability
+    args: []
+    depends_on: ["build_expected_moves_snapshots"]
+    outputs: ["data/analytics/options/reliability/*.json"]
+    inputs: ["data/analytics/options/snapshots/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  # --- Phase 5: Additional Analytics ---
+  - id: update_seasonality
+    name: "Seasonality"
+    mode: BATCH
+    command: update-seasonality
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/seasonality/base/*.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: update_sma_stack
+    name: "SMA/EMA Stack"
+    mode: BATCH
+    command: update-sma-stack
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/sma_stack_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: update_dcs
+    name: "Downtrend Continuation"
+    mode: BATCH
+    command: update-dcs
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/dcs/*.json", "data/analytics/dcs/*.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: update_adx
+    name: "ADX/DMI"
+    mode: BATCH
+    command: update-adx
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/adx_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: update_psar
+    name: "PSAR"
+    mode: BATCH
+    command: update-psar
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/psar_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: update_ichimoku
+    name: "Ichimoku"
+    mode: BATCH
+    command: update-ichimoku
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/ichimoku_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: build_volatility_struct
+    name: "VolatilityTermStructure"
+    mode: BATCH
+    command: build-volatility-struct
+    args: []
+    depends_on: ["extract_massive_snapshot"]
+    outputs: ["data/analytics/volatility_term_structure.json"]
+    inputs: ["data/raw/massive/options/options_*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: update_volatility
+    name: "ATR/Volatility Analysis"
+    mode: BATCH
+    command: update-volatility
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/volatility_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: update_fred_calendar
+    name: "FRED Calendar"
+    mode: BATCH
+    command: python
+    args: ["scripts/update_fred_calendar.py"]
+    depends_on: []
+    outputs: ["data/economy/fred_calendar.json"]
+    inputs: []
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  - id: build_skew_daily
+    name: "Skew & PCR"
+    mode: BATCH
+    command: build-skew-daily
+    args: ["--tickers", "@config"]
+    depends_on: ["extract_massive_snapshot"]
+    outputs: ["data/analytics/options/skew/*.json"]
+    inputs: ["data/raw/massive/options/options_*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: build_tsmom_daily
+    name: "TSMOM"
+    mode: BATCH
+    command: build-tsmom-daily
+    args: ["--tickers", "@config"]
+    depends_on: ["update_raw"]
+    outputs: ["data/tsmom/*.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: build_gaf_daily
+    name: "GAF"
+    mode: BATCH
+    command: build-gaf-daily
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/gaf/*.json"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 20
+    on_failure: warn
+
+  - id: update_volume_regime
+    name: "Volume Regime Analysis"
+    mode: BATCH
+    command: update-volume-regime
+    args: []
+    depends_on: ["update_raw"]
+    outputs: ["data/analytics/volume_daily.parquet"]
+    inputs: ["data/raw/*.parquet"]
+    retry: 0
+    timeout_minutes: 5
+    on_failure: warn
+
+  # --- Phase 6: AI Intelligence ---
+  - id: generate_ai_context
+    name: "AI Context Generation"
+    mode: BATCH
+    command: generate-ai-context
+    args: ["--ticker", "SPY"]
+    depends_on: ["build_features", "build_minervini", "build_markov_snapshots", "build_gex_daily"]
+    outputs: ["data/ai_context/*.json"]
+    inputs: ["data/analytics/**/*.json"]
+    retry: 0
+    timeout_minutes: 15
+    on_failure: warn
+
+  - id: generate_ai_report
+    name: "AI Daily Report"
+    mode: BATCH
+    command: generate-ai-report
+    args: ["--ticker", "SPY"]
+    depends_on: ["generate_ai_context"]
+    outputs: ["data/reports/daily_report_latest.json"]
+    inputs: ["data/ai_context/*.json"]
+    retry: 0
+    timeout_minutes: 15
+    on_failure: warn

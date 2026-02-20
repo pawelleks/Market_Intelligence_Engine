@@ -1,5 +1,6 @@
 {
     email admin@example.com
+    auto_https off
 }
 
 http://localhost, http://127.0.0.1 {

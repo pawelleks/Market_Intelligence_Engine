@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Constants
-AGGREGATION_WINDOW_MS = 20
+AGGREGATION_WINDOW_MS = 50
 HISTORY_SIZE = 200
 
 # Enum for Trade Tags
@@ -67,9 +67,10 @@ class TradeProcessor:
             key = self._get_contract_key(msg.contract)
             if not key: return 
             
+            # Fix A: use correct attribute names (bid_price / ask_price, not bid / ask)
             self.quotes[key] = {
-                "bid": getattr(msg.quote, 'bid', 0.0),
-                "ask": getattr(msg.quote, 'ask', 0.0)
+                "bid": getattr(msg.quote, 'bid_price', 0.0),
+                "ask": getattr(msg.quote, 'ask_price', 0.0)
             }
         except Exception as e:
             logger.error(f"Quote Error: {e}")
@@ -116,7 +117,8 @@ class TradeProcessor:
         
         # 2. Tagging
         tags = []
-        is_sweep = any(c in [83, 'S', 'SWEEP', 'INTERMARKET_SWEEP'] for c in bucket.conditions)
+        # Fix C: code 95 = INTERMARKET_SWEEP (code 83 = MID_BID_ASK_PRICE — not a sweep)
+        is_sweep = any(c in [95, 'INTERMARKET_SWEEP'] for c in bucket.conditions)
         if is_sweep: tags.append(TradeTag.SWEEP.value)
         
         if total_size >= 500 and not is_sweep:
@@ -125,14 +127,23 @@ class TradeProcessor:
         if bucket.count > 1 and len(bucket.exchanges) == 1 and not is_sweep:
             tags.append(TradeTag.SPLIT.value)
             
-        # 3. Side
-        quote = self.quotes.get(bucket.key)
-        side = TradeSide.MID.value
-        if quote:
-            bid, ask = quote['bid'], quote['ask']
-            if bid > 0 and ask > 0:
-                if avg_price >= ask: side = TradeSide.ASK.value
-                elif avg_price <= bid: side = TradeSide.BID.value
+        # 3. Side — Fix B: condition-code-first, NBBO tick-test fallback
+        # Priority 1: OPRA aggressor condition codes (authoritative, when present)
+        if 146 in bucket.conditions or 'ASK_AGGRESSOR' in bucket.conditions:
+            side = TradeSide.ASK.value   # buyer-initiated
+        elif 145 in bucket.conditions or 'BID_AGGRESSOR' in bucket.conditions:
+            side = TradeSide.BID.value   # seller-initiated
+        else:
+            # Priority 2: NBBO tick-test (now works — bid_price/ask_price fixed in on_quote)
+            quote = self.quotes.get(bucket.key)
+            side = TradeSide.MID.value
+            if quote:
+                bid, ask = quote['bid'], quote['ask']
+                if bid > 0 and ask > 0:
+                    if avg_price >= ask:
+                        side = TradeSide.ASK.value
+                    elif avg_price <= bid:
+                        side = TradeSide.BID.value
         
         # 4. Object
         root, exp, strike, right = bucket.key
@@ -151,8 +162,15 @@ class TradeProcessor:
             "type": "TRADE_CLEAN" 
         }
         
-        # 5. Persist
+        # 5. Persist + debug logging (first 10 trades at startup for spot-check)
         self.history.append(clean_obj)
+        if len(self.history) <= 10:
+            quote = self.quotes.get(bucket.key, {})
+            logger.info(
+                f"[TRADE #{len(self.history)}] {root} {right} {strike} exp={exp} "
+                f"price={avg_price:.2f} bid={quote.get('bid', 'n/a')} ask={quote.get('ask', 'n/a')} "
+                f"conditions={list(bucket.conditions)} side={side} tags={tags}"
+            )
         
         # Cleanup
         if bucket.key in self.buffer and self.buffer[bucket.key] == bucket:

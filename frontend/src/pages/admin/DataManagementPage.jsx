@@ -212,6 +212,32 @@ const DataManagementPage = () => {
         };
         const isRunning = auditData.status === 'RUNNING';
 
+        const formatDetails = (details) => {
+            if (!details) return null;
+            let d = details;
+            // Handle stringified JSON if applicable
+            if (typeof d === 'string' && d.trim().startsWith('{')) {
+                try { d = JSON.parse(d); } catch (e) { }
+            }
+            // If simple string, display as is (grey)
+            if (typeof d === 'string') return <span style={{ color: '#666', fontSize: '0.8rem' }}>{d}</span>;
+
+            const elems = [];
+            if (d.duration_seconds) {
+                elems.push(<span key="dur" style={{ color: '#94a3b8', marginRight: '8px' }}>({Number(d.duration_seconds).toFixed(1)}s)</span>);
+            }
+            if (d.processed !== undefined || d.total !== undefined) {
+                const p = d.processed !== undefined ? d.processed : '?';
+                const t = d.total !== undefined ? d.total : '?';
+                elems.push(<span key="prog" style={{ color: '#94a3b8', marginRight: '8px' }}>{p}/{t}</span>);
+            }
+            if (d.error) {
+                elems.push(<span key="err" style={{ color: '#ef4444' }}>{d.error}</span>);
+            }
+
+            return <span style={{ fontSize: '0.8rem' }}>{elems}</span>;
+        };
+
         return (
             <div>
                 <div style={{ backgroundColor: '#162032', padding: '20px', borderRadius: '8px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
@@ -249,7 +275,7 @@ const DataManagementPage = () => {
                                     <div key={stepName} style={{ padding: '10px 15px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
                                         <span>{stepName}</span>
                                         <div style={{ display: 'flex', gap: '10px' }}>
-                                            {info && info.details && <span style={{ color: '#666', fontSize: '0.8rem' }}>{JSON.stringify(info.details).slice(0, 50)}</span>}
+                                            {info && info.details && formatDetails(info.details)}
                                             <StatusBadge status={status} />
                                         </div>
                                     </div>

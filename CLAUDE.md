@@ -256,3 +256,9 @@ This document is based on the comprehensive repository audit performed via Shotg
 ---
 
 **Questions?** Refer to `.shotgun/specification.md` for the full audit report and rationale.
+
+### 6. Pipeline Execution
+- **Entry Point**: `run_pipeline.py` is the main entry point for the daily batch pipeline.
+- **Usage**: `python run_pipeline.py --run-type MANUAL --stages ...`
+- **Do Not Modify**: Never add stages directly to `orchestrator.sh` or `mie.py` `main()`. Always add them to `pipeline/stages.yml`.
+- **Orchestrator**: `orchestrator.sh` is now a thin wrapper around `run_pipeline.py` for legacy cron compatibility.

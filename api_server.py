@@ -50,6 +50,7 @@ from mie_lib.realtime.theta_streamer import ThetaStreamer
 # from mie_lib.realtime.theta_engine import ThetaStreamer as ThetaEngine
 from datetime import datetime
 from mie_lib.utils.probability_math import BreedenLitzenberger
+from mie_lib.realtime import db
 
 
 # -----------------------------------------------------------------
@@ -950,26 +951,39 @@ def get_dcs_latest_status(ticker: str) -> JSONResponse:
 # -----------------------------------------------------------------
 
 @app.get("/api/v1/stream/history/{ticker}")
-def get_stream_history(ticker: str, resolution: str = "1m", source: str = "auto") -> List[Dict[str, Any]]:
+def get_stream_history(
+    ticker: str, 
+    resolution: str = "1m", 
+    source: str = "auto",
+    start: Optional[str] = None,
+    end: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Returns history for the specified ticker with custom resolution.
     source=auto: For 1d uses REST OHLC; for intraday prefers flow history then REST.
     source=ohlc: Always uses ThetaData REST OHLC (no flow history).
+    Optional query params: start, end (ISO dates or Unix timestamps).
     """
     ticker = ticker.upper()
     try:
         # Daily or explicit OHLC: always fetch from ThetaData REST
         if resolution == "1d" or source == "ohlc":
-            history = theta_streamer.get_intraday_history(ticker, resolution=resolution)
+            history = theta_streamer.get_intraday_history(
+                ticker, resolution=resolution, start_date=start, end_date=end
+            )
             return history
 
         # Intraday (auto): prefer in-memory flow history (has price + flow together)
-        flow_hist = theta_streamer.get_flow_history(ticker)
-        if flow_hist and len(flow_hist) > 10:
-            return flow_hist
+        # For now, flow history doesn't support custom ranges, so it falls back to REST if start/end used.
+        if not start and not end:
+            flow_hist = theta_streamer.get_flow_history(ticker)
+            if flow_hist and len(flow_hist) > 10:
+                return flow_hist
 
         # Fallback to Theta REST OHLC (no flow data)
-        history = theta_streamer.get_intraday_history(ticker, resolution=resolution)
+        history = theta_streamer.get_intraday_history(
+            ticker, resolution=resolution, start_date=start, end_date=end
+        )
         return history
     except Exception as e:
         print(f"Error fetching history for {ticker} at {resolution}: {e}")
@@ -1160,14 +1174,16 @@ async def websocket_option_flow(websocket: WebSocket):
                 initial_stats["data"][t] = s # Send raw dict, frontend can parse
         await websocket.send_json(initial_stats)
         
-        # 2. History (Filtered)
+        # 2. History (Database-backed for full intraday persistence)
+        history_raw = db.get_trades_since_open()
         history = []
-        for trade in theta_streamer.recent_trades:
-            if trade["root"] in tickers and trade.get("value", 0) >= min_premium:
+        for trade in history_raw:
+            # Apply user filters to history
+            if trade.get("root") in tickers and trade.get("value", 0) >= min_premium:
                 history.append(trade)
         
         if history:
-             await websocket.send_json({"type": "SNAPSHOT_TRADES", "trades": history})
+             await websocket.send_json({"type": "history", "trades": history})
 
         while True:
             # Race between receiving websocket control messages (filter update) and queue data
@@ -1217,6 +1233,8 @@ async def websocket_option_flow(websocket: WebSocket):
                     if trade.get("value", 0) < min_premium:
                         continue
                 
+                # Flat structure — always normalise type to lowercase "trade"
+                trade["type"] = "trade"
                 await websocket.send_json(trade)
 
     except WebSocketDisconnect:
@@ -1227,6 +1245,56 @@ async def websocket_option_flow(websocket: WebSocket):
         stats_task.cancel()
         if queue in theta_streamer.listeners:
             theta_streamer.listeners.remove(queue)
+
+# -----------------------------------------------------------------
+# Option Flow — Historical REST Endpoints
+# -----------------------------------------------------------------
+
+@app.get("/api/option-flow/dates")
+async def get_option_flow_dates():
+    """Returns list of available historical session dates (excludes today — live only)."""
+    from mie_lib.realtime import db
+    import pytz
+    dates = db.get_available_dates()
+    et_tz = pytz.timezone("America/New_York")
+    today = datetime.now(et_tz).strftime("%Y-%m-%d")
+    return {"dates": [d for d in dates if d != today]}
+
+
+@app.get("/api/option-flow/history")
+async def get_option_flow_history(
+    date: str,
+    ticker: str = "SPY",
+    min_premium: float = 100000,
+):
+    """
+    Returns all trades and stats for a given historical session date.
+    Stats are computed across all ticker trades (regardless of min_premium),
+    matching how live day_stats accrue. The trades list is filtered by
+    ticker + min_premium for table display.
+    """
+    from mie_lib.realtime import db
+    all_trades = db.get_trades_since_open(date)
+
+    # Filtered trades for table (ticker + premium gate)
+    filtered = [
+        t for t in all_trades
+        if t.get("root") == ticker and t.get("value", 0) >= min_premium
+    ]
+
+    # Stats from unfiltered ticker trades — mirrors live day_stats logic
+    ticker_trades = [t for t in all_trades if t.get("root") == ticker]
+    call_prem = sum(t.get("value", 0) for t in ticker_trades if t.get("right") == "C")
+    put_prem  = sum(t.get("value", 0) for t in ticker_trades if t.get("right") == "P")
+    stats = {
+        "call_prem": call_prem,
+        "put_prem":  put_prem,
+        "net_flow":  call_prem - put_prem,
+        "call_vol":  sum(t.get("size", 0) for t in ticker_trades if t.get("right") == "C"),
+        "put_vol":   sum(t.get("size", 0) for t in ticker_trades if t.get("right") == "P"),
+    }
+    return {"trades": filtered, "stats": stats}
+
 
 @app.get("/api/v1/dcs/history/{ticker}")
 def get_dcs_history(ticker: str) -> JSONResponse:

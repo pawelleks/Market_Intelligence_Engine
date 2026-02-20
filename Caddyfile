@@ -2,7 +2,7 @@
     auto_https off
 }
 
-http://localhost, http://127.0.0.1 {
+http://localhost, http://127.0.0.1, http://100.90.57.79 {
     header {
         X-Xss-Protection "1; mode=block"
         X-Frame-Options "DENY"

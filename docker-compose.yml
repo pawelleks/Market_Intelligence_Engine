@@ -87,7 +87,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
+      # 443 intentionally omitted for local dev — prevents ERR_SSL_PROTOCOL_ERROR
+      # Production: add 443:443 back in docker-compose.prod.yml
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data

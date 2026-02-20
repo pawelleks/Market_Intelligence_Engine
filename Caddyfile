@@ -1,5 +1,4 @@
 {
-    email admin@example.com
     auto_https off
 }
 
@@ -14,15 +13,5 @@ http://localhost, http://127.0.0.1 {
     reverse_proxy * mie-web:80
 }
 
-159.203.66.39.nip.io, blindmonkey.io, www.blindmonkey.io {
-    header {
-        # Standard Security Headers
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Xss-Protection "1; mode=block"
-        X-Frame-Options "DENY"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
-    reverse_proxy /api/* mie-api:8000
-    reverse_proxy * mie-web:80
-}
+# Production domains are managed separately on the server.
+# Do NOT add blindmonkey.io / TLS blocks here — causes ERR_SSL_PROTOCOL_ERROR locally.

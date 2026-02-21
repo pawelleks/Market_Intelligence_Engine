@@ -2165,6 +2165,10 @@ def build_parser():
     em_v2_parser = sub.add_parser("update-expected-moves-v2", help="Update Static Expected Moves (Theta)")
     em_v2_parser.set_defaults(func=handle_update_expected_moves_v2)
 
+    # --- FRED Calendar ---
+    p_fred_cal = sub.add_parser("update-fred-calendar", help="Update FRED release calendar")
+    p_fred_cal.set_defaults(func=handle_update_fred_calendar)
+
     # --- EOD Chain Fetch (ThetaData) ---
     p_eod_chains = sub.add_parser("fetch-eod-chains", help="Fetch EOD option chains from ThetaData")
     p_eod_chains.set_defaults(func=handle_fetch_eod_chains)
@@ -2174,6 +2178,46 @@ def build_parser():
     p_implied_prob.set_defaults(func=handle_process_implied_probabilities)
 
     return parser
+
+
+def handle_update_fred_calendar(args):
+    """
+    Handler for update-fred-calendar.
+    Wraps scripts/update_fred_calendar.py with AuditLogger.
+
+    Mode: BATCH
+    Data Source: FRED API (api.stlouisfed.org)
+    """
+    from mie_lib.services.audit_logger import get_audit_logger
+
+    logger = get_audit_logger()
+    stage_name = "FRED Calendar"
+
+    print("Starting FRED Calendar Update...")
+    logger.update_stage(stage_name, "RUNNING", {})
+
+    try:
+        script_path = PROJECT_ROOT / "scripts" / "update_fred_calendar.py"
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script not found: {script_path}")
+
+        cmd = [sys.executable, str(script_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode == 0:
+            print("✅ FRED Calendar update completed successfully.")
+            print(result.stdout[-500:] if len(result.stdout) > 500 else result.stdout)
+            logger.update_stage(stage_name, "COMPLETED", {})
+        else:
+            print(f"❌ FRED Calendar update failed with code {result.returncode}")
+            print(result.stderr[-500:] if len(result.stderr) > 500 else result.stderr)
+            logger.update_stage(stage_name, "FAILED", {"error": result.stderr[-200:]})
+            sys.exit(result.returncode)
+
+    except Exception as e:
+        print(f"❌ Error in update-fred-calendar: {e}")
+        logger.update_stage(stage_name, "FAILED", {"error": str(e)})
+        sys.exit(1)
 
 
 def handle_fetch_eod_chains(args):

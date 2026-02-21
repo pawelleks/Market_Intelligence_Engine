@@ -322,10 +322,10 @@ stages:
   - id: update_fred_calendar
     name: "FRED Calendar"
     mode: BATCH
-    command: python
-    args: ["scripts/update_fred_calendar.py"]
+    command: update-fred-calendar
+    args: []
     depends_on: []
-    outputs: ["data/economy/fred_calendar.json"]
+    outputs: ["data/calendar/fred_release_calendar.json"]
     inputs: []
     retry: 0
     timeout_minutes: 5

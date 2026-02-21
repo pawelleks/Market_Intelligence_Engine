@@ -50,7 +50,7 @@ INDICATOR_SERIES = {
     },
     'interest_rates': {
         'primary': ['FEDFUNDS'],
-        'secondary': ['DGS30', 'DGS10', 'DGS5', 'DGS2', 'DGS6MO', 'DGS3MO', 'DGS2MO', 'DGS1MO', 'MORTGAGE30US'],
+        'secondary': ['DGS30', 'DGS10', 'DGS5', 'DGS2', 'DGS6MO', 'DGS3MO', 'DGS1MO', 'MORTGAGE30US'],
         'components': ['T10Y2Y', 'T10Y3M', 'AAA', 'BAA', 'TB3MS'],
         'freq': 'daily'
     },

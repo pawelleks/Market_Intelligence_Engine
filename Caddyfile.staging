@@ -1,0 +1,14 @@
+{
+    auto_https off
+}
+
+http://100.90.57.79 {
+    header {
+        X-Xss-Protection "1; mode=block"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    reverse_proxy /api/* mie-api:8000
+    reverse_proxy * mie-web:80
+}

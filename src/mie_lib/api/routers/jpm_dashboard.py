@@ -142,7 +142,6 @@ SERIES_MAPPING = {
     'DGS5': '5-Year Treasury Yield',
     'DGS2': '2-Year Treasury Yield',
     'DGS1MO': '1-Month Treasury Yield',
-    'DGS2MO': '2-Month Treasury Yield',
     'TB3MS': '3-Month Treasury Yield',
     'DGS3MO': '3-Month Treasury Yield',
     'DGS6MO': '6-Month Treasury Yield',
@@ -219,7 +218,6 @@ SERIES_UNITS_METADATA = {
     'DGS5': '%',
     'DGS2': '%',
     'DGS1MO': '%',
-    'DGS2MO': '%',
     'DGS6MO': '%',
     'DGS3MO': '%',
     'TB3MS': '%',
@@ -1013,7 +1011,7 @@ async def get_indicator_detail(
     if category == 'interest-rates':
         # Order: Bills (Short), Notes/Bonds (Long), Spreads, Mortgages
         RATE_ORDER = [
-            'DGS1MO', 'DGS2MO', 'TB3MS', 'DGS3MO', 'DGS6MO', 
+            'DGS1MO', 'TB3MS', 'DGS3MO', 'DGS6MO', 
             'DGS2', 'DGS5', 'DGS10', 'DGS30',
             'T10Y2Y', 'T10Y3M', 'SPREAD30Y5Y',
             'MORTGAGE30US'

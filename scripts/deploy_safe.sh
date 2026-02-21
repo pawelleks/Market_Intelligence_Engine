@@ -95,6 +95,20 @@ rsync -avz --delete \
 echo "[3/4] Updating Envs & Secrets..."
 ENV_UPDATES=""
 REQUIRED_KEYS=("POLYGON_API_KEY" "MASSIVE_API_KEY" "GOOGLE_CLIENT_ID" "JWT_SECRET_KEY" "OPENAI_API_KEY" "LLM_MODEL_NAME" "FRED_API_KEY" "SENDGRID_API_KEY" "SENDGRID_FROM_EMAIL" "SENDGRID_FROM_NAME" "THETADATA_USERNAME" "THETADATA_PASSWORD")
+
+# Production-specific env overrides (not secret, but required for correct Caddy/auth config)
+PROD_OVERRIDES=(
+    "CADDYFILE=Caddyfile.prod"
+    "VITE_DISABLE_AUTH=false"
+)
+for OVERRIDE in "${PROD_OVERRIDES[@]}"; do
+    KEY="${OVERRIDE%%=*}"
+    VAL="${OVERRIDE#*=}"
+    ENV_UPDATES+="
+    if grep -q \"^$KEY=\" .env; then sed -i \"/^$KEY=/d\" .env; fi
+    echo \"$KEY=$VAL\" >> .env
+    "
+done
 for KEY in "${REQUIRED_KEYS[@]}"; do
     VAL="${!KEY}"
     if [ -z "$VAL" ]; then

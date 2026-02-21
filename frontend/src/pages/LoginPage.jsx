@@ -1,13 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Lock } from 'lucide-react';
 
 const LoginPage = () => {
-    const { login, bypassLogin } = useAuth();
+    const { login, bypassLogin, user } = useAuth();
     const navigate = useNavigate();
     const [error, setError] = useState(null);
+
+    // When auth is disabled or user already logged in, redirect to home
+    useEffect(() => {
+        if (user) {
+            navigate('/', { replace: true });
+        }
+    }, [user, navigate]);
+
+    const authDisabled = import.meta.env.VITE_DISABLE_AUTH === 'true';
 
     const handleSuccess = async (credentialResponse) => {
         const result = await login(credentialResponse.credential);
@@ -53,17 +62,19 @@ const LoginPage = () => {
                 <h2 style={{ marginBottom: 10 }}>Sign In</h2>
                 <p style={{ color: '#9e9e9e', marginBottom: 30 }}>Access Market Intelligence Engine</p>
 
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                    <GoogleLogin
-                        onSuccess={handleSuccess}
-                        onError={handleError}
-                        theme="filled_black"
-                        shape="pill"
-                    />
-                </div>
+                {!authDisabled && (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                        <GoogleLogin
+                            onSuccess={handleSuccess}
+                            onError={handleError}
+                            theme="filled_black"
+                            shape="pill"
+                        />
+                    </div>
+                )}
 
                 {/* Developer Bypass for Localhost Only */}
-                {(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
+                {!authDisabled && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
                     <div style={{ marginBottom: 20 }}>
                         <button
                             onClick={async () => {

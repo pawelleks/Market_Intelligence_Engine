@@ -841,16 +841,23 @@ function AppContent() {
 }
 
 function App() {
-  // Use a placeholder ID if env var is missing, but best to set it.
+  const authDisabled = import.meta.env.VITE_DISABLE_AUTH === 'true';
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "GOOGLE_CLIENT_ID_MISSING";
+
+  const content = (
+    <AuthProvider>
+      <Router>
+        <AppContent />
+      </Router>
+    </AuthProvider>
+  );
+
+  // When auth is disabled, skip GoogleOAuthProvider (no Google SDK needed)
+  if (authDisabled) return content;
 
   return (
     <GoogleOAuthProvider clientId={clientId}>
-      <AuthProvider>
-        <Router>
-          <AppContent />
-        </Router>
-      </AuthProvider>
+      {content}
     </GoogleOAuthProvider>
   );
 }

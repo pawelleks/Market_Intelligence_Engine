@@ -83,8 +83,8 @@ stages:
     command: build-markov-snapshots
     args: ["--allow-missing"]
     depends_on: ["build_markov_grid"]
-    outputs: ["data/analytics/markov/snapshots/*.json"]
-    inputs: ["data/analytics/markov/grid/*.parquet"]
+    outputs: ["data/analytics_snapshots/markov/*.json"]
+    inputs: ["data/analytics/markov/**/*.parquet"]
     retry: 0
     timeout_minutes: 5
     on_failure: warn
@@ -184,6 +184,30 @@ stages:
     inputs: [] # Theta API
     retry: 3
     timeout_minutes: 5
+    on_failure: warn
+
+  - id: fetch_eod_chains
+    name: "Fetch EOD Chains"
+    mode: BATCH
+    command: fetch-eod-chains
+    args: []
+    depends_on: [] # Independent (uses Theta API directly)
+    outputs: ["data/raw/chain_*.parquet"]
+    inputs: [] # ThetaData REST API
+    retry: 2
+    timeout_minutes: 10
+    on_failure: warn
+
+  - id: process_implied_probabilities
+    name: "Implied Probability"
+    mode: BATCH
+    command: process-implied-probabilities
+    args: []
+    depends_on: ["fetch_eod_chains"]
+    outputs: ["public/data/probability_surface_*.json", "public/data/forward_cone_*.json"]
+    inputs: ["data/raw/chain_*.parquet"]
+    retry: 1
+    timeout_minutes: 10
     on_failure: warn
 
   - id: analyze_expected_moves_reliability
@@ -313,7 +337,7 @@ stages:
     command: build-skew-daily
     args: ["--tickers", "@config"]
     depends_on: ["extract_massive_snapshot"]
-    outputs: ["data/analytics/options/skew/*.json"]
+    outputs: ["data/analytics/skew/latest.json"]
     inputs: ["data/raw/massive/options/options_*.parquet"]
     retry: 0
     timeout_minutes: 10

@@ -1,8 +1,8 @@
 # ABCT - Prediction Analysis Report
 
-**Generated**: 2026-02-18 03:02  
-**Analysis Period**: 1970-01-01 00:00:00 to 2025-11-01 00:00:00  
-**Data Coverage**: 55.8 years
+**Generated**: 2026-02-21 16:30  
+**Analysis Period**: 1970-01-01 00:00:00 to 2025-12-01 00:00:00  
+**Data Coverage**: 55.9 years
 
 ---
 
@@ -87,10 +87,10 @@
 
 ## Signal Characteristics
 
-**Total Observations**: 671  
+**Total Observations**: 672  
 **TROUBLE Periods**: 33 (4.9% of time)  
 **WARNING Periods**: 52  
-**CLEAR Periods**: 586
+**CLEAR Periods**: 587
 
 ---
 
@@ -109,6 +109,6 @@
 
 ---
 
-**Report Generated**: 2026-02-18 03:02:59  
+**Report Generated**: 2026-02-21 16:30:46  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

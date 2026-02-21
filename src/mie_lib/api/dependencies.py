@@ -18,6 +18,18 @@ ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login", auto_error=False)
 
 async def get_current_user(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    # Environment-aware auth bypass for staging/development
+    app_env = os.getenv("APP_ENV", "production").lower()
+    if app_env in ("staging", "development"):
+        return User(
+            id=9999,
+            email="dev@blindmonkey.io",
+            full_name="Dev User",
+            google_sub="dev_bypass",
+            is_admin=True,
+            is_approved=True,
+        )
+
     # 1. Prioritize Real Token Verification if provided
     if token:
         credentials_exception = HTTPException(

@@ -1,8 +1,8 @@
 # BUSINESS CYCLE - Prediction Analysis Report
 
-**Generated**: 2026-02-18 03:02  
-**Analysis Period**: 1981-07-31 00:00:00 to 2025-10-31 00:00:00  
-**Data Coverage**: 44.3 years
+**Generated**: 2026-02-21 16:30  
+**Analysis Period**: 1981-07-31 00:00:00 to 2025-12-31 00:00:00  
+**Data Coverage**: 44.4 years
 
 ---
 
@@ -82,10 +82,10 @@
 
 ## Signal Characteristics
 
-**Total Observations**: 532  
-**TROUBLE Periods**: 53 (10.0% of time)  
+**Total Observations**: 534  
+**TROUBLE Periods**: 53 (9.9% of time)  
 **WARNING Periods**: 128  
-**CLEAR Periods**: 351
+**CLEAR Periods**: 353
 
 ---
 
@@ -109,6 +109,6 @@
 
 ---
 
-**Report Generated**: 2026-02-18 03:02:59  
+**Report Generated**: 2026-02-21 16:30:46  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

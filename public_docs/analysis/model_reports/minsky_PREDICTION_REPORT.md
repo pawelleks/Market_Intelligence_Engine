@@ -1,6 +1,6 @@
 # MINSKY - Prediction Analysis Report
 
-**Generated**: 2026-02-18 03:02  
+**Generated**: 2026-02-21 16:30  
 **Analysis Period**: 1986-01-01 00:00:00 to 2025-07-01 00:00:00  
 **Data Coverage**: 39.5 years
 
@@ -105,6 +105,6 @@
 
 ---
 
-**Report Generated**: 2026-02-18 03:02:59  
+**Report Generated**: 2026-02-21 16:30:46  
 **Data Source**: Path B Prediction Analysis Framework  
 **For questions or refinements**: See `docs/analysis/`

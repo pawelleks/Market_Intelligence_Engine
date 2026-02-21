@@ -1,8 +1,4 @@
-{
-    auto_https off
-}
-
-http://localhost, http://127.0.0.1, http://100.90.57.79 {
+blindmonkey.io {
     header {
         X-Xss-Protection "1; mode=block"
         X-Frame-Options "DENY"
@@ -13,5 +9,6 @@ http://localhost, http://127.0.0.1, http://100.90.57.79 {
     reverse_proxy * mie-web:80
 }
 
-# Production domains are managed separately on the server.
-# Do NOT add blindmonkey.io / TLS blocks here — causes ERR_SSL_PROTOCOL_ERROR locally.
+www.blindmonkey.io {
+    redir https://blindmonkey.io{uri} permanent
+}

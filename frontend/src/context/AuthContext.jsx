@@ -11,6 +11,12 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         const initAuth = async () => {
+            // Auth bypass for local/staging — auto-trigger existing bypassLogin()
+            if (import.meta.env.VITE_DISABLE_AUTH === 'true' && !token) {
+                await bypassLogin();
+                return; // bypassLogin sets token, which re-triggers this effect
+            }
+
             if (token) {
                 try {
                     const decoded = jwtDecode(token);

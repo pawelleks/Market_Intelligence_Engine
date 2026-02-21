@@ -65,6 +65,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+        - VITE_DISABLE_AUTH=${VITE_DISABLE_AUTH:-false}
     container_name: mie-web
     # Ports removed; traffic handled by Caddy
     # ports:
@@ -87,10 +88,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      # 443 intentionally omitted for local dev — prevents ERR_SSL_PROTOCOL_ERROR
-      # Production: add 443:443 back in docker-compose.prod.yml
+      - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./${CADDYFILE:-Caddyfile.local}:/etc/caddy/Caddyfile
       - caddy_data:/data
     depends_on:
       - web

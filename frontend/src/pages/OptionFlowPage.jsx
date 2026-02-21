@@ -375,6 +375,25 @@ export default function OptionFlowPage() {
         return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     };
 
+    // Helper: count trading weekdays from today (exclusive) to expiry (inclusive). 0 = 0DTE.
+    const calcDTE = (expStr) => {
+        if (!expStr) return '—';
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const exp = new Date(expStr + 'T00:00:00');
+        exp.setHours(0, 0, 0, 0);
+        if (exp <= today) return 0;
+        let count = 0;
+        const d = new Date(today);
+        d.setDate(d.getDate() + 1); // start from tomorrow
+        while (d <= exp) {
+            const day = d.getDay();
+            if (day !== 0 && day !== 6) count++; // skip Sat (6) and Sun (0)
+            d.setDate(d.getDate() + 1);
+        }
+        return count;
+    };
+
     // Helper: format session date for display (e.g. "Feb 19, 2026")
     const fmtDate = (d) => {
         if (!d) return '';
@@ -621,6 +640,7 @@ export default function OptionFlowPage() {
                             <tr className="border-b border-slate-800 text-xs uppercase tracking-wider text-slate-500">
                                 <th className="h-10 px-3 text-left font-medium">Ticker</th>
                                 <th className="h-10 px-3 text-left font-medium">Exp</th>
+                                <th className="h-10 px-3 text-left font-medium">DTE</th>
                                 <th className="h-10 px-3 text-left font-medium">Strike</th>
                                 <th className="h-10 px-3 text-left font-medium">Type</th>
                                 <th className="h-10 px-3 text-left font-medium">Tags</th>
@@ -635,7 +655,7 @@ export default function OptionFlowPage() {
                         <tbody className="divide-y divide-slate-800/50">
                             {trades.length === 0 ? (
                                 <tr>
-                                    <td colSpan={11} className="p-8 text-center text-slate-500 italic font-mono text-xs">
+                                    <td colSpan={12} className="p-8 text-center text-slate-500 italic font-mono text-xs">
                                         {isLoadingHistory ? (
                                             <span className="flex items-center justify-center gap-2">
                                                 <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
@@ -687,6 +707,9 @@ export default function OptionFlowPage() {
                                         >
                                             <td className="p-3 font-bold text-white">{trade.root}</td>
                                             <td className="p-3 text-slate-400">{trade.exp}</td>
+                                            <td className="p-3 font-mono text-center text-slate-400">
+                                                {(() => { const d = calcDTE(trade.exp); return d === '—' ? '—' : <span className={d === 0 ? 'text-orange-400 font-bold' : 'text-slate-400'}>{d}</span>; })()}
+                                            </td>
                                             <td className="p-3 font-mono text-slate-300">{trade.strike}</td>
                                             <td className="p-3">
                                                 <span className={`font-bold ${isCall ? 'text-green-500' : 'text-red-500'}`}>

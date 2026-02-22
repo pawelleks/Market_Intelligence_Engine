@@ -4,20 +4,45 @@ set -e
 # ==============================================================================
 # Market Intelligence Engine - SAFE Remote Deployment Script
 # ==============================================================================
-# Features:
-# - Full Data Backup (Analytics + DB)
-# - Code Backup (Rollback capability)
-# - Safe Sync (Excludes data overwrite)
+# Usage:
+#   ./scripts/deploy_safe.sh [staging|production]
+#
+# Defaults to "production" if no argument given.
 # ==============================================================================
+
+# --- Environment Selection ---
+DEPLOY_ENV="${1:-production}"
+
+case "$DEPLOY_ENV" in
+    staging)
+        ENV_CADDYFILE="Caddyfile.staging"
+        ENV_DISABLE_AUTH="true"
+        ;;
+    production|prod)
+        DEPLOY_ENV="production"
+        ENV_CADDYFILE="Caddyfile.prod"
+        ENV_DISABLE_AUTH="false"
+        ;;
+    *)
+        echo "Error: Unknown environment '$DEPLOY_ENV'. Use 'staging' or 'production'."
+        exit 1
+        ;;
+esac
 
 # --- Configuration ---
 REMOTE_USER="${REMOTE_USER:-}"
 REMOTE_HOST="${REMOTE_HOST:-}"
 IDENTITY_FILE="${IDENTITY_FILE:-}"
-REMOTE_DIR="${REMOTE_DIR:-~/market_intelligence_engine}"
+REMOTE_DIR="${REMOTE_DIR:-}"
 SSH_PORT="${SSH_PORT:-22}"
 
-# --- Load Local .env ---
+# --- Load Local .env (preserve connection vars if already set) ---
+_SAVED_REMOTE_USER="${REMOTE_USER:-}"
+_SAVED_REMOTE_HOST="${REMOTE_HOST:-}"
+_SAVED_IDENTITY_FILE="${IDENTITY_FILE:-}"
+_SAVED_REMOTE_DIR="${REMOTE_DIR:-}"
+_SAVED_SSH_PORT="${SSH_PORT:-}"
+
 if [ -f ".env" ]; then
     echo "Loading local .env file..."
     set -a
@@ -25,10 +50,17 @@ if [ -f ".env" ]; then
     set +a
 fi
 
+# Restore connection vars that were set before .env was loaded
+[ -n "$_SAVED_REMOTE_USER" ] && REMOTE_USER="$_SAVED_REMOTE_USER"
+[ -n "$_SAVED_REMOTE_HOST" ] && REMOTE_HOST="$_SAVED_REMOTE_HOST"
+[ -n "$_SAVED_IDENTITY_FILE" ] && IDENTITY_FILE="$_SAVED_IDENTITY_FILE"
+[ -n "$_SAVED_REMOTE_DIR" ] && REMOTE_DIR="$_SAVED_REMOTE_DIR"
+[ -n "$_SAVED_SSH_PORT" ] && SSH_PORT="$_SAVED_SSH_PORT"
+
 # --- Validation ---
 if [[ -z "$REMOTE_USER" || -z "$REMOTE_HOST" ]]; then
     echo "Error: REMOTE_USER and REMOTE_HOST environment variables must be set."
-    echo "Usage: REMOTE_USER=user REMOTE_HOST=host [SSH_PORT=22] ./scripts/deploy_safe.sh"
+    echo "Usage: ./scripts/deploy_safe.sh [staging|production]"
     exit 1
 fi
 
@@ -39,10 +71,17 @@ else
     SSH_OPTS="-o StrictHostKeyChecking=no -p $SSH_PORT"
 fi
 
+# Resolve REMOTE_DIR: default to remote $HOME/market_intelligence_engine
+if [[ -z "$REMOTE_DIR" ]]; then
+    REMOTE_HOME=$(ssh $SSH_OPTS -o ConnectTimeout=5 "${REMOTE_USER}@${REMOTE_HOST}" 'echo $HOME')
+    REMOTE_DIR="${REMOTE_HOME}/market_intelligence_engine"
+fi
+
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 echo "========================================================"
-echo "SAFE DEPLOY to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
+echo "SAFE DEPLOY [${DEPLOY_ENV}] to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
+echo "  Caddyfile: ${ENV_CADDYFILE}  |  Auth disabled: ${ENV_DISABLE_AUTH}"
 echo "========================================================"
 
 # --- Pre-flight Check ---
@@ -96,12 +135,12 @@ echo "[3/4] Updating Envs & Secrets..."
 ENV_UPDATES=""
 REQUIRED_KEYS=("POLYGON_API_KEY" "MASSIVE_API_KEY" "GOOGLE_CLIENT_ID" "JWT_SECRET_KEY" "OPENAI_API_KEY" "LLM_MODEL_NAME" "FRED_API_KEY" "SENDGRID_API_KEY" "SENDGRID_FROM_EMAIL" "SENDGRID_FROM_NAME" "THETADATA_USERNAME" "THETADATA_PASSWORD")
 
-# Production-specific env overrides (not secret, but required for correct Caddy/auth config)
-PROD_OVERRIDES=(
-    "CADDYFILE=Caddyfile.prod"
-    "VITE_DISABLE_AUTH=false"
+# Environment-specific overrides (Caddy config + auth)
+ENV_OVERRIDES=(
+    "CADDYFILE=${ENV_CADDYFILE}"
+    "VITE_DISABLE_AUTH=${ENV_DISABLE_AUTH}"
 )
-for OVERRIDE in "${PROD_OVERRIDES[@]}"; do
+for OVERRIDE in "${ENV_OVERRIDES[@]}"; do
     KEY="${OVERRIDE%%=*}"
     VAL="${OVERRIDE#*=}"
     ENV_UPDATES+="

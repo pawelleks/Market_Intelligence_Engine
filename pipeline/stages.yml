@@ -108,7 +108,7 @@ stages:
     args: ["--allow-missing"]
     depends_on: ["build_hmm_daily"]
     outputs: ["data/analytics/hmm/snapshots/*.json"]
-    inputs: ["data/analytics/hmm/*.pkl"]
+    inputs: ["data/analytics/hmm/**/*.parquet"]
     retry: 0
     timeout_minutes: 5
     on_failure: warn
@@ -120,7 +120,7 @@ stages:
     args: ["--tickers", "@config"]
     depends_on: ["build_hmm_daily"]
     outputs: ["data/analytics/hmm/backtest/*.json"]
-    inputs: ["data/analytics/hmm/*.pkl"]
+    inputs: ["data/analytics/hmm/**/*.parquet"]
     retry: 0
     timeout_minutes: 15
     on_failure: warn

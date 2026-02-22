@@ -169,21 +169,37 @@ class PipelineRunner:
         print(f"  > Checking inputs...")
         input_res = contracts.validate_inputs(sid)
         if not input_res.passed:
-            node.status = "FAILED"
             node.error = f"Input contract failed: missing={input_res.missing}, stale={input_res.stale}"
             node.end_time = time.time()
-            node.end_time = time.time()
             print(f"  ❌ INPUT CONTRACT FAILED: {node.error}")
-            if not dry_run:
-                try:
-                    get_audit_logger().update_stage(node.config['name'], "FAILED", {
-                        "runner": "new", 
-                        "duration_seconds": node.end_time - node.start_time,
-                        "error": node.error
-                    })
-                except Exception as e:
-                    print(f"  ⚠️ Failed to update audit log (FAILED): {e}")
-            return False
+
+            policy = node.config.get("on_failure", "fail")
+
+            if policy == "warn":
+                print(f"  ⚠️ INPUT CONTRACT FAILED (Policy: warn). Continuing...")
+                node.status = "WARNING"
+                if not dry_run:
+                    try:
+                        get_audit_logger().update_stage(node.config['name'], "WARNING", {
+                            "runner": "new",
+                            "duration_seconds": node.end_time - node.start_time,
+                            "error": node.error
+                        })
+                    except Exception as e:
+                        print(f"  ⚠️ Failed to update audit log (WARNING): {e}")
+                return True
+            else:
+                node.status = "FAILED"
+                if not dry_run:
+                    try:
+                        get_audit_logger().update_stage(node.config['name'], "FAILED", {
+                            "runner": "new",
+                            "duration_seconds": node.end_time - node.start_time,
+                            "error": node.error
+                        })
+                    except Exception as e:
+                        print(f"  ⚠️ Failed to update audit log (FAILED): {e}")
+                return False
 
         # 3. Execution (with Retry)
         cmd = [sys.executable, "-m", "mie_lib.cli.mie", node.config["command"]] + node.config["args"]
@@ -301,31 +317,31 @@ class PipelineRunner:
         
         for sid in order:
             node = self.nodes[sid]
-            
+
             # Check dependency status
             if self._should_skip(sid):
                 print(f"[SKIP] {sid} (dependencies unsatisfied)")
                 node.status = "SKIPPED"
+                self.run_log["stages"][sid] = node.to_dict()
                 continue
-            
-            # If a previous hard fail occurred, we skip everything remaining 
-            # (unless it was a parallel branch, but _should_skip handles that logic mostly.
-            # However, if 'fail' policy was triggered, we decided to Stop Pipeline completely.)
+
+            # If a previous hard fail occurred, skip remaining stages
             if failure_stop:
                 print(f"[SKIP] {sid} (pipeline aborted)")
                 node.status = "SKIPPED"
+                self.run_log["stages"][sid] = node.to_dict()
                 continue
 
             # Run
             ok = self.run_stage(sid, dry_run=dry_run)
-            
+
             # Record log
             self.run_log["stages"][sid] = node.to_dict()
-            
+
             if not ok:
-                # If run_stage returned False, it means it failed AND policy was not 'warn'.
-                # So we stop the pipeline.
-                failure_stop = True
+                policy = node.config.get("on_failure", "fail")
+                if policy != "warn":
+                    failure_stop = True
 
         self._save_log()
         

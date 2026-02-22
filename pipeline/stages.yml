@@ -119,7 +119,7 @@ stages:
     command: backtest-hmm
     args: ["--tickers", "@config"]
     depends_on: ["build_hmm_daily"]
-    outputs: ["data/analytics/hmm/backtest/*.json"]
+    outputs: ["data/analytics/hmm/backtest_results_*.json"]
     inputs: ["data/analytics/hmm/**/*.parquet"]
     retry: 0
     timeout_minutes: 15

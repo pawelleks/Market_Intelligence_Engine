@@ -249,44 +249,53 @@ export const ExpectedMovesChartV2: React.FC<ExpectedMovesChartV2Props> = ({ tick
             let formatted: any[] = [];
             try {
                 if (resolution === '1d') {
-                    // Daily: try ThetaData REST first (fresh data), fall back to Parquet
+                    // Daily: try ThetaData REST with retry (intermittent timeouts), fall back to Parquet
                     let dailyLoaded = false;
-                    try {
-                        const resThetaDaily = await fetch(`/api/v1/stream/history/${ticker}?resolution=1d`);
-                        if (resThetaDaily.ok) {
-                            const hist = await resThetaDaily.json();
-                            const validHist = (Array.isArray(hist) ? hist : []).filter((d: any) => d.close > 0);
-                            if (validHist.length > 50) {
-                                // ThetaData REST returns {time: "YYYY-MM-DD", ...} for daily
-                                formatted = validHist.map((d: any) => {
-                                    const dateStr = d.time || d.date;
-                                    if (chartType === 'Candles') {
-                                        return { time: dateStr, open: d.open, high: d.high, low: d.low, close: d.close };
-                                    } else {
-                                        return { time: dateStr, value: d.close };
-                                    }
-                                });
-                                dailyLoaded = true;
+                    for (let attempt = 0; attempt < 3 && !dailyLoaded; attempt++) {
+                        try {
+                            if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+                            const resThetaDaily = await fetch(`/api/v1/stream/history/${ticker}?resolution=1d`);
+                            if (resThetaDaily.ok) {
+                                const hist = await resThetaDaily.json();
+                                const validHist = (Array.isArray(hist) ? hist : []).filter((d: any) => d.close > 0);
+                                if (validHist.length > 50) {
+                                    formatted = validHist.map((d: any) => {
+                                        const dateStr = d.time || d.date;
+                                        if (chartType === 'Candles') {
+                                            return { time: dateStr, open: d.open, high: d.high, low: d.low, close: d.close };
+                                        } else {
+                                            return { time: dateStr, value: d.close };
+                                        }
+                                    });
+                                    dailyLoaded = true;
+                                }
                             }
-                        }
-                    } catch { /* ThetaData REST failed — fall back to Parquet */ }
+                        } catch { /* ThetaData REST failed — retry or fall back to Parquet */ }
+                    }
 
                     if (!dailyLoaded) {
                         // Fallback: use pre-ingested Parquet data
-                        const resHist = await fetch(`/api/history/${ticker}`);
-                        if (resHist.ok) {
-                            const payload = await resHist.json();
-                            const hist = payload.data || [];
-                            const validHist = hist.filter((d: any) => d.close > 0);
+                        try {
+                            const resHist = await fetch(`/api/history/${ticker}`);
+                            if (resHist.ok) {
+                                const payload = await resHist.json();
+                                const hist = payload.data || [];
+                                const validHist = hist.filter((d: any) => d.close > 0);
 
-                            formatted = validHist.map((d: any) => {
-                                if (chartType === 'Candles') {
-                                    return { time: d.date, open: d.open, high: d.high, low: d.low, close: d.close };
-                                } else {
-                                    return { time: d.date, value: d.close };
-                                }
-                            });
-                        }
+                                formatted = validHist.map((d: any) => {
+                                    if (chartType === 'Candles') {
+                                        return { time: d.date, open: d.open, high: d.high, low: d.low, close: d.close };
+                                    } else {
+                                        return { time: d.date, value: d.close };
+                                    }
+                                });
+                                if (formatted.length > 0) dailyLoaded = true;
+                            }
+                        } catch { /* Parquet fallback also failed */ }
+                    }
+
+                    if (!dailyLoaded) {
+                        setDataError(`Chart data temporarily unavailable for ${ticker}. ThetaData may be initializing — try refreshing in a few seconds.`);
                     }
                 } else {
                     // Intraday: use ThetaData OHLC history (source=ohlc bypasses flow history)

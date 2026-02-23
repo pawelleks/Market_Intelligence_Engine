@@ -585,35 +585,41 @@ class ThetaStreamer:
                 if age < ttl:
                     return entry["data"]
 
-        # 3. Fetch from ThetaREST
+        # 3. Fetch from ThetaREST (with retry for intermittent timeouts)
         base_url = f"http://{self.theta_host}:{self.theta_rest_port}"
-        try:
-            if is_index:
-                history = self._fetch_index_history(
-                    base_url, ticker, s_date, e_date, resolution, interval_ms
-                )
-            elif resolution == "1d":
-                history = self._fetch_stock_daily(
-                    base_url, ticker, s_date, e_date
-                )
-            else:
-                history = self._fetch_stock_intraday(
-                    base_url, ticker, s_date, e_date, interval_ms
-                )
-            
-            # Store in cache
-            if history:
-                with CACHE_LOCK:
-                    HISTORY_CACHE[cache_key] = {
-                        "data": history,
-                        "timestamp": time.time()
-                    }
-            return history
+        last_err = None
+        for attempt in range(2):
+            try:
+                if is_index:
+                    history = self._fetch_index_history(
+                        base_url, ticker, s_date, e_date, resolution, interval_ms
+                    )
+                elif resolution == "1d":
+                    history = self._fetch_stock_daily(
+                        base_url, ticker, s_date, e_date
+                    )
+                else:
+                    history = self._fetch_stock_intraday(
+                        base_url, ticker, s_date, e_date, interval_ms
+                    )
 
-        except Exception as e:
-            LOG.error(f"Failed to fetch history for {ticker} ({resolution}): {e}")
-            LOG.error(traceback.format_exc())
-            return []
+                # Store in cache
+                if history:
+                    with CACHE_LOCK:
+                        HISTORY_CACHE[cache_key] = {
+                            "data": history,
+                            "timestamp": time.time()
+                        }
+                return history
+
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    LOG.warning(f"History fetch attempt 1 failed for {ticker} ({resolution}): {e}, retrying...")
+                    time.sleep(2)
+
+        LOG.error(f"Failed to fetch history for {ticker} ({resolution}) after 2 attempts: {last_err}")
+        return []
 
     def _coerce_date(self, val):
         """Helper to convert various inputs into a date object."""

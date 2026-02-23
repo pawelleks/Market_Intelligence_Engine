@@ -12,7 +12,7 @@ const GammaExposurePage = () => {
     const [error, setError] = useState(null);
     const [emData, setEmData] = useState(null);
     const [viewMode, setViewMode] = useState('split');
-    const [horizon, setHorizon] = useState('eow'); // 'eow', 'eom', 'eoq', 'next5', 'next30'
+    const [horizon, setHorizon] = useState('total'); // 'total', 'eow', 'eom', 'eoq', 'next5', 'next30'
     const [availableTickers, setAvailableTickers] = useState([]);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -135,7 +135,10 @@ const GammaExposurePage = () => {
             let call = 0;
             let put = 0;
 
-            if (horizon === 'eow') {
+            if (horizon === 'total') {
+                call = p.total_call_gex || 0;
+                put = p.total_put_gex || 0;
+            } else if (horizon === 'eow') {
                 call = p.eow_call_gex || p.weekly_call_gex || 0;
                 put = p.eow_put_gex || p.weekly_put_gex || 0;
             } else if (horizon === 'eom') {
@@ -164,9 +167,9 @@ const GammaExposurePage = () => {
     const getEmRange = () => {
         if (!emData?.expirations) return null;
 
-        let key = 'WEEKLY'; // Default mapping
+        let key = 'MONTHLY'; // Default mapping
         if (horizon === 'eow' || horizon === 'next5') key = 'WEEKLY';
-        if (horizon === 'eom' || horizon === 'next30' || horizon === 'eoq') key = 'MONTHLY';
+        if (horizon === 'eom' || horizon === 'next30' || horizon === 'eoq' || horizon === 'total') key = 'MONTHLY';
 
         const exp = emData.expirations[key];
         if (exp) {
@@ -181,6 +184,7 @@ const GammaExposurePage = () => {
     // Calculate Dynamic Title with Date
     const getValidTill = () => {
         if (!data?.group_dates) return null;
+        if (horizon === 'total') return 'All Expirations';
         if (horizon === 'eow') return data.group_dates.eow || data.group_dates.Weekly;
         if (horizon === 'eom') return data.group_dates.eom || data.group_dates.Monthly;
         if (horizon === 'eoq') return data.group_dates.eoq || data.group_dates.Quarterly;
@@ -192,7 +196,7 @@ const GammaExposurePage = () => {
 
     // Helper for display name
     const horizonDisplay = {
-        'eow': 'EOW', 'eom': 'EOM', 'eoq': 'EOQ', 'next5': '+5 Days', 'next30': '+30 Days'
+        'total': 'Total', 'eow': 'EOW', 'eom': 'EOM', 'eoq': 'EOQ', 'next5': '+5 Days', 'next30': '+30 Days'
     };
     const chartTitle = `${horizonDisplay[horizon]} GEX - ${ticker}${validTill ? ` (til ${validTill})` : ''} - ${viewMode === 'split' ? '(Split View)' : '(Net View)'}`;
 
@@ -256,6 +260,7 @@ const GammaExposurePage = () => {
                     {/* Horizon Selector (Moved to right with ticker) */}
                     <div style={{ display: 'flex', backgroundColor: '#0e1525', borderRadius: '6px', padding: '2px', border: '1px solid #203049' }}>
                         {[
+                            { id: 'total', label: 'Total' },
                             { id: 'eow', label: 'EOW' },
                             { id: 'eom', label: 'EOM' },
                             { id: 'eoq', label: 'EOQ' },
@@ -455,6 +460,7 @@ const GammaExposurePage = () => {
                             <tbody>
                                 {(() => {
                                     const horizons = [
+                                        { key: 'total', label: 'Total' },
                                         { key: 'eow', label: 'EOW' },
                                         { key: 'eom', label: 'EOM' },
                                         { key: 'eoq', label: 'EOQ' },

@@ -121,7 +121,7 @@ class TradeProcessor:
         is_sweep = any(c in [95, 'INTERMARKET_SWEEP'] for c in bucket.conditions)
         if is_sweep: tags.append(TradeTag.SWEEP.value)
         
-        if total_size >= 500 and not is_sweep:
+        if total_size >= 200 and not is_sweep:
             tags.append(TradeTag.BLOCK.value)
             
         if bucket.count > 1 and len(bucket.exchanges) == 1 and not is_sweep:

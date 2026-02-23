@@ -1327,11 +1327,11 @@ class ThetaStreamer:
                                     delta_flow -= premium
 
                                 # Heuristic Tags
+                                # Polling path: only BLOCK (size-based). SWEEP requires
+                                # OPRA condition codes only available in real-time stream.
                                 tags = []
                                 if delta_vol >= 200:
                                     tags.append("BLOCK")
-                                elif delta_vol >= 30 and premium >= 150_000:
-                                    tags.append("SWEEP")
 
                                 # Heuristic Side from price movement
                                 prev_close = prev_data.get("close", 0.0)

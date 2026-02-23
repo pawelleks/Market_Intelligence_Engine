@@ -423,10 +423,41 @@ def _merge_data_sources(yf_df: pd.DataFrame, poly_df: pd.DataFrame) -> pd.DataFr
     return merged
 
 
+def _is_weekend() -> bool:
+    """Check if today is Saturday (5) or Sunday (6)."""
+    return date.today().weekday() >= 5
+
+
 def _process_single_ticker_hybrid(ticker: str) -> Dict[str, Any]:
     """
     Process ticker using Hybrid Merge strategy.
+    On weekends, validates data quality before overwriting existing GEX data.
     """
+    # Weekend guard: if existing fresh data exists, skip recalculation
+    # yfinance option chains are unreliable on weekends
+    if _is_weekend():
+        from .storage import load_gex_profile
+        existing = load_gex_profile(ticker)
+        if existing and existing.get('profile'):
+            existing_date = existing.get('date', '')
+            # Check if existing data is from a recent weekday (within 3 days)
+            try:
+                ex_date = datetime.strptime(existing_date, "%Y-%m-%d").date()
+                days_old = (date.today() - ex_date).days
+                if days_old <= 3:
+                    # Count non-zero total rows as quality metric
+                    nz_total = sum(1 for p in existing['profile']
+                                   if p.get('total_call_gex', 0) or p.get('total_put_gex', 0))
+                    if nz_total >= 50:
+                        LOG.info(f"Weekend skip for {ticker}: existing data from {existing_date} "
+                                 f"has {nz_total} non-zero rows, preserving.")
+                        return {"status": "ok"}
+                    else:
+                        LOG.info(f"Weekend: existing {ticker} data from {existing_date} is sparse "
+                                 f"({nz_total} rows), will recalculate.")
+            except (ValueError, TypeError):
+                pass
+
     # 1. Fetch Spot (YFinance)
     try:
         spot_res = _fetch_spot_price(ticker)
@@ -468,7 +499,20 @@ def _process_single_ticker_hybrid(ticker: str) -> Dict[str, Any]:
              # LOG.warning(f"Sample: {working_df[['strike','type','oi','iv']].head()}")
              
         if gex_result:
-            from .storage import save_gex_profile
+            # Quality gate: don't overwrite rich data with sparse results
+            nz_new = sum(1 for p in gex_result.get('profile', [])
+                         if p.get('total_call_gex', 0) or p.get('total_put_gex', 0))
+
+            from .storage import load_gex_profile, save_gex_profile
+            existing = load_gex_profile(ticker)
+            if existing and existing.get('profile'):
+                nz_old = sum(1 for p in existing['profile']
+                             if p.get('total_call_gex', 0) or p.get('total_put_gex', 0))
+                if nz_new < nz_old * 0.3 and nz_old >= 50:
+                    LOG.warning(f"Quality gate: {ticker} new data has {nz_new} non-zero rows "
+                                f"vs existing {nz_old}. Keeping existing data.")
+                    return {"status": "ok"}
+
             save_gex_profile(ticker, gex_result)
             return {"status": "ok"}
         else:

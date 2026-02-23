@@ -198,10 +198,14 @@ const GammaExposurePage = () => {
 
     // Calculate Zoom Range (Active Horizon EM + Buffer)
     const getZoomRange = () => {
+        const spot = data?.spot_price;
+        // Minimum sensible zoom width: 3% of spot price (e.g., ~$20 for SPY at $690)
+        const minWidth = (spot && typeof spot === 'number') ? spot * 0.03 : 10;
+
         // 1. Prioritize Valid EM for the CURRENT horizon so it's always visible
         if (emRange && typeof emRange.low === 'number' && typeof emRange.high === 'number') {
             const width = emRange.high - emRange.low;
-            if (width > 0.1) {
+            if (width >= minWidth) {
                 const buffer = width * 0.15; // 15% buffer
                 return [emRange.low - buffer, emRange.high + buffer];
             }
@@ -210,23 +214,19 @@ const GammaExposurePage = () => {
         // 2. Fallback strategy: Monthly -> Weekly -> ODTE
         const m = emData?.expirations?.MONTHLY || emData?.expirations?.WEEKLY || emData?.expirations?.ODTE;
 
-        // Strict safety check: Need m object AND defined numeric ranges
-        if (!m || typeof m.upper_range !== 'number' || typeof m.lower_range !== 'number') {
-            return null;
-        }
-
-        const width = m.upper_range - m.lower_range;
-
-        // Safety against zero/negative width or tiny width
-        if (width < 0.1) {
-            if (data?.spot_price && typeof data.spot_price === 'number') {
-                return [data.spot_price * 0.95, data.spot_price * 1.05];
+        if (m && typeof m.upper_range === 'number' && typeof m.lower_range === 'number') {
+            const width = m.upper_range - m.lower_range;
+            if (width >= minWidth) {
+                const buffer = width * 0.10;
+                return [m.lower_range - buffer, m.upper_range + buffer];
             }
-            return null;
         }
 
-        const buffer = width * 0.10;
-        return [m.lower_range - buffer, m.upper_range + buffer];
+        // 3. Fallback to spot ± 5% when EM range is missing or too narrow
+        if (spot && typeof spot === 'number') {
+            return [spot * 0.95, spot * 1.05];
+        }
+        return null;
     };
     const zoomRange = getZoomRange();
 

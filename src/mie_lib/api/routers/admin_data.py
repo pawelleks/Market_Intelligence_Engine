@@ -209,20 +209,20 @@ def get_gex_status() -> Dict[str, Any]:
         return {"status": "error", "message": str(e), "data": []}
 
 def _run_orchestrator_task():
-    """Background task wrapper"""
+    """Background task wrapper — streams output to docker logs."""
     logger = logging.getLogger("uvicorn")
     logger.info("API: Triggering orchestrator.sh ...")
     try:
-        # Assumes /app/cli/orchestrator.sh exists and we are in /app
+        # Stream stdout/stderr to container logs instead of capturing
+        # so pipeline [RUN]/[SKIP]/✅/❌ markers are visible in `docker logs`
         result = subprocess.run(
-            ["bash", "cli/orchestrator.sh", "MANUAL"], 
-            capture_output=True, 
+            ["bash", "cli/orchestrator.sh", "MANUAL"],
             text=True
         )
         if result.returncode != 0:
-            logger.error(f"Orchestrator Failed: {result.stderr}")
+            logger.error(f"Orchestrator finished with exit code {result.returncode}")
         else:
-            logger.info(f"Orchestrator Success: {result.stdout[:200]}...") # Log first 200 chars
+            logger.info("Orchestrator finished successfully.")
     except Exception as e:
         logger.error(f"Orchestrator Exception: {e}")
 

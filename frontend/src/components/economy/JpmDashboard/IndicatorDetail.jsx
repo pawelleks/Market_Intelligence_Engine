@@ -258,7 +258,9 @@ const IndicatorDetail = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 {/* Current Value Card with Last Reported */}
                 <div className="p-3 bg-gray-900/50 border border-gray-700 rounded-lg">
-                    <div className="text-xs text-gray-400 uppercase tracking-wider">Current Value</div>
+                    <div className="text-xs text-gray-400 uppercase tracking-wider">
+                        {category === 'gdp' ? 'Current Growth Rate' : 'Current Value'}
+                    </div>
                     <div className="text-2xl font-bold text-cyan-400 mt-1">
                         {formatValueWithUnit(data.primary_metric?.current, data.primary_metric?.unit)}
                         {/* Change Indicator */}
@@ -312,9 +314,12 @@ const IndicatorDetail = () => {
                     </div>
                     <div className="text-sm text-gray-400 mt-2">
                         {data.primary_metric?.historical_avg
-                            ? `${data.primary_metric.current > data.primary_metric.historical_avg ? '+' : ''}${((data.primary_metric.current - data.primary_metric.historical_avg) / data.primary_metric.historical_avg * 100).toFixed(1)}% vs 10Y Mean`
+                            ? `${data.primary_metric.current > data.primary_metric.historical_avg ? '+' : ''}${((data.primary_metric.current - data.primary_metric.historical_avg) / Math.abs(data.primary_metric.historical_avg) * 100).toFixed(1)}% vs 10Y Mean`
                             : 'Relative to 10-year mean'
                         }
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                        Compares current {data.primary_metric?.unit === '%' ? 'rate' : 'level'} to its 10-year average
                     </div>
                 </div>
             </div>
@@ -329,9 +334,16 @@ const IndicatorDetail = () => {
                         <h3 className="text-xl font-bold text-white">
                             {category === 'policy' ? 'Federal Funds Rate History' : `${data.primary_metric?.name} History`}
                         </h3>
-                        <p className="text-xs text-gray-500">
-                            {data.primary_metric?.unit} • Seasonal Adjustment: {data.primary_metric?.sa ? 'True' : 'False'}
-                        </p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <span>{data.primary_metric?.unit}</span>
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-medium ${
+                                data.primary_metric?.sa
+                                    ? 'border-green-600/50 text-green-400 bg-green-900/20'
+                                    : 'border-gray-600 text-gray-400 bg-gray-800/50'
+                            }`}>
+                                {data.primary_metric?.sa ? 'Seasonally Adjusted' : 'Not Seasonally Adjusted'}
+                            </span>
+                        </div>
                     </div>
 
                     <div className="flex bg-gray-800/50 rounded-lg p-1">
@@ -617,7 +629,9 @@ const IndicatorDetail = () => {
 
                             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                                 <div className="col-span-2">
-                                    <div className="text-xs text-gray-500">Current Value</div>
+                                    <div className="text-xs text-gray-500">
+                                        {data.primary_metric?.unit === '%' ? 'Current Rate' : 'Current Level'}
+                                    </div>
                                     <div className="text-lg font-bold text-cyan-400">
                                         {formatValueWithUnit(data.primary_metric.distribution.current_value, data.primary_metric.unit)}
                                     </div>
@@ -655,14 +669,16 @@ const IndicatorDetail = () => {
                                 </div>
 
                                 <div className="col-span-2 border-t border-gray-700 pt-2">
-                                    <div className="text-xs text-gray-500">vs Mean</div>
-                                    <div className={`text-sm font-semibold ${data.primary_metric.distribution.current_value > data.primary_metric.distribution.mean_value
-                                        ? 'text-green-400'
-                                        : 'text-red-400'
-                                        }`}>
-                                        {((data.primary_metric.distribution.current_value - data.primary_metric.distribution.mean_value) /
-                                            data.primary_metric.distribution.mean_value * 100).toFixed(1)}%
-                                    </div>
+                                    <div className="text-xs text-gray-500">Above/Below Mean</div>
+                                    {(() => {
+                                        const diff = data.primary_metric.distribution.current_value - data.primary_metric.distribution.mean_value;
+                                        const pct = (diff / Math.abs(data.primary_metric.distribution.mean_value) * 100);
+                                        return (
+                                            <div className={`text-sm font-semibold ${diff > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {pct > 0 ? '+' : ''}{pct.toFixed(1)}% vs historical mean
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         </div>
@@ -768,9 +784,14 @@ const IndicatorDetail = () => {
 
             {/* AI Analysis Section */}
             <div className="mb-12 p-6 bg-gray-900/50 border border-gray-700 rounded-lg shadow-lg">
-                <h3 className="text-xl font-bold text-white mb-4 flex items-center">
+                <h3 className="text-xl font-bold text-white mb-2 flex items-center">
                     <span className="mr-2">🤖</span> AI-Generated Insights
                 </h3>
+                {data.insights?.generated_at && (
+                    <div className="text-xs text-gray-500 mb-4">
+                        Generated based on data as of {formatReportedDate(data.insights.generated_at)}
+                    </div>
+                )}
 
                 <div className="prose prose-invert max-w-none">
                     <div className="text-gray-300 leading-relaxed mb-6 bg-black/20 p-4 rounded border border-gray-800">

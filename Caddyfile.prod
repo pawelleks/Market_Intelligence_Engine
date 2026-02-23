@@ -1,5 +1,10 @@
-blindmonkey.io {
+{
+    email admin@example.com
+}
+
+159.203.66.39.nip.io, blindmonkey.io, www.blindmonkey.io {
     header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Xss-Protection "1; mode=block"
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
@@ -7,8 +12,4 @@ blindmonkey.io {
     }
     reverse_proxy /api/* mie-api:8000
     reverse_proxy * mie-web:80
-}
-
-www.blindmonkey.io {
-    redir https://blindmonkey.io{uri} permanent
 }

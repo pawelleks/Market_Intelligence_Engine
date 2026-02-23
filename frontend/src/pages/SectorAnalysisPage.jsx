@@ -1,12 +1,20 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import SectorPerformance from '../components/SectorPerformance';
 import SectorTrends from '../components/SectorTrends';
 import SectorCorrelations from '../components/SectorCorrelations';
 import SectorTreemap from '../components/SectorTreemap';
 
+const VALID_TABS = ['performance', 'tab2', 'tab3', 'tab4', 'tab5'];
+
 const SectorAnalysisPage = () => {
-    // Tab State
-    const [activeTab, setActiveTab] = useState('performance');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const activeTab = VALID_TABS.includes(tabParam) ? tabParam : 'performance';
+
+    const setActiveTab = (tab) => {
+        setSearchParams(tab === 'performance' ? {} : { tab });
+    };
 
     // Tab Definitions
     // Placeholder for future tabs (5 expected)

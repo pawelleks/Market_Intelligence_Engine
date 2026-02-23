@@ -29,25 +29,27 @@ LOG = logging.getLogger(__name__)
 INSIGHTS_DIR = Path("/app/data/reports/economic")
 
 def _load_cached_insights(indicator_id: str, tier: int) -> Optional[Dict]:
-    """Load cached AI insights from file"""
-    # Try both /app path and relative path
+    """Load cached AI insights from file. Returns insights dict with 'generated_at' timestamp."""
     possible_dirs = [
         Path("/app/data/reports/economic"),
         Path("data/reports/economic")
     ]
-    
+
     for insights_dir in possible_dirs:
         insight_file = insights_dir / f"{indicator_id}_tier{tier}_latest.json"
         if insight_file.exists():
             try:
-                import json
                 with open(insight_file, 'r') as f:
                     data = json.load(f)
-                return data.get('insights', {})
+                insights = data.get('insights', {})
+                # Attach file modification time as generation timestamp
+                mtime = datetime.fromtimestamp(insight_file.stat().st_mtime)
+                insights['generated_at'] = mtime.isoformat()
+                return insights
             except Exception as e:
                 LOG.error(f"Error loading insights from {insight_file}: {e}")
             return None
-    
+
     LOG.debug(f"No cached insights found for {indicator_id} tier {tier}")
     return None
 
@@ -906,33 +908,62 @@ async def get_indicator_detail(
     
     # Calculate distribution
     distribution = calculate_distribution(clean_df[primary_col], float(current_value))
-    
+
     # Determine unit for primary metric
     raw_primary_unit = UNITS.get(primary_col, 'Index')
     primary_unit = standardize_unit(primary_col, raw_primary_unit)
 
-    # Build primary metric
-    # Build primary metric
-    
     # Scale primary current value
     primary_display_value = float(current_value)
     if primary_col in SCALING_FACTORS:
         primary_display_value = primary_display_value * SCALING_FACTORS[primary_col]
-        
-    # GDP FIX for Detail Page
+
+    # GDP override: switch from level to QoQ annualized growth rate
+    # Must propagate to distribution, historical_avg, yoy changes, and trend
     if category == 'gdp':
-         # Calculate growth metric
-         g_metrics = calculate_growth_rates(clean_df[primary_col], 'quarterly')
-         if g_metrics['last_period_pct'] is not None:
-             primary_display_value = g_metrics['last_period_pct']
-             primary_unit = "%"
-             
+        g_metrics = calculate_growth_rates(clean_df[primary_col], 'quarterly')
+        if g_metrics['last_period_pct'] is not None:
+            primary_display_value = g_metrics['last_period_pct']
+            primary_unit = "%"
+
+            # Compute full QoQ annualized growth rate series
+            gdp_level_series = clean_df[primary_col]
+            growth_rate_series = gdp_level_series.pct_change(periods=1) * 4 * 100
+            growth_rate_series = growth_rate_series.dropna()
+
+            # Override distribution with growth rates
+            distribution = calculate_distribution(growth_rate_series, primary_display_value)
+
+            # Override historical_avg with 10Y average growth rate
+            growth_dates = clean_df.loc[growth_rate_series.index, 'date']
+            hist_growth_10y = growth_rate_series[growth_dates >= ten_years_ago]
+            historical_avg = float(hist_growth_10y.mean()) if not hist_growth_10y.empty else None
+
+            # Override trend using growth rate series
+            trend_direction = determine_trend(growth_rate_series)
+
+            # Override YoY changes (growth rate 4 quarters ago vs now)
+            if len(growth_rate_series) >= 5:
+                current_growth = growth_rate_series.iloc[-1]
+                prev_growth = growth_rate_series.iloc[-5]
+                yoy_absolute_change = float(current_growth - prev_growth)
+                yoy_change = ((current_growth - prev_growth) / abs(prev_growth)) * 100 if prev_growth != 0 else None
+            else:
+                yoy_absolute_change = None
+                yoy_change = None
+
+    # Seasonal adjustment metadata (from FRED series properties)
+    SA_SERIES = {'GDPC1', 'PCE', 'PCEC96', 'CPIAUCSL', 'CPILFESL', 'PCEPI', 'PCEPILFE',
+                 'UNRATE', 'PAYEMS', 'HOUST', 'PERMIT', 'INDPRO', 'RSAFS', 'BOPGSTB'}
+    is_sa = primary_col in SA_SERIES
+
     primary_metric = {
         'series_id': primary_col,
         'name': DISPLAY_NAMES[category],
         'current': primary_display_value if pd.notna(primary_display_value) else None,
         'current_date': current_date,
         'unit': primary_unit,
+        'sa': is_sa,
         'yoy_change': float(yoy_change) if yoy_change is not None else None,
         'yoy_absolute_change': float(yoy_absolute_change) if yoy_absolute_change is not None else None,
         'percentile': float(percentile),
@@ -940,8 +971,8 @@ async def get_indicator_detail(
         'trend_direction': trend_direction,
         'historical_avg': historical_avg,
         'data': primary_data,
-        'moving_average_10y': moving_average_10y,  # NEW
-        'distribution': distribution  # NEW
+        'moving_average_10y': moving_average_10y,
+        'distribution': distribution
     }
     
     # Build secondary metrics
@@ -1054,12 +1085,14 @@ async def get_indicator_detail(
     
     if tier2_insights:
         insights = {
+            'generated_at': tier2_insights.get('generated_at'),
             'detailed_insight': tier2_insights.get('detailed_insight', 'Analysis pending...'),
             'key_takeaways': tier2_insights.get('key_takeaways', []),
             'business_impact': tier2_insights.get('business_impact', 'Analysis pending...')
         }
     else:
         insights = {
+            'generated_at': None,
             'detailed_insight': 'Analysis pending...',
             'key_takeaways': [],
             'business_impact': 'Analysis pending...'

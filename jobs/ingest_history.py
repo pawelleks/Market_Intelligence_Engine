@@ -19,7 +19,7 @@ def fetch_stock_eod(client: httpx.Client, root: str, start: str, end: str) -> pd
     """Fetch EOD candles for a stock/ETF via /v2/hist/stock/eod."""
     url = f"{THETA_URL}/v2/hist/stock/eod"
     params = {"root": root, "start_date": start, "end_date": end}
-    resp = client.get(url, params=params, timeout=30.0)
+    resp = client.get(url, params=params, timeout=120.0)
     resp.raise_for_status()
     data = resp.json()
 
@@ -44,7 +44,7 @@ def fetch_index_price(client: httpx.Client, root: str, start: str, end: str) -> 
         "end_date": end,
         "ivl": "3600000",  # 1-hour buckets
     }
-    resp = client.get(url, params=params, timeout=30.0)
+    resp = client.get(url, params=params, timeout=120.0)
     resp.raise_for_status()
     data = resp.json()
 

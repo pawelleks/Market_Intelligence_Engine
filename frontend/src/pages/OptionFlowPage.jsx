@@ -148,6 +148,10 @@ export default function OptionFlowPage() {
     const blinkTimersRef = useRef([]);
     // How To Read modal
     const [showHelp, setShowHelp] = useState(false);
+    // Pagination state
+    const [oldestTradeId, setOldestTradeId] = useState(null);
+    const [hasMore, setHasMore] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
 
     // Stats for the single selected ticker
     const aggregateStats = useMemo(() => {
@@ -210,6 +214,14 @@ export default function OptionFlowPage() {
                     raw.reverse();
                     setTrades(raw);
                     setIsLoadingHistory(false);
+                    // Track oldest trade ID for pagination cursor
+                    if (raw.length > 0) {
+                        const oldest = raw[raw.length - 1];
+                        setOldestTradeId(oldest._db_id || null);
+                        setHasMore(raw.length >= 100);
+                    } else {
+                        setHasMore(false);
+                    }
                 } else if (msg.type === "SNAPSHOT_TRADES") {
                     // Legacy/Fallback snapshot — reverse so newest is at top
                     const raw = msg.trades.slice(-500);
@@ -231,7 +243,7 @@ export default function OptionFlowPage() {
 
                     setTrades(prev => {
                         const updated = [{ ...msg, _rowKey: tradeKey }, ...prev];
-                        if (updated.length > 500) updated.pop();
+                        if (updated.length > 2000) updated.pop();
                         return updated;
                     });
 
@@ -287,6 +299,33 @@ export default function OptionFlowPage() {
         sendFilterUpdate(selectedTicker, minPremium);
     }
 
+    // Load More: fetch older trades via REST cursor pagination
+    const loadMoreTrades = async () => {
+        if (!oldestTradeId || loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const params = new URLSearchParams({
+                before_id: oldestTradeId,
+                limit: '100',
+                min_value: String(minPremium),
+                ticker: selectedTicker,
+            });
+            const res = await fetch(`/api/option-flow/page?${params}`);
+            const data = await res.json();
+            const older = data.trades || [];
+            if (older.length > 0) {
+                setTrades(prev => [...prev, ...older]);
+                const last = older[older.length - 1];
+                setOldestTradeId(last._db_id || null);
+            }
+            setHasMore(data.has_more === true);
+        } catch (e) {
+            console.error('Load more failed:', e);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
+
     // -- Mode switching --
     const switchToHistory = () => {
         wsRef.current?.close();
@@ -301,6 +340,8 @@ export default function OptionFlowPage() {
         setHistoryStats(null);
         setSelectedDate(null);
         setTrades([]);
+        setOldestTradeId(null);
+        setHasMore(true);
         setWsKey(k => k + 1);  // triggers fresh WS connection via useEffect([wsKey])
     };
 
@@ -748,6 +789,31 @@ export default function OptionFlowPage() {
                             )}
                         </tbody>
                     </table>
+
+                    {/* Load More Button — LIVE mode only */}
+                    {mode === 'LIVE' && hasMore && trades.length > 0 && (
+                        <div className="flex justify-center py-4 border-t border-slate-800">
+                            <button
+                                onClick={loadMoreTrades}
+                                disabled={loadingMore}
+                                className="px-6 py-2 text-xs font-bold rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loadingMore ? (
+                                    <span className="flex items-center gap-2">
+                                        <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                        Loading...
+                                    </span>
+                                ) : (
+                                    'Load More'
+                                )}
+                            </button>
+                        </div>
+                    )}
+                    {mode === 'LIVE' && !hasMore && trades.length > 0 && (
+                        <div className="text-center py-3 text-xs text-slate-600">
+                            All trades loaded for this session
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

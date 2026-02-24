@@ -38,8 +38,10 @@ def init_db():
                     raw_json TEXT
                 )
             """)
-            # Add index for session_date to speed up intraday queries
+            # Add indexes for fast intraday queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_date ON trades(session_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_value ON trades(session_date, value)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_root ON trades(session_date, root)")
             conn.commit()
             conn.close()
             LOG.info(f"Option Flow DB initialized at {DB_PATH}")
@@ -96,35 +98,108 @@ def insert_trade(trade_dict: dict):
         # Log but don't crash the streamer
         LOG.error(f"Failed to insert trade into SQLite: {e}")
 
-def get_trades_since_open(date_str: str = None):
+def get_trades_since_open(date_str: str = None, min_value: float = 0,
+                          tickers: list = None, limit: int = 2000):
     """
-    Returns all trades from a specific date. 
+    Returns trades from a specific date, filtered at the SQL level.
     Defaults to today's current session date in ET.
+
+    Args:
+        date_str: Session date (YYYY-MM-DD). Defaults to today ET.
+        min_value: Minimum trade premium ($). Filters at SQL level.
+        tickers: List of root symbols to include. None = all.
+        limit: Max rows returned (most recent first, reversed to ASC).
     """
     if not date_str:
         et_tz = pytz.timezone("America/New_York")
         date_str = datetime.now(et_tz).strftime("%Y-%m-%d")
-        
+
     try:
         with _lock:
             conn = sqlite3.connect(DB_PATH)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT raw_json FROM trades WHERE session_date = ? ORDER BY id ASC", (date_str,))
+
+            query = "SELECT id, raw_json FROM trades WHERE session_date = ?"
+            params = [date_str]
+
+            if min_value > 0:
+                query += " AND value >= ?"
+                params.append(min_value)
+
+            if tickers:
+                placeholders = ",".join("?" * len(tickers))
+                query += f" AND root IN ({placeholders})"
+                params.extend(tickers)
+
+            # Get most recent N rows, then reverse to chronological order
+            query += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, params)
             rows = cursor.fetchall()
             conn.close()
-            
-            # Reconstruct original trade objects from raw_json
+
+            # Reconstruct and reverse to chronological (oldest first)
             trades = []
-            for row in rows:
+            for row in reversed(rows):
                 try:
-                    trades.append(json.loads(row["raw_json"]))
+                    trade = json.loads(row["raw_json"])
+                    trade["_db_id"] = row["id"]
+                    trades.append(trade)
                 except:
                     continue
             return trades
     except Exception as e:
         LOG.error(f"Failed to query trades from SQLite: {e}")
         return []
+
+def get_trades_page(before_id: int, min_value: float = 0,
+                    ticker: str = None, limit: int = 100):
+    """
+    Cursor-based pagination: returns trades with id < before_id.
+    Returns trades in reverse chronological order (newest first).
+    """
+    et_tz = pytz.timezone("America/New_York")
+    date_str = datetime.now(et_tz).strftime("%Y-%m-%d")
+
+    try:
+        with _lock:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            query = "SELECT id, raw_json FROM trades WHERE session_date = ? AND id < ?"
+            params = [date_str, before_id]
+
+            if min_value > 0:
+                query += " AND value >= ?"
+                params.append(min_value)
+
+            if ticker:
+                query += " AND root = ?"
+                params.append(ticker)
+
+            query += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+
+            trades = []
+            for row in rows:
+                try:
+                    trade = json.loads(row["raw_json"])
+                    trade["_db_id"] = row["id"]
+                    trades.append(trade)
+                except:
+                    continue
+            return trades
+    except Exception as e:
+        LOG.error(f"Failed to query trades page from SQLite: {e}")
+        return []
+
 
 def get_available_dates():
     """Returns a list of distinct session dates present in the database."""

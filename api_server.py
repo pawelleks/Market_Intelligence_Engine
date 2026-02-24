@@ -1174,14 +1174,13 @@ async def websocket_option_flow(websocket: WebSocket):
                 initial_stats["data"][t] = s # Send raw dict, frontend can parse
         await websocket.send_json(initial_stats)
         
-        # 2. History (Database-backed for full intraday persistence)
-        history_raw = db.get_trades_since_open()
-        history = []
-        for trade in history_raw:
-            # Apply user filters to history
-            if trade.get("root") in tickers and trade.get("value", 0) >= min_premium:
-                history.append(trade)
-        
+        # 2. History (Database-backed, filtered at SQL level for performance)
+        history = db.get_trades_since_open(
+            min_value=min_premium,
+            tickers=list(tickers),
+            limit=100
+        )
+
         if history:
              await websocket.send_json({"type": "history", "trades": history})
 
@@ -1294,6 +1293,31 @@ async def get_option_flow_history(
         "put_vol":   sum(t.get("size", 0) for t in ticker_trades if t.get("right") == "P"),
     }
     return {"trades": filtered, "stats": stats}
+
+
+@app.get("/api/option-flow/page")
+async def get_option_flow_page(
+    before_id: int,
+    limit: int = 100,
+    min_value: float = 100000,
+    ticker: str = None,
+):
+    """
+    Mode: REAL-TIME
+    Data Source: SQLite option_flow.db
+    Response Time: <100ms
+
+    Cursor-based pagination for option flow trades.
+    Returns trades older than `before_id`, filtered by premium and ticker.
+    """
+    from mie_lib.realtime import db
+    trades = db.get_trades_page(
+        before_id=before_id,
+        min_value=min_value,
+        ticker=ticker,
+        limit=limit,
+    )
+    return {"trades": trades, "has_more": len(trades) == limit}
 
 
 @app.get("/api/v1/dcs/history/{ticker}")

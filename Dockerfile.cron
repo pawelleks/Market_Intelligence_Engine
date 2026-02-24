@@ -45,12 +45,12 @@ COPY jobs/ ./jobs/
 COPY config/ ./config/
 
 # Create crontab
-# 17:00 EST = 22:00 UTC (Standard)
-# 0 22 * * *
-RUN echo "0 22 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab && \
-    echo "10 22 * * * python /app/jobs/process_expected_moves_static.py >> /proc/1/fd/1 2>&1" >> crontab && \
-    echo "30 22 * * * python /app/jobs/fetch_market_eod_chains.py >> /proc/1/fd/1 2>&1" >> crontab && \
-    echo "35 22 * * * python /app/jobs/process_implied_probabilities.py >> /proc/1/fd/1 2>&1" >> crontab && \
+# 19:00 EST = 00:00 UTC (Standard)
+# 0 0 * * *
+RUN echo "0 0 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab && \
+    echo "10 0 * * * python /app/jobs/process_expected_moves_static.py >> /proc/1/fd/1 2>&1" >> crontab && \
+    echo "30 0 * * * python /app/jobs/fetch_market_eod_chains.py >> /proc/1/fd/1 2>&1" >> crontab && \
+    echo "35 0 * * * python /app/jobs/process_implied_probabilities.py >> /proc/1/fd/1 2>&1" >> crontab && \
     echo "0 3 * * * /app/scripts/economic_cron.sh >> /proc/1/fd/1 2>&1" >> crontab
 
 ENV PYTHONPATH=/app/src

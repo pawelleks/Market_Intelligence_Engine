@@ -471,7 +471,7 @@ export default function OptionFlowPage() {
                                     ['Side: BOUGHT', 'Option price rose vs prev poll — buyer was the aggressor (paid the ask).'],
                                     ['Side: SOLD', 'Option price fell vs prev poll — seller was the aggressor (hit the bid).'],
                                     ['Side: MID', 'Price was flat — trade likely negotiated at mid, no clear direction.'],
-                                    ['Sentiment', 'BULLISH = Call option bought. BEARISH = Put option bought.'],
+                                    ['Sentiment', 'BULLISH = Call Bought or Put Sold. BEARISH = Call Sold or Put Bought.'],
                                     ['Premium', 'Total dollar value of the trade: Price × Contracts × 100.'],
                                     ['Contracts', 'Number of option contracts traded. 1 contract = 100 shares.'],
                                     ['Time', 'Your local time when the trade was detected.'],
@@ -738,8 +738,15 @@ export default function OptionFlowPage() {
                                         ? (tagStyles[firstTag] || 'bg-slate-700/40 text-slate-400 border border-slate-600/30')
                                         : '';
 
-                                    // Sentiment badge
-                                    const sentiment = trade.sentiment || (trade.right === 'C' ? 'BULLISH' : 'BEARISH');
+                                    // Sentiment badge (derived logically from option type and execution side)
+                                    let sentiment = trade.sentiment;
+                                    if (!sentiment || sentiment === 'NEUTRAL' || sentiment === '—') {
+                                        if (isCall) {
+                                            sentiment = side === 'BID' ? 'BEARISH' : 'BULLISH'; // Call Sold = Bearish, Call Bought/Mid = Bullish
+                                        } else {
+                                            sentiment = side === 'BID' ? 'BULLISH' : 'BEARISH'; // Put Sold = Bullish, Put Bought/Mid = Bearish
+                                        }
+                                    }
 
                                     return (
                                         <tr

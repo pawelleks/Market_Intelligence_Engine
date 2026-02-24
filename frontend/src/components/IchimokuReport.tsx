@@ -137,9 +137,11 @@ const IchimokuReport = () => {
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Initialize xaxisRange if null
-    if (!xaxisRange && data) {
-        setXaxisRange([zoomStartStr, todayStr]);
-    }
+    useEffect(() => {
+        if (!xaxisRange && data) {
+            setXaxisRange([zoomStartStr, todayStr]);
+        }
+    }, [data, xaxisRange, zoomStartStr, todayStr]);
 
     // Dynamic Y-Axis Scaling Effect
     useEffect(() => {

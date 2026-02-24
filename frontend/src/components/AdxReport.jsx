@@ -12,6 +12,9 @@ const AdxReport = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [xaxisRange, setXaxisRange] = useState(null);
+    const [yaxisRange, setYaxisRange] = useState(null);
+    const [y2axisRange, setY2axisRange] = useState(null);
 
     useEffect(() => {
         // Fetch tickers
@@ -126,6 +129,11 @@ const AdxReport = () => {
         const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
         const todayStr = new Date().toISOString().split('T')[0];
 
+        // Initialize xaxisRange if null
+        if (!xaxisRange && data) {
+            setXaxisRange([zoomStartStr, todayStr]);
+        }
+
         return {
             autosize: true,
             title: `${ticker} - Price vs ADX/DMI`,
@@ -138,7 +146,8 @@ const AdxReport = () => {
                 showgrid: true,
                 domain: [0, 1],
                 anchor: 'y2',
-                range: [zoomStartStr, todayStr],
+                autorange: false,
+                range: xaxisRange || [zoomStartStr, todayStr],
                 rangeslider: { visible: true, thickness: 0.05, bgcolor: '#0f172a' },
                 type: 'date'
                 // Creating standard stacked subplots manually via axis domains:
@@ -148,14 +157,18 @@ const AdxReport = () => {
                 domain: [0.6, 1], // Top 40%
                 gridcolor: '#334155',
                 showgrid: true,
-                title: 'Price'
+                title: 'Price',
+                autorange: yaxisRange ? false : true,
+                range: yaxisRange
             },
             // Bottom Plot (ADX)
             yaxis2: {
                 domain: [0, 0.5], // Bottom 50%
                 gridcolor: '#334155',
                 showgrid: true,
-                title: 'ADX/DMI'
+                title: 'ADX/DMI',
+                autorange: y2axisRange ? false : true,
+                range: y2axisRange
             },
             margin: { l: 50, r: 20, t: 40, b: 40 },
             shapes: [
@@ -176,6 +189,64 @@ const AdxReport = () => {
                 }
             ]
         };
+    };
+
+    // Dynamic Y-Axis Scaling Effect
+    useEffect(() => {
+        if (!data || !data.history || !xaxisRange) return;
+
+        const visibleData = data.history.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
+        if (visibleData.length === 0) return;
+
+        let minPrice = Infinity;
+        let maxPrice = -Infinity;
+        let minAdx = Infinity;
+        let maxAdx = -Infinity;
+
+        visibleData.forEach(d => {
+            const priceVals = [d.close].filter(v => v != null);
+            if (priceVals.length > 0) {
+                const localMinP = Math.min(...priceVals);
+                const localMaxP = Math.max(...priceVals);
+                if (localMinP < minPrice) minPrice = localMinP;
+                if (localMaxP > maxPrice) maxPrice = localMaxP;
+            }
+
+            const adxVals = [d.adx, d.plus_di, d.minus_di].filter(v => v != null);
+            if (adxVals.length > 0) {
+                const localMinA = Math.min(...adxVals);
+                const localMaxA = Math.max(...adxVals);
+                if (localMinA < minAdx) minAdx = localMinA;
+                if (localMaxA > maxAdx) maxAdx = localMaxA;
+            }
+        });
+
+        if (minPrice !== Infinity && maxPrice !== -Infinity) {
+            const paddingPrice = Math.max((maxPrice - minPrice) * 0.05, 1);
+            setYaxisRange([minPrice - paddingPrice, maxPrice + paddingPrice]);
+        }
+
+        if (minAdx !== Infinity && maxAdx !== -Infinity) {
+            const paddingAdx = Math.max((maxAdx - minAdx) * 0.05, 1);
+            setY2axisRange([minAdx - paddingAdx, maxAdx + paddingAdx]);
+        }
+    }, [xaxisRange, data]);
+
+    const handleRelayout = (event) => {
+        setTimeout(() => {
+            const zoomStartDate = new Date();
+            zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+            const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            if (event['xaxis.range[0]'] && event['xaxis.range[1]']) {
+                setXaxisRange([event['xaxis.range[0]'], event['xaxis.range[1]']]);
+            } else if (event['xaxis.range']) {
+                setXaxisRange(event['xaxis.range']);
+            } else if (event['xaxis.autorange'] === true) {
+                setXaxisRange([zoomStartStr, todayStr]);
+            }
+        }, 0);
     };
 
     // --- Conclusion Logic ---
@@ -357,6 +428,7 @@ const AdxReport = () => {
                             layout={getLayout()}
                             useResizeHandler={true}
                             style={{ width: '100%', height: '100%' }}
+                            onRelayout={handleRelayout}
                         />
                     </div>
                 </>

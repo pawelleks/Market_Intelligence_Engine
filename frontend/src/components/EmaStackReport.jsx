@@ -12,6 +12,8 @@ const EmaStackReport = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [xaxisRange, setXaxisRange] = useState(null);
+    const [yaxisRange, setYaxisRange] = useState(null);
 
     useEffect(() => {
         // Fetch tickers
@@ -137,6 +139,50 @@ const EmaStackReport = () => {
     zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
     const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
     const todayStr = new Date().toISOString().split('T')[0];
+
+    // Initialize xaxisRange if null
+    if (!xaxisRange && data) {
+        setXaxisRange([zoomStartStr, todayStr]);
+    }
+
+    // Dynamic Y-Axis Scaling Effect
+    useEffect(() => {
+        if (!data || !data.history || !xaxisRange) return;
+
+        const visibleData = data.history.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
+        if (visibleData.length === 0) return;
+
+        let minV = Infinity;
+        let maxV = -Infinity;
+
+        visibleData.forEach(d => {
+            const vals = [d.close, d.ema_20, d.ema_50, d.ema_200].filter(v => v != null);
+            if (vals.length > 0) {
+                const localMin = Math.min(...vals);
+                const localMax = Math.max(...vals);
+                if (localMin < minV) minV = localMin;
+                if (localMax > maxV) maxV = localMax;
+            }
+        });
+
+        if (minV !== Infinity && maxV !== -Infinity) {
+            const padding = Math.max((maxV - minV) * 0.05, 1); // 5% padding, min 1pt
+            setYaxisRange([minV - padding, maxV + padding]);
+        }
+    }, [xaxisRange, data]);
+
+    const handleRelayout = (event) => {
+        // Use timeout to prevent React state update loops reacting to Plotly's internal syncs
+        setTimeout(() => {
+            if (event['xaxis.range[0]'] && event['xaxis.range[1]']) {
+                setXaxisRange([event['xaxis.range[0]'], event['xaxis.range[1]']]);
+            } else if (event['xaxis.range']) {
+                setXaxisRange(event['xaxis.range']);
+            } else if (event['xaxis.autorange'] === true) {
+                setXaxisRange([zoomStartStr, todayStr]);
+            }
+        }, 0);
+    };
 
     return (
         <div style={{ padding: '20px', color: '#e0e0e0', backgroundColor: '#0b1220', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -264,13 +310,15 @@ const EmaStackReport = () => {
                                 gridcolor: '#1e293b',
                                 tickfont: { size: 11 },
                                 autorange: false,
-                                range: [zoomStartStr, todayStr],
+                                range: xaxisRange || [zoomStartStr, todayStr],
                                 rangeslider: { visible: true, thickness: 0.1, bgcolor: '#0f172a' },
                                 type: 'date'
                             },
                             yaxis: {
                                 gridcolor: '#1e293b',
-                                tickfont: { size: 11 }
+                                tickfont: { size: 11 },
+                                autorange: yaxisRange ? false : true,
+                                range: yaxisRange
                             },
                             margin: { l: 40, r: 20, t: 40, b: 30 },
                             showlegend: true,
@@ -279,6 +327,7 @@ const EmaStackReport = () => {
                         useResizeHandler={true}
                         style={{ width: '100%', height: '100%' }}
                         config={{ responsive: true, displayModeBar: false }}
+                        onRelayout={handleRelayout}
                     />
                 </div>
 

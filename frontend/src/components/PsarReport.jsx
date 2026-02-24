@@ -12,6 +12,8 @@ const PsarReport = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [xaxisRange, setXaxisRange] = useState(null);
+    const [yaxisRange, setYaxisRange] = useState(null);
 
     // Initial Ticker Fetch
     useEffect(() => {
@@ -123,6 +125,11 @@ const PsarReport = () => {
         const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
         const todayStr = new Date().toISOString().split('T')[0];
 
+        // Initialize xaxisRange if null
+        if (!xaxisRange && data) {
+            setXaxisRange([zoomStartStr, todayStr]);
+        }
+
         return {
             autosize: true,
             title: `${ticker} - PSAR (0.02, 0.20)`,
@@ -133,17 +140,63 @@ const PsarReport = () => {
                 gridcolor: '#334155',
                 showgrid: true,
                 rangeslider: { visible: true, thickness: 0.1, bgcolor: '#0f172a' },
-                range: [zoomStartStr, todayStr],
+                autorange: false,
+                range: xaxisRange || [zoomStartStr, todayStr],
                 type: 'date'
             },
             yaxis: {
                 gridcolor: '#334155',
                 showgrid: true,
-                title: 'Price'
+                title: 'Price',
+                autorange: yaxisRange ? false : true,
+                range: yaxisRange
             },
             margin: { l: 50, r: 20, t: 40, b: 40 },
             showlegend: false
         };
+    };
+
+    // Dynamic Y-Axis Scaling Effect
+    useEffect(() => {
+        if (!data || !data.history || !xaxisRange) return;
+
+        const visibleData = data.history.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
+        if (visibleData.length === 0) return;
+
+        let minV = Infinity;
+        let maxV = -Infinity;
+
+        visibleData.forEach(d => {
+            const vals = [d.low, d.high, d.psar].filter(v => v != null);
+            if (vals.length > 0) {
+                const localMin = Math.min(...vals);
+                const localMax = Math.max(...vals);
+                if (localMin < minV) minV = localMin;
+                if (localMax > maxV) maxV = localMax;
+            }
+        });
+
+        if (minV !== Infinity && maxV !== -Infinity) {
+            const padding = Math.max((maxV - minV) * 0.05, 1);
+            setYaxisRange([minV - padding, maxV + padding]);
+        }
+    }, [xaxisRange, data]);
+
+    const handleRelayout = (event) => {
+        setTimeout(() => {
+            const zoomStartDate = new Date();
+            zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+            const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            if (event['xaxis.range[0]'] && event['xaxis.range[1]']) {
+                setXaxisRange([event['xaxis.range[0]'], event['xaxis.range[1]']]);
+            } else if (event['xaxis.range']) {
+                setXaxisRange(event['xaxis.range']);
+            } else if (event['xaxis.autorange'] === true) {
+                setXaxisRange([zoomStartStr, todayStr]);
+            }
+        }, 0);
     };
 
     // --- Conclusion Logic ---
@@ -301,6 +354,7 @@ const PsarReport = () => {
                             useResizeHandler={true}
                             style={{ width: '100%', height: '100%' }}
                             config={{ responsive: true }}
+                            onRelayout={handleRelayout}
                         />
                     </div>
                 </>

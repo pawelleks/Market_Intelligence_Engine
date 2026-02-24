@@ -1367,7 +1367,7 @@ class ThetaStreamer:
                                     "asset_type": "OPTION",
                                     "value": premium,
                                     "sweep": bool(tags) and tags[0] == "SWEEP",
-                                    "sentiment": "BULLISH" if is_call else "BEARISH",
+                                    "sentiment": "BEARISH" if (is_call and synthetic_side == "BID") or ((not is_call) and synthetic_side != "BID") else "BULLISH",
                                     "tags": tags,
                                     "side": synthetic_side,
                                     "spot": self.state.get(ticker, {}).get("price", 0.0),

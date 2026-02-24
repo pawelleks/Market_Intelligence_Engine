@@ -739,13 +739,12 @@ export default function OptionFlowPage() {
                                         : '';
 
                                     // Sentiment badge (derived logically from option type and execution side)
-                                    let sentiment = trade.sentiment;
-                                    if (!sentiment || sentiment === 'NEUTRAL' || sentiment === '—') {
-                                        if (isCall) {
-                                            sentiment = side === 'BID' ? 'BEARISH' : 'BULLISH'; // Call Sold = Bearish, Call Bought/Mid = Bullish
-                                        } else {
-                                            sentiment = side === 'BID' ? 'BULLISH' : 'BEARISH'; // Put Sold = Bullish, Put Bought/Mid = Bearish
-                                        }
+                                    // Overrides incorrect backend string values from the fallback stream.
+                                    let sentiment;
+                                    if (isCall) {
+                                        sentiment = side === 'BID' ? 'BEARISH' : 'BULLISH'; // Call Sold = Bearish, Call Bought/Mid = Bullish
+                                    } else {
+                                        sentiment = side === 'BID' ? 'BULLISH' : 'BEARISH'; // Put Sold = Bullish, Put Bought/Mid = Bearish
                                     }
 
                                     return (

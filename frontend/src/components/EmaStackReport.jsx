@@ -58,6 +58,45 @@ const EmaStackReport = () => {
         navigate(`/analysis/ema-stack/${t}`);
     };
 
+    // Default Zoom Range (Last 10 Months)
+    const zoomStartDate = new Date();
+    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Initialize xaxisRange if null
+    useEffect(() => {
+        if (!xaxisRange && data) {
+            setXaxisRange([zoomStartStr, todayStr]);
+        }
+    }, [data, xaxisRange, zoomStartStr, todayStr]);
+
+    // Dynamic Y-Axis Scaling Effect
+    useEffect(() => {
+        if (!data || !data.history || !xaxisRange) return;
+
+        const visibleData = data.history.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
+        if (visibleData.length === 0) return;
+
+        let minV = Infinity;
+        let maxV = -Infinity;
+
+        visibleData.forEach(d => {
+            const vals = [d.close, d.ema_20, d.ema_50, d.ema_200].filter(v => v != null);
+            if (vals.length > 0) {
+                const localMin = Math.min(...vals);
+                const localMax = Math.max(...vals);
+                if (localMin < minV) minV = localMin;
+                if (localMax > maxV) maxV = localMax;
+            }
+        });
+
+        if (minV !== Infinity && maxV !== -Infinity) {
+            const padding = Math.max((maxV - minV) * 0.05, 1); // 5% padding, min 1pt
+            setYaxisRange([minV - padding, maxV + padding]);
+        }
+    }, [xaxisRange, data]);
+
     if (loading) return <div style={{ padding: 20, color: '#fff' }}>Loading Data...</div>;
     if (error) return <div style={{ padding: 20, color: '#ff6b6b' }}>Error: {error}</div>;
     if (!data) return null;
@@ -133,45 +172,6 @@ const EmaStackReport = () => {
     const ema20 = filteredHistory.map(d => d.ema_20);
     const ema50 = filteredHistory.map(d => d.ema_50);
     const ema200 = filteredHistory.map(d => d.ema_200);
-
-    // Default Zoom Range (Last 10 Months)
-    const zoomStartDate = new Date();
-    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
-    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Initialize xaxisRange if null
-    useEffect(() => {
-        if (!xaxisRange && data) {
-            setXaxisRange([zoomStartStr, todayStr]);
-        }
-    }, [data, xaxisRange, zoomStartStr, todayStr]);
-
-    // Dynamic Y-Axis Scaling Effect
-    useEffect(() => {
-        if (!data || !data.history || !xaxisRange) return;
-
-        const visibleData = data.history.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
-        if (visibleData.length === 0) return;
-
-        let minV = Infinity;
-        let maxV = -Infinity;
-
-        visibleData.forEach(d => {
-            const vals = [d.close, d.ema_20, d.ema_50, d.ema_200].filter(v => v != null);
-            if (vals.length > 0) {
-                const localMin = Math.min(...vals);
-                const localMax = Math.max(...vals);
-                if (localMin < minV) minV = localMin;
-                if (localMax > maxV) maxV = localMax;
-            }
-        });
-
-        if (minV !== Infinity && maxV !== -Infinity) {
-            const padding = Math.max((maxV - minV) * 0.05, 1); // 5% padding, min 1pt
-            setYaxisRange([minV - padding, maxV + padding]);
-        }
-    }, [xaxisRange, data]);
 
     const handleRelayout = (event) => {
         // Use timeout to prevent React state update loops reacting to Plotly's internal syncs

@@ -84,6 +84,45 @@ const IchimokuReport = () => {
         navigate(`/investing/ichimoku/${t}`);
     };
 
+    // Default Zoom Range (Last 10 Months)
+    const zoomStartDate = new Date();
+    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
+    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Initialize xaxisRange if null
+    useEffect(() => {
+        if (!xaxisRange && data) {
+            setXaxisRange([zoomStartStr, todayStr]);
+        }
+    }, [data, xaxisRange, zoomStartStr, todayStr]);
+
+    // Dynamic Y-Axis Scaling Effect
+    useEffect(() => {
+        if (!data || !data.series || !xaxisRange) return;
+
+        const visibleData = data.series.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
+        if (visibleData.length === 0) return;
+
+        let minV = Infinity;
+        let maxV = -Infinity;
+
+        visibleData.forEach(d => {
+            const vals = [d.low, d.high, d.tenkan_sen, d.kijun_sen, d.senkou_span_a, d.senkou_span_b, d.chikou_plotted].filter(v => v != null) as number[];
+            if (vals.length > 0) {
+                const localMin = Math.min(...vals);
+                const localMax = Math.max(...vals);
+                if (localMin < minV) minV = localMin;
+                if (localMax > maxV) maxV = localMax;
+            }
+        });
+
+        if (minV !== Infinity && maxV !== -Infinity) {
+            const padding = Math.max((maxV - minV) * 0.05, 1);
+            setYaxisRange([minV - padding, maxV + padding]);
+        }
+    }, [xaxisRange, data]);
+
     if (loading) return <div style={{ padding: 20, color: '#fff' }}>Loading Ichimoku Analysis...</div>;
     if (error) return <div style={{ padding: 20, color: '#ff6b6b' }}>Error: {error}</div>;
     if (!data) return null;
@@ -129,45 +168,6 @@ const IchimokuReport = () => {
     const dates = filteredSeries.map(d => d.date);
     const spanA = filteredSeries.map(d => d.senkou_span_a);
     const spanB = filteredSeries.map(d => d.senkou_span_b);
-
-    // Default Zoom Range (Last 10 Months)
-    const zoomStartDate = new Date();
-    zoomStartDate.setMonth(zoomStartDate.getMonth() - 10);
-    const zoomStartStr = zoomStartDate.toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Initialize xaxisRange if null
-    useEffect(() => {
-        if (!xaxisRange && data) {
-            setXaxisRange([zoomStartStr, todayStr]);
-        }
-    }, [data, xaxisRange, zoomStartStr, todayStr]);
-
-    // Dynamic Y-Axis Scaling Effect
-    useEffect(() => {
-        if (!data || !data.series || !xaxisRange) return;
-
-        const visibleData = data.series.filter(d => d.date >= xaxisRange[0] && d.date <= xaxisRange[1]);
-        if (visibleData.length === 0) return;
-
-        let minV = Infinity;
-        let maxV = -Infinity;
-
-        visibleData.forEach(d => {
-            const vals = [d.low, d.high, d.tenkan_sen, d.kijun_sen, d.senkou_span_a, d.senkou_span_b, d.chikou_plotted].filter(v => v != null) as number[];
-            if (vals.length > 0) {
-                const localMin = Math.min(...vals);
-                const localMax = Math.max(...vals);
-                if (localMin < minV) minV = localMin;
-                if (localMax > maxV) maxV = localMax;
-            }
-        });
-
-        if (minV !== Infinity && maxV !== -Infinity) {
-            const padding = Math.max((maxV - minV) * 0.05, 1);
-            setYaxisRange([minV - padding, maxV + padding]);
-        }
-    }, [xaxisRange, data]);
 
     const handleRelayout = (event: any) => {
         setTimeout(() => {

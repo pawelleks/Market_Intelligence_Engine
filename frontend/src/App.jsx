@@ -69,6 +69,8 @@ import UserManagementPage from './pages/admin/UserManagementPage';
 import DataManagementPage from './pages/admin/DataManagementPage';
 import DailyAnalysisPage from './pages/DailyAnalysisPage';
 import VolumeRegimeReport from './pages/VolumeRegimeReport';
+// Volume Regime Alpha disabled — slowing down live feeds
+// import VolumeRegimeAlphaPage from './pages/VolumeRegimeAlphaPage';
 import { UserProfile } from './pages/UserProfile'; // New Profile Page
 import { TermsModal } from './components/TermsModal'; // New Terms Modal
 import VolatilityPage from './pages/VolatilityPage';
@@ -716,6 +718,8 @@ function AppContent() {
             <Route path="/analysis/expected-moves-v2" element={<ProtectedLayout><ExpectedMovesV2Page /></ProtectedLayout>} />
             <Route path="/option-flow" element={<ProtectedLayout><OptionFlowPage /></ProtectedLayout>} />
             <Route path="/analysis/implied-probability" element={<ProtectedLayout><ImpliedProbabilityPage /></ProtectedLayout>} />
+            {/* Volume Regime Alpha disabled — slowing down live feeds */}
+            {/* <Route path="/analysis/volume-regime-alpha" element={<ProtectedLayout><VolumeRegimeAlphaPage /></ProtectedLayout>} /> */}
 
             <Route path="/analysis/expected-moves-massive" element={<ProtectedLayout><ExpectedMovesPageMassive /></ProtectedLayout>} />
             <Route path="/analysis/reliability" element={<ProtectedLayout><EMReliabilityPage /></ProtectedLayout>} />

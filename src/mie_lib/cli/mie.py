@@ -880,6 +880,167 @@ def handle_build_gex_daily(args):
         get_audit_logger().update_stage("GEX", "FAILED", {"error": str(e)})
         return 1
 
+def handle_build_gex_theta(args):
+    """
+    Mode: BATCH
+    Data Source: ThetaData REST API (port 25510)
+
+    Builds GEX profiles using ThetaData as the primary option chain source.
+    Uses the same GEXEngine and saves to the same storage location as the
+    yfinance pipeline, so the API and frontend work identically.
+    """
+    from mie_lib.analytics.gex.theta_gex_audit import fetch_theta_gex_chain
+    from mie_lib.analytics.gex.gex_engine import GEXEngine
+    from mie_lib.analytics.gex.storage import save_gex_profile
+    from mie_lib.data_ingest.providers.theta_rest import ThetaRestClient
+    import os
+
+    logger = logging.getLogger(__name__)
+
+    tickers = []
+    if args.tickers == "@config":
+        tickers = _load_scope_tickers("Gamma_Exposure")
+        if not tickers:
+            tickers = _load_yaml_tickers()
+    elif args.tickers:
+        tickers = _parse_csv_str_list(args.tickers, [])
+
+    if not tickers:
+        tickers = ["SPY", "QQQ", "IWM", "SPX"]
+
+    theta_host = os.getenv("THETA_HOST", "theta_terminal")
+    theta_port = int(os.getenv("THETA_REST_PORT", "25510"))
+    client = ThetaRestClient(host=theta_host, port=theta_port)
+    engine = GEXEngine()
+
+    logger.info(f"Building GEX from ThetaData for {len(tickers)} tickers: {tickers}")
+
+    for ticker in tickers:
+        try:
+            # 1. Fetch spot price
+            spot = client.get_eod_price(ticker, date.today())
+            if not spot:
+                logger.warning(f"  {ticker}: No spot price from ThetaData, skipping")
+                print(f"  {ticker}: SKIP (no spot price)")
+                continue
+
+            # 2. Fetch option chain from ThetaData
+            chain_df = fetch_theta_gex_chain(ticker)
+            if chain_df.empty:
+                logger.warning(f"  {ticker}: No chain data from ThetaData, skipping")
+                print(f"  {ticker}: SKIP (no chain data)")
+                continue
+
+            # 3. Calculate GEX using same engine
+            gex_result = engine.calculate_gex_from_frame(ticker, chain_df, spot)
+            if not gex_result:
+                logger.warning(f"  {ticker}: GEX calculation returned empty")
+                print(f"  {ticker}: SKIP (empty calculation)")
+                continue
+
+            # 4. Save to same storage location
+            save_gex_profile(ticker, gex_result)
+
+            profile_rows = len(gex_result.get("profile", []))
+            net_gex = round(gex_result.get("net_gex", 0))
+            logger.info(f"  {ticker}: OK  spot={spot}  rows={len(chain_df)}  profile={profile_rows}  net_gex={net_gex:,}")
+            print(f"  {ticker}: OK  spot={spot}  chain={len(chain_df)} rows  profile={profile_rows} strikes  net_gex={net_gex:,}")
+
+        except Exception as e:
+            logger.error(f"  {ticker}: FAILED - {e}")
+            print(f"  {ticker}: FAILED - {e}")
+
+    return 0
+
+
+def handle_fetch_theta_gex_chain(args):
+    """
+    Mode: BATCH
+    Data Source: ThetaData REST API (port 25510)
+
+    Fetches ThetaData option chain (OI, IV, Gamma) and saves to disk.
+    Designed to run in parallel with build-gex-daily so both data sources
+    are captured at approximately the same time for fair audit comparison.
+    """
+    from mie_lib.analytics.gex.theta_gex_audit import fetch_and_save_theta_chain
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    tickers = []
+    if args.tickers == "@config":
+        tickers = _load_scope_tickers("Gamma_Exposure")
+        if not tickers:
+            tickers = _load_yaml_tickers()
+    elif args.tickers:
+        tickers = _parse_csv_str_list(args.tickers, [])
+
+    if not tickers:
+        tickers = ["SPY", "QQQ", "IWM"]
+
+    logger.info(f"Fetching ThetaData chains for {len(tickers)} tickers: {tickers}")
+
+    for ticker in tickers:
+        try:
+            result = fetch_and_save_theta_chain(ticker)
+            status = result.get("status", "error")
+            if status == "ok":
+                print(f"  {ticker}: OK  rows={result['rows']}  spot={result['spot']}")
+            else:
+                print(f"  {ticker}: {status} - {result.get('error', 'unknown')}")
+        except Exception as e:
+            logger.error(f"ThetaData chain fetch failed for {ticker}: {e}")
+            print(f"  {ticker}: FAILED - {e}")
+
+    return 0
+
+
+def handle_audit_gex(args):
+    """
+    Mode: BATCH
+    Data Source: Pre-computed data from disk (yfinance GEX + ThetaData chain)
+
+    Runs GEX audit: loads pre-fetched ThetaData chain, calculates GEX
+    using the same engine, and compares against the yfinance-based profile.
+    Both data sources should be fetched during the same pipeline run.
+    """
+    from mie_lib.analytics.gex.theta_gex_audit import run_gex_audit
+    import logging
+    import json
+
+    logger = logging.getLogger(__name__)
+
+    tickers = []
+    if args.tickers == "@config":
+        tickers = _load_scope_tickers("Gamma_Exposure")
+        if not tickers:
+            tickers = _load_yaml_tickers()
+    elif args.tickers:
+        tickers = _parse_csv_str_list(args.tickers, [])
+
+    if not tickers:
+        tickers = ["SPY", "QQQ", "IWM"]
+
+    logger.info(f"Running GEX Audit for {len(tickers)} tickers: {tickers}")
+
+    for ticker in tickers:
+        try:
+            report = run_gex_audit(ticker)
+            status = report.get("status", "error")
+            if status == "ok":
+                theta_net = report.get("theta_net_gex", 0)
+                yf_net = report.get("yfinance_net_gex", 0)
+                divergent = len(report.get("comparison", {}).get("divergent_strikes", []))
+                print(f"  {ticker}: OK  theta_net={theta_net:,}  yf_net={yf_net:,}  divergent_strikes={divergent}")
+            else:
+                print(f"  {ticker}: {status} - {report.get('error', 'unknown')}")
+        except Exception as e:
+            logger.error(f"Audit failed for {ticker}: {e}")
+            print(f"  {ticker}: FAILED - {e}")
+
+    return 0
+
+
 def handle_update_dcs(args):
     """
     Handle update-dcs command.
@@ -1747,6 +1908,18 @@ def build_parser():
     p_gex.add_argument("--online", action="store_true", help="Use online data fetch (yfinance) instead of CSV")
     p_gex.add_argument("--workers", type=int, default=10, help="Parallel worker threads (default: 10)")
     p_gex.set_defaults(func=handle_build_gex_daily)
+
+    p_gex_theta = sub.add_parser("build-gex-theta", help="Build GEX from ThetaData (primary)")
+    p_gex_theta.add_argument("--tickers", type=str, default="@config")
+    p_gex_theta.set_defaults(func=handle_build_gex_theta)
+
+    p_fetch_theta_chain = sub.add_parser("fetch-theta-gex-chain", help="Fetch ThetaData option chain for GEX audit")
+    p_fetch_theta_chain.add_argument("--tickers", type=str, default="@config")
+    p_fetch_theta_chain.set_defaults(func=handle_fetch_theta_gex_chain)
+
+    p_audit_gex = sub.add_parser("audit-gex", help="Audit GEX: compare yfinance vs ThetaData")
+    p_audit_gex.add_argument("--tickers", type=str, default="@config")
+    p_audit_gex.set_defaults(func=handle_audit_gex)
 
     p_fetch_gex = sub.add_parser("fetch-options-snapshot", help="Fetch fresh options snapshot from YFinance (Optional)")
     p_fetch_gex.add_argument("--tickers", type=str, default="@config")

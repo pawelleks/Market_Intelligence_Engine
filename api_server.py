@@ -52,6 +52,9 @@ from datetime import datetime
 from mie_lib.utils.probability_math import BreedenLitzenberger
 from mie_lib.realtime import db
 
+from mie_lib.db.volume_regime_db import init_db as init_vr_db
+from mie_lib.realtime.volume_regime_recorder import VolumeRegimeRecorder
+
 
 # -----------------------------------------------------------------
 # Data Source Routing Configuration
@@ -75,6 +78,9 @@ def get_quote_source(ticker: str) -> str:
 
 # ThetaStreamer for Indices (only source)
 theta_streamer = ThetaStreamer(tickers=list(INDEX_TICKERS))
+
+# Volume Regime Recorder
+vr_recorder = VolumeRegimeRecorder()
 
 # Separate Engine for Snapshot Data (uses thetadata lib) - DISABLED due to build issues
 # theta_engine_client = ThetaEngine(tickers=['SPX'])
@@ -106,6 +112,11 @@ async def lifespan(app: FastAPI):
     # print(f"  - Alpaca IEX: {', '.join(ETF_TICKERS)}")
     theta_task = asyncio.create_task(theta_streamer.start())
 
+    init_vr_db()
+    # Volume Regime Recorder DISABLED — continuous Theta polling saturates the
+    # single Theta Terminal connection, starving all other real-time endpoints.
+    # vr_task = asyncio.create_task(vr_recorder.start())
+
     # Seed static Expected Moves JSON if missing or stale (>24h)
     import subprocess
     static_em_path = Path("/app/public/data/expected_moves_static.json")
@@ -127,13 +138,14 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    print("Stopping Real-Time Data Streamers...")
+    print("Stopping Real-Time Data Streamers and Recorders...")
 
     await theta_streamer.stop()
+    # await vr_recorder.stop()  # Recorder disabled
     
     # Wait for tasks to finish (optional but good practice)
     try:
-        await asyncio.gather(theta_task, return_exceptions=True)
+        await asyncio.gather(theta_task, vr_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 
@@ -219,6 +231,9 @@ from mie_lib.api.routers.economic_calendar import router as economic_calendar_ro
 app.include_router(economic_calendar_router)
 from mie_lib.api.routers.jpm_dashboard import router as jpm_dashboard_router
 app.include_router(jpm_dashboard_router, prefix="/api/v1/jpm-dashboard", tags=["jpm-dashboard"])
+
+from mie_lib.api.routers.volume_regime_router import volume_regime_router
+app.include_router(volume_regime_router)
 
 
 # Configure CORS
@@ -1861,6 +1876,36 @@ def get_market_candles(ticker: str, interval: str = "1d", range: str = "max") ->
             pass # Fallback to yF
 
 
+@app.post("/api/v1/system/refresh-static-em")
+async def refresh_static_em() -> JSONResponse:
+    """
+    Mode: BATCH
+    Data Source: ThetaData REST API (port 25510)
+    Response Time: 30-60 seconds
+
+    Triggers process_expected_moves_static.py inside the API process.
+    Used by mie-cron to avoid Theta Terminal single-IP restriction.
+    """
+    import subprocess
+    import threading
+
+    def _run_job():
+        try:
+            result = subprocess.run(
+                ["python", "/app/jobs/process_expected_moves_static.py"],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                print("[refresh-static-em] Job completed successfully.")
+            else:
+                print(f"[refresh-static-em] Job failed: {result.stderr[-500:]}")
+        except Exception as e:
+            print(f"[refresh-static-em] Job error: {e}")
+
+    threading.Thread(target=_run_job, daemon=True).start()
+    return JSONResponse(content={"status": "started", "message": "Static EM refresh job started in background."})
+
+
 @app.get("/api/v1/system/audit/latest")
 def get_latest_audit_log() -> JSONResponse:
     """Retrieves the latest pipeline audit log."""
@@ -1879,6 +1924,86 @@ def get_latest_audit_log() -> JSONResponse:
         return JSONResponse(content=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read audit log: {e}")
+
+@app.get("/api/v1/system/pipeline/stages")
+def get_pipeline_stages() -> JSONResponse:
+    """
+    Mode: BATCH
+    Data Source: pipeline/stages.yml (local file)
+    Response Time: <50ms
+
+    Returns pipeline stage definitions grouped by phase in topological execution order.
+    The frontend uses this to render the pipeline checklist dynamically.
+    """
+    import yaml
+    stages_path = Path("pipeline/stages.yml")
+    if not stages_path.exists():
+        raise HTTPException(status_code=404, detail="stages.yml not found")
+
+    with open(stages_path, "r") as f:
+        data = yaml.safe_load(f)
+
+    stages = data.get("stages", [])
+
+    # Build topological order using the same logic as the runner
+    # (inline lightweight version — avoids importing runner which has heavy deps)
+    nodes = {s["id"]: s for s in stages}
+    children = {sid: [] for sid in nodes}
+    in_degree = {sid: 0 for sid in nodes}
+    for s in stages:
+        for dep in s.get("depends_on", []):
+            if dep in children:
+                children[dep].append(s["id"])
+                in_degree[s["id"]] += 1
+
+    queue = [sid for sid, deg in in_degree.items() if deg == 0]
+    topo_order = []
+    while queue:
+        curr = queue.pop(0)
+        topo_order.append(curr)
+        for child in children[curr]:
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                queue.append(child)
+
+    # Group by phase, preserving topological order within each phase
+    from collections import OrderedDict
+    phase_map = OrderedDict()
+    for sid in topo_order:
+        s = nodes[sid]
+        phase = s.get("phase", "Other")
+        if phase not in phase_map:
+            phase_map[phase] = []
+        phase_map[phase].append({
+            "id": s["id"],
+            "name": s["name"],
+            "depends_on": s.get("depends_on", []),
+        })
+
+    # Ordered phase definitions (controls display order)
+    phase_order = [
+        ("Ingestion", "Phase 1: Ingestion"),
+        ("Features", "Phase 2: Features"),
+        ("Analytics", "Phase 3: Analytics & Scanners"),
+        ("Expected Moves", "Phase 4: Expected Moves"),
+        ("Technicals", "Phase 5: Technicals"),
+        ("AI Intelligence", "Phase 6: AI Intelligence"),
+    ]
+
+    phases = []
+    for phase_key, phase_label in phase_order:
+        if phase_key in phase_map:
+            phases.append({
+                "label": phase_label,
+                "stages": phase_map[phase_key],
+            })
+    # Include any phases not in the predefined list
+    for phase_key, stage_list in phase_map.items():
+        if phase_key not in dict(phase_order):
+            phases.append({"label": phase_key, "stages": stage_list})
+
+    return JSONResponse(content={"phases": phases})
+
 
 @app.get("/api/v1/analytics/volume/{ticker}")
 def get_volume_regime_analysis(ticker: str) -> JSONResponse:

@@ -53,7 +53,7 @@ class ThetaRestClient:
             
             try:
                 LOG.info(f"ThetaRest: Fetching price for {clean_root} [{start_date} to {as_of}]")
-                resp = client.get(url, params=params, timeout=5.0)
+                resp = client.get(url, params=params, timeout=30.0)
                 if resp.status_code != 200:
                     LOG.warning(f"ThetaRest: API Error {resp.status_code} for {clean_root}")
                     return None

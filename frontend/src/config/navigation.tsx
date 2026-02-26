@@ -65,6 +65,8 @@ export const NAV_DATA = {
                 { label: 'Implied Probability', to: '/analysis/implied-probability', icon: TrendingUp },
                 { label: 'Real-Time Option Flow', to: '/option-flow', icon: Zap },
                 { label: 'Real-Time Dealer Flow', to: '/analysis/realtime-flow', icon: Zap },
+                // Volume Regime Alpha disabled — competes with Theta Terminal streamer
+                // { label: 'Volume Regime Alpha', to: '/analysis/volume-regime-alpha', icon: Activity },
 
                 { label: 'EM Reliability', to: '/analysis/reliability', icon: ShieldCheck },
                 { label: 'Gamma Exposure (GEX)', to: '/analysis/gex', icon: Layers },

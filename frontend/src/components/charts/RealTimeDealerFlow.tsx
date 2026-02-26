@@ -2,6 +2,52 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { createChart, ColorType, CrosshairMode, LineStyle, LineSeries } from 'lightweight-charts';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
+// --- ZSCORE SUBCHART START ---
+const ZSCORE_WINDOW = 60;
+
+function zscoreCompute(buffer: number[], newValue: number): number {
+    buffer.push(newValue);
+    if (buffer.length > ZSCORE_WINDOW) buffer.shift();
+    if (buffer.length < 3) return 0;
+    const mean = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+    const variance = buffer.reduce((a, b) => a + (b - mean) ** 2, 0) / buffer.length;
+    const std = Math.sqrt(variance);
+    if (std === 0) return 0;
+    return (newValue - mean) / std;
+}
+
+function zscoreComputeBatch(values: number[]): number[] {
+    const buf: number[] = [];
+    return values.map(v => {
+        buf.push(v);
+        if (buf.length > ZSCORE_WINDOW) buf.shift();
+        if (buf.length < 3) return 0;
+        const mean = buf.reduce((a, b) => a + b, 0) / buf.length;
+        const variance = buf.reduce((a, b) => a + (b - mean) ** 2, 0) / buf.length;
+        const std = Math.sqrt(variance);
+        if (std === 0) return 0;
+        return (v - mean) / std;
+    });
+}
+// --- ZSCORE SUBCHART END ---
+
+// --- 1-MINUTE AGGREGATION ---
+const AGGREGATION_SECONDS = 60; // 1 minute buckets
+
+/** Aggregate tick-level data into 1-minute bars (last value per bucket) */
+function aggregateToMinutes(data: { time: number; value: number }[]): { time: any; value: number }[] {
+    if (data.length === 0) return [];
+    const buckets = new Map<number, number>();
+    for (const d of data) {
+        const bucket = Math.floor(d.time / AGGREGATION_SECONDS) * AGGREGATION_SECONDS;
+        buckets.set(bucket, d.value); // last value wins
+    }
+    return Array.from(buckets.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([time, value]) => ({ time: time as any, value }));
+}
+// --- END 1-MINUTE AGGREGATION ---
+
 interface RealTimeDealerFlowProps {
     ticker: string;
 }
@@ -25,6 +71,20 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
     const priceLineRefs = useRef<any[]>([]);
     const gexProfileRef = useRef<any[]>([]);
     const emDataRef = useRef<any>(null);
+
+    // --- 1-MINUTE AGGREGATION REFS ---
+    const lastPriceBucketRef = useRef<number>(0);
+    const lastFlowBucketRef = useRef<number>(0);
+
+    // --- ZSCORE SUBCHART START ---
+    const subchartContainerRef = useRef<HTMLDivElement>(null);
+    const subchartRef = useRef<any>(null);
+    const subchartPriceZscoreSeriesRef = useRef<any>(null);
+    const subchartFlowZscoreSeriesRef = useRef<any>(null);
+    const zscorePriceBufferRef = useRef<number[]>([]);
+    const zscoreFlowBufferRef = useRef<number[]>([]);
+    const zscoreIsSyncingRef = useRef(false);
+    // --- ZSCORE SUBCHART END ---
 
     // Keep gexProfile ref in sync for horizon recalc
     useEffect(() => { gexProfileRef.current = gexProfile; }, [gexProfile]);
@@ -136,7 +196,7 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             crosshair: { mode: CrosshairMode.Normal },
             timeScale: {
                 timeVisible: true,
-                secondsVisible: true,
+                secondsVisible: false,
                 rightOffset: 20,
             },
             rightPriceScale: {
@@ -170,6 +230,133 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
         priceSeriesRef.current = priceSeries;
         flowSeriesRef.current = flowSeries;
 
+        // --- ZSCORE SUBCHART START ---
+        let subChart: any = null;
+        let subchartPriceZscoreSeries: any = null;
+        let subchartFlowZscoreSeries: any = null;
+        let subchartResizeObserver: ResizeObserver | null = null;
+
+        if (subchartContainerRef.current) {
+            subchartContainerRef.current.innerHTML = '';
+            zscorePriceBufferRef.current = [];
+            zscoreFlowBufferRef.current = [];
+
+            subChart = createChart(subchartContainerRef.current, {
+                layout: {
+                    background: { type: ColorType.Solid, color: '#0F172A' },
+                    textColor: '#94A3B8',
+                    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+                    fontSize: 11,
+                },
+                grid: {
+                    vertLines: { color: '#1E293B' },
+                    horzLines: { color: '#1E293B' },
+                },
+                width: subchartContainerRef.current.clientWidth,
+                height: subchartContainerRef.current.clientHeight,
+                crosshair: { mode: CrosshairMode.Normal },
+                timeScale: {
+                    visible: false,
+                    rightOffset: 20,
+                },
+                rightPriceScale: {
+                    borderColor: '#334155',
+                    visible: true,
+                    scaleMargins: { top: 0.1, bottom: 0.1 },
+                    autoScale: true,
+                },
+                leftPriceScale: { visible: false },
+            });
+
+            subchartPriceZscoreSeries = subChart.addSeries(LineSeries, {
+                color: '#F8FAFC',
+                lineWidth: 1,
+                priceScaleId: 'right',
+                title: 'Price Z',
+            });
+
+            subchartFlowZscoreSeries = subChart.addSeries(LineSeries, {
+                color: '#22d3ee',
+                lineWidth: 1,
+                priceScaleId: 'right',
+                title: 'Flow Z',
+            });
+
+            // Reference lines: +2σ, 0, -2σ
+            subchartPriceZscoreSeries.createPriceLine({
+                price: 2.0, color: '#EF4444', lineWidth: 1,
+                lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '+2σ',
+            });
+            subchartPriceZscoreSeries.createPriceLine({
+                price: 0, color: '#64748B', lineWidth: 1,
+                lineStyle: LineStyle.Solid, axisLabelVisible: true, title: '0',
+            });
+            subchartPriceZscoreSeries.createPriceLine({
+                price: -2.0, color: '#22C55E', lineWidth: 1,
+                lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '-2σ',
+            });
+
+            subchartRef.current = subChart;
+            subchartPriceZscoreSeriesRef.current = subchartPriceZscoreSeries;
+            subchartFlowZscoreSeriesRef.current = subchartFlowZscoreSeries;
+
+            // Time scale sync (bidirectional)
+            const mainTimeScale = chart.timeScale();
+            const subTimeScale = subChart.timeScale();
+
+            const zscoreSyncMainHandler = (range: any) => {
+                if (zscoreIsSyncingRef.current) return;
+                zscoreIsSyncingRef.current = true;
+                try { if (range) subTimeScale.setVisibleLogicalRange(range); } catch {}
+                zscoreIsSyncingRef.current = false;
+            };
+            const zscoreSyncSubHandler = (range: any) => {
+                if (zscoreIsSyncingRef.current) return;
+                zscoreIsSyncingRef.current = true;
+                try { if (range) mainTimeScale.setVisibleLogicalRange(range); } catch {}
+                zscoreIsSyncingRef.current = false;
+            };
+            mainTimeScale.subscribeVisibleLogicalRangeChange(zscoreSyncMainHandler);
+            subTimeScale.subscribeVisibleLogicalRangeChange(zscoreSyncSubHandler);
+
+            // Crosshair sync (bidirectional)
+            const zscoreCrosshairMainHandler = (param: any) => {
+                if (zscoreIsSyncingRef.current) return;
+                zscoreIsSyncingRef.current = true;
+                try {
+                    if (param.time && subchartPriceZscoreSeriesRef.current) {
+                        subChart.setCrosshairPosition(0, param.time, subchartPriceZscoreSeriesRef.current);
+                    } else {
+                        subChart.clearCrosshairPosition();
+                    }
+                } catch {}
+                zscoreIsSyncingRef.current = false;
+            };
+            const zscoreCrosshairSubHandler = (param: any) => {
+                if (zscoreIsSyncingRef.current) return;
+                zscoreIsSyncingRef.current = true;
+                try {
+                    if (param.time && priceSeriesRef.current) {
+                        chart.setCrosshairPosition(0, param.time, priceSeriesRef.current);
+                    } else {
+                        chart.clearCrosshairPosition();
+                    }
+                } catch {}
+                zscoreIsSyncingRef.current = false;
+            };
+            chart.subscribeCrosshairMove(zscoreCrosshairMainHandler);
+            subChart.subscribeCrosshairMove(zscoreCrosshairSubHandler);
+
+            // Subchart resize observer
+            subchartResizeObserver = new ResizeObserver(entries => {
+                if (entries.length === 0 || !entries[0].contentRect) return;
+                const { width, height } = entries[0].contentRect;
+                if (width > 0 && height > 0) subChart.applyOptions({ width, height });
+            });
+            subchartResizeObserver.observe(subchartContainerRef.current);
+        }
+        // --- ZSCORE SUBCHART END ---
+
         // Fetch history, GEX, and EM data
         const fetchEverything = async () => {
             let loadedProfile: any[] = [];
@@ -182,12 +369,15 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
                 if (resHist.ok) {
                     const historyData = await resHist.json();
                     if (historyData.length > 0) {
-                        const priceData = historyData
+                        const rawPriceData = historyData
                             .filter((d: any) => d.value && d.value > 0)
-                            .map((d: any) => ({ time: d.time as any, value: d.value }));
-                        const flowData = historyData
+                            .map((d: any) => ({ time: d.time as number, value: d.value as number }));
+                        const rawFlowData = historyData
                             .filter((d: any) => d.value && d.value > 0)
-                            .map((d: any) => ({ time: d.time as any, value: d.flow ?? 0 }));
+                            .map((d: any) => ({ time: d.time as number, value: (d.flow ?? 0) as number }));
+                        // Aggregate to 1-minute bars for full-session view
+                        const priceData = aggregateToMinutes(rawPriceData);
+                        const flowData = aggregateToMinutes(rawFlowData);
                         priceSeries.setData(priceData);
                         flowSeries.setData(flowData);
                         const last = priceData[priceData.length - 1];
@@ -195,6 +385,30 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
                             setCurrentPrice(last.value);
                             refPrice = last.value;
                         }
+
+                        // --- ZSCORE SUBCHART START ---
+                        if (subchartPriceZscoreSeries && subchartFlowZscoreSeries) {
+                            const priceValues = priceData.map((d: any) => d.value as number);
+                            const flowValues = flowData.map((d: any) => d.value as number);
+
+                            const priceZscores = zscoreComputeBatch(priceValues);
+                            const flowZscores = zscoreComputeBatch(flowValues);
+
+                            const priceZscoreData = priceData.map((d: any, i: number) => ({
+                                time: d.time as any, value: priceZscores[i],
+                            }));
+                            const flowZscoreData = flowData.map((d: any, i: number) => ({
+                                time: d.time as any, value: flowZscores[i],
+                            }));
+
+                            subchartPriceZscoreSeries.setData(priceZscoreData);
+                            subchartFlowZscoreSeries.setData(flowZscoreData);
+
+                            // Seed rolling buffers with last ZSCORE_WINDOW values
+                            zscorePriceBufferRef.current = priceValues.slice(-ZSCORE_WINDOW);
+                            zscoreFlowBufferRef.current = flowValues.slice(-ZSCORE_WINDOW);
+                        }
+                        // --- ZSCORE SUBCHART END ---
                     }
                 }
 
@@ -261,6 +475,18 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
             chartRef.current = null;
             priceSeriesRef.current = null;
             flowSeriesRef.current = null;
+
+            // --- ZSCORE SUBCHART START ---
+            if (subchartResizeObserver) subchartResizeObserver.disconnect();
+            if (subChart) {
+                try { subChart.remove(); } catch {}
+            }
+            subchartRef.current = null;
+            subchartPriceZscoreSeriesRef.current = null;
+            subchartFlowZscoreSeriesRef.current = null;
+            zscorePriceBufferRef.current = [];
+            zscoreFlowBufferRef.current = [];
+            // --- ZSCORE SUBCHART END ---
         };
     }, [ticker]);
 
@@ -322,9 +548,21 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
 
         lastMessageTime.current = Date.now();
 
+        // Bucket time into 1-minute intervals
+        const bucketTime = Math.floor(time / AGGREGATION_SECONDS) * AGGREGATION_SECONDS;
+
         // Update Price Series ONLY if we have a valid UNDERLYING price
         if (priceToUpdate && priceToUpdate > 0 && priceSeriesRef.current) {
-            priceSeriesRef.current.update({ time, value: priceToUpdate });
+            priceSeriesRef.current.update({ time: bucketTime as any, value: priceToUpdate });
+
+            // --- ZSCORE SUBCHART START ---
+            // Only compute z-score when we enter a NEW minute bucket
+            if (subchartPriceZscoreSeriesRef.current && bucketTime !== lastPriceBucketRef.current) {
+                lastPriceBucketRef.current = bucketTime;
+                const zscore = zscoreCompute(zscorePriceBufferRef.current, priceToUpdate);
+                subchartPriceZscoreSeriesRef.current.update({ time: bucketTime as any, value: zscore });
+            }
+            // --- ZSCORE SUBCHART END ---
 
             const now = Date.now();
             if (now - lastPriceUpdate.current > 500) { // Throttle React state updates
@@ -335,7 +573,15 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
 
         // Update Flow Series (always allowed if flow present)
         if (flowSeriesRef.current && flow !== undefined) {
-            flowSeriesRef.current.update({ time, value: flow });
+            flowSeriesRef.current.update({ time: bucketTime as any, value: flow });
+
+            // --- ZSCORE SUBCHART START ---
+            if (subchartFlowZscoreSeriesRef.current && bucketTime !== lastFlowBucketRef.current) {
+                lastFlowBucketRef.current = bucketTime;
+                const zscore = zscoreCompute(zscoreFlowBufferRef.current, flow);
+                subchartFlowZscoreSeriesRef.current.update({ time: bucketTime as any, value: zscore });
+            }
+            // --- ZSCORE SUBCHART END ---
         }
     }, [ticker]);
 
@@ -467,8 +713,18 @@ export const RealTimeDealerFlow: React.FC<RealTimeDealerFlowProps> = ({ ticker }
                 </div>
 
                 {/* Chart (85%) */}
-                <div className="w-[85%] relative bg-[#0F172A]">
-                    <div ref={chartContainerRef} className="w-full h-full" />
+                <div className="w-[85%] relative bg-[#0F172A] flex flex-col">
+                    <div ref={chartContainerRef} className="w-full flex-1 min-h-0" />
+                    {/* --- ZSCORE SUBCHART START --- */}
+                    <div className="w-full h-[150px] shrink-0 relative border-t border-slate-800">
+                        <div ref={subchartContainerRef} className="w-full h-full" />
+                        <div className="absolute top-1 left-2 z-10 flex items-center gap-2 text-[10px] text-slate-400 font-sans pointer-events-none">
+                            <span className="text-slate-300 font-medium">Z-Score ({ZSCORE_WINDOW})</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white"></span>Price</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#22d3ee]"></span>Flow</span>
+                        </div>
+                    </div>
+                    {/* --- ZSCORE SUBCHART END --- */}
                 </div>
             </div>
 

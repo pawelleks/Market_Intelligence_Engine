@@ -155,7 +155,7 @@ class PipelineRunner:
         
         if not dry_run:
             try:
-                get_audit_logger().update_stage(node.config['name'], "RUNNING", {})
+                get_audit_logger().update_stage(node.id, "RUNNING", {})
             except Exception as e:
                 print(f"  ⚠️ Failed to update audit log (RUNNING): {e}")
         
@@ -180,7 +180,7 @@ class PipelineRunner:
                 node.status = "WARNING"
                 if not dry_run:
                     try:
-                        get_audit_logger().update_stage(node.config['name'], "WARNING", {
+                        get_audit_logger().update_stage(node.id, "WARNING", {
                             "runner": "new",
                             "duration_seconds": node.end_time - node.start_time,
                             "error": node.error
@@ -192,7 +192,7 @@ class PipelineRunner:
                 node.status = "FAILED"
                 if not dry_run:
                     try:
-                        get_audit_logger().update_stage(node.config['name'], "FAILED", {
+                        get_audit_logger().update_stage(node.id, "FAILED", {
                             "runner": "new",
                             "duration_seconds": node.end_time - node.start_time,
                             "error": node.error
@@ -233,7 +233,7 @@ class PipelineRunner:
             def log_audit(status_code, err_msg):
                 if not dry_run:
                     try:
-                        get_audit_logger().update_stage(node.config['name'], status_code, {
+                        get_audit_logger().update_stage(node.id, status_code, {
                             "runner": "new",
                             "duration_seconds": node.end_time - node.start_time,
                             "error": err_msg
@@ -273,7 +273,7 @@ class PipelineRunner:
             def log_audit_out(status_code, err_msg):
                 if not dry_run:
                     try:
-                        get_audit_logger().update_stage(node.config['name'], status_code, {
+                        get_audit_logger().update_stage(node.id, status_code, {
                             "runner": "new",
                             "duration_seconds": node.end_time - node.start_time,
                             "error": err_msg
@@ -298,7 +298,7 @@ class PipelineRunner:
         
         if not dry_run:
             try:
-                get_audit_logger().update_stage(node.config['name'], "COMPLETED", {
+                get_audit_logger().update_stage(node.id, "COMPLETED", {
                     "runner": "new",
                     "duration_seconds": node.end_time - node.start_time
                 })

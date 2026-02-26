@@ -3,6 +3,7 @@ import asyncio
 import logging
 import json
 import traceback
+import pytz
 from datetime import datetime, date as dt_date
 from typing import List, Optional, Dict
 from collections import defaultdict, deque
@@ -209,6 +210,16 @@ class ThetaStreamer:
                 
         except Exception as e:
             LOG.error(f"Broadcasting Error: {e}")
+
+    @staticmethod
+    def _is_extended_session() -> bool:
+        """Returns True if within extended trading hours (4:00 AM - 8:00 PM ET).
+        Outside this window the streamer sleeps to free Theta Terminal for batch/ad-hoc use."""
+        et = pytz.timezone("America/New_York")
+        now = datetime.now(et)
+        if now.weekday() >= 5:  # Weekend
+            return False
+        return 4 <= now.hour < 20
 
     async def start(self):
         """
@@ -1063,6 +1074,11 @@ class ThetaStreamer:
         await asyncio.sleep(5)
 
         while self.active:
+            # Outside extended hours, sleep to free Theta Terminal for other requests
+            if not self._is_extended_session():
+                await asyncio.sleep(60)
+                continue
+
             for ticker in self.tickers:
                 try:
                     # Use snapshot/stock/quote for real-time bid/ask (works pre-market)
@@ -1254,6 +1270,11 @@ class ThetaStreamer:
         prev_volumes: Dict[str, Dict[str, Dict]] = {}
 
         while self.active:
+            # Outside extended hours, sleep to free Theta Terminal for other requests
+            if not self._is_extended_session():
+                await asyncio.sleep(60)
+                continue
+
             for ticker in self.tickers:
                 if ticker == "VIX": continue # VIX options are special, skip for now
 

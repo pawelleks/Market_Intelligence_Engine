@@ -5,6 +5,7 @@ stages:
   # --- Phase 1: Ingestion ---
   - id: update_raw
     name: "Update Raw Data"
+    phase: "Ingestion"
     mode: BATCH
     command: update-raw
     args: []
@@ -17,6 +18,7 @@ stages:
 
   - id: fetch_massive_snapshot
     name: "Download Daily Options (Flat File)"
+    phase: "Ingestion"
     mode: BATCH
     command: fetch-massive-snapshot
     args: []
@@ -29,6 +31,7 @@ stages:
 
   - id: extract_massive_snapshot
     name: "Extract Options Tickers"
+    phase: "Ingestion"
     mode: BATCH
     command: extract-massive-snapshot
     args: ["--tickers", "@config"]
@@ -42,6 +45,7 @@ stages:
   # --- Phase 2: Feature Engineering ---
   - id: build_features
     name: "Update Features"
+    phase: "Features"
     mode: BATCH
     command: build-features
     args: ["--mode", "update", "--lookback", "90"]
@@ -55,6 +59,7 @@ stages:
   # --- Phase 3: Analytics & Scanners ---
   - id: build_minervini
     name: "Minervini Scanner"
+    phase: "Analytics"
     mode: BATCH
     command: build-minervini-daily
     args: ["--tickers", "@config"]
@@ -67,6 +72,7 @@ stages:
 
   - id: build_markov_grid
     name: "Markov Grid"
+    phase: "Analytics"
     mode: BATCH
     command: build-markov-grid
     args: ["--state-modes", "binary,tri", "--thresholds", "0,5,10,15,20,25,30,35,40,45,50", "--windows", "1Y,2Y,5Y,10Y,15Y,MAX", "--orders", "1,2"]
@@ -79,6 +85,7 @@ stages:
 
   - id: build_markov_snapshots
     name: "Markov Snapshots"
+    phase: "Analytics"
     mode: BATCH
     command: build-markov-snapshots
     args: ["--allow-missing"]
@@ -91,6 +98,7 @@ stages:
 
   - id: build_hmm_daily
     name: "HMM Grid"
+    phase: "Analytics"
     mode: BATCH
     command: build-hmm-daily
     args: ["--tickers", "@config"]
@@ -103,11 +111,12 @@ stages:
 
   - id: build_hmm_snapshots
     name: "HMM Snapshots"
+    phase: "Analytics"
     mode: BATCH
     command: build-hmm-snapshots
     args: ["--allow-missing"]
     depends_on: ["build_hmm_daily"]
-    outputs: ["data/analytics/hmm/snapshots/*.json"]
+    outputs: ["data/analytics_snapshots/hmm/**/*.json"]
     inputs: ["data/analytics/hmm/**/*.parquet"]
     retry: 0
     timeout_minutes: 5
@@ -115,6 +124,7 @@ stages:
 
   - id: backtest_hmm
     name: "Backtest HMM"
+    phase: "Analytics"
     mode: BATCH
     command: backtest-hmm
     args: ["--tickers", "@config"]
@@ -126,24 +136,26 @@ stages:
     on_failure: warn
 
   - id: build_gex_daily
-    name: "GEX"
+    name: "GEX (ThetaData)"
+    phase: "Analytics"
     mode: BATCH
-    command: build-gex-daily
+    command: build-gex-theta
     args: ["--tickers", "@config"]
-    depends_on: ["extract_massive_snapshot", "update_raw"]
+    depends_on: []  # ThetaData REST API — no file dependencies
     outputs: ["data/analytics/gex/*.json", "data/analytics/gex/*.parquet"]
-    inputs: ["data/raw/massive/options/options_*.parquet", "data/raw/*.parquet"]
-    retry: 0
+    inputs: []
+    retry: 1
     timeout_minutes: 20
     on_failure: warn
 
   - id: archive_gex_daily
     name: "GEX History Archive"
+    phase: "Analytics"
     mode: BATCH
     command: archive-gex-daily
     args: ["--tickers", "SPY"]
     depends_on: ["build_gex_daily"]
-    outputs: ["data/analytics/gex/archive/*.parquet"]
+    outputs: ["data/analytics/gex/history/*.parquet"]
     inputs: ["data/analytics/gex/*.json"]
     retry: 0
     timeout_minutes: 5
@@ -152,6 +164,7 @@ stages:
   # --- Phase 4: Expected Moves ---
   - id: update_expected_moves
     name: "Expected Moves"
+    phase: "Expected Moves"
     mode: BATCH
     command: update-expected-moves
     args: ["--ticker", "@config", "--lookback", "5", "--include-weekly-reference"]
@@ -164,6 +177,7 @@ stages:
 
   - id: build_expected_moves_snapshots
     name: "Expected Moves History Snapshots"
+    phase: "Expected Moves"
     mode: BATCH
     command: build-expected-moves-snapshots
     args: ["--tickers", "@config"]
@@ -176,6 +190,7 @@ stages:
 
   - id: update_expected_moves_v2
     name: "Expected Moves V2"
+    phase: "Expected Moves"
     mode: BATCH
     command: update-expected-moves-v2
     args: []
@@ -188,6 +203,7 @@ stages:
 
   - id: fetch_eod_chains
     name: "Fetch EOD Chains"
+    phase: "Expected Moves"
     mode: BATCH
     command: fetch-eod-chains
     args: []
@@ -200,6 +216,7 @@ stages:
 
   - id: process_implied_probabilities
     name: "Implied Probability"
+    phase: "Expected Moves"
     mode: BATCH
     command: process-implied-probabilities
     args: []
@@ -212,12 +229,13 @@ stages:
 
   - id: analyze_expected_moves_reliability
     name: "Expected Moves Reliability"
+    phase: "Expected Moves"
     mode: BATCH
     command: analyze-expected-moves-reliability
     args: []
     depends_on: ["build_expected_moves_snapshots"]
     outputs: ["data/analytics/options/reliability/*.json"]
-    inputs: ["data/analytics/options/snapshots/*.parquet"]
+    inputs: ["data/analytics_snapshots/options/**/*.parquet"]
     retry: 0
     timeout_minutes: 5
     on_failure: warn
@@ -225,6 +243,7 @@ stages:
   # --- Phase 5: Additional Analytics ---
   - id: update_seasonality
     name: "Seasonality"
+    phase: "Technicals"
     mode: BATCH
     command: update-seasonality
     args: []
@@ -237,6 +256,7 @@ stages:
 
   - id: update_sma_stack
     name: "SMA/EMA Stack"
+    phase: "Technicals"
     mode: BATCH
     command: update-sma-stack
     args: []
@@ -249,6 +269,7 @@ stages:
 
   - id: update_dcs
     name: "Downtrend Continuation"
+    phase: "Technicals"
     mode: BATCH
     command: update-dcs
     args: []
@@ -261,6 +282,7 @@ stages:
 
   - id: update_adx
     name: "ADX/DMI"
+    phase: "Technicals"
     mode: BATCH
     command: update-adx
     args: []
@@ -273,6 +295,7 @@ stages:
 
   - id: update_psar
     name: "PSAR"
+    phase: "Technicals"
     mode: BATCH
     command: update-psar
     args: []
@@ -285,6 +308,7 @@ stages:
 
   - id: update_ichimoku
     name: "Ichimoku"
+    phase: "Technicals"
     mode: BATCH
     command: update-ichimoku
     args: []
@@ -296,7 +320,8 @@ stages:
     on_failure: warn
 
   - id: build_volatility_struct
-    name: "VolatilityTermStructure"
+    name: "Volatility Term Structure"
+    phase: "Technicals"
     mode: BATCH
     command: build-volatility-struct
     args: []
@@ -309,6 +334,7 @@ stages:
 
   - id: update_volatility
     name: "ATR/Volatility Analysis"
+    phase: "Technicals"
     mode: BATCH
     command: update-volatility
     args: []
@@ -321,6 +347,7 @@ stages:
 
   - id: update_fred_calendar
     name: "FRED Calendar"
+    phase: "Technicals"
     mode: BATCH
     command: update-fred-calendar
     args: []
@@ -333,6 +360,7 @@ stages:
 
   - id: build_skew_daily
     name: "Skew & PCR"
+    phase: "Technicals"
     mode: BATCH
     command: build-skew-daily
     args: ["--tickers", "@config"]
@@ -345,6 +373,7 @@ stages:
 
   - id: build_tsmom_daily
     name: "TSMOM"
+    phase: "Technicals"
     mode: BATCH
     command: build-tsmom-daily
     args: ["--tickers", "@config"]
@@ -357,6 +386,7 @@ stages:
 
   - id: build_gaf_daily
     name: "GAF"
+    phase: "Technicals"
     mode: BATCH
     command: build-gaf-daily
     args: []
@@ -369,6 +399,7 @@ stages:
 
   - id: update_volume_regime
     name: "Volume Regime Analysis"
+    phase: "Technicals"
     mode: BATCH
     command: update-volume-regime
     args: []
@@ -382,6 +413,7 @@ stages:
   # --- Phase 6: AI Intelligence ---
   - id: generate_ai_context
     name: "AI Context Generation"
+    phase: "AI Intelligence"
     mode: BATCH
     command: generate-ai-context
     args: ["--ticker", "SPY"]
@@ -394,6 +426,7 @@ stages:
 
   - id: generate_ai_report
     name: "AI Daily Report"
+    phase: "AI Intelligence"
     mode: BATCH
     command: generate-ai-report
     args: ["--ticker", "SPY"]

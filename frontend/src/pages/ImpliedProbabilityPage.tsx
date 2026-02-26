@@ -116,10 +116,13 @@ export const ImpliedProbabilityPage = () => {
                 // Fallback: candles API
                 const res = await fetch(`/api/v1/market/candles/${selectedAsset}?interval=1d&range=1d`);
                 if (res.ok) {
-                    const data = await res.json();
-                    if (data?.length > 0) {
-                        setLivePrice(data[data.length - 1].Close || 0);
-                        return;
+                    const contentType = res.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const data = await res.json();
+                        if (data?.length > 0) {
+                            setLivePrice(data[data.length - 1].Close || 0);
+                            return;
+                        }
                     }
                 }
                 // Last resort: ref_price from static data

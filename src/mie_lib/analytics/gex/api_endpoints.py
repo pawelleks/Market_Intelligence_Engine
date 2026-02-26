@@ -88,9 +88,27 @@ def get_latest_gex(ticker: str, force_refresh: bool = False):
     except Exception as e:
          logger.error(f"GEX Error: {e}")
          raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-         logger.error(f"GEX Error: {e}")
-         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/audit/{ticker}")
+def get_gex_audit(ticker: str):
+    """
+    Mode: BATCH (read-only)
+    Data Source: Pre-computed audit report from disk
+    Response Time: <50ms
+
+    Returns the latest GEX audit report comparing ThetaData vs yfinance calculations.
+    """
+    import json
+
+    ticker = ticker.upper().strip()
+    audit_path = Path("data/analytics/gex") / f"audit_{ticker}.json"
+
+    if not audit_path.exists():
+        raise HTTPException(status_code=404, detail=f"No audit report found for {ticker}. Run 'audit-gex' first.")
+
+    with open(audit_path) as f:
+        return json.load(f)
+
 
 @router.get("/history/heatmap/{ticker}")
 def get_gex_history_heatmap(ticker: str):

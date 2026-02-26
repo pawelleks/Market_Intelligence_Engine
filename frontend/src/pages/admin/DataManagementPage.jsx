@@ -4,12 +4,7 @@ import FredPipeline from '../../components/FredPipeline';
 import EconomicPipeline from '../../components/EconomicPipeline';
 import { usePageTitle } from '../../hooks/usePageTitle';
 
-// --- Sub-Components (Internal for now due to coupling) ---
-const PIPELINE_STEPS = [
-    { id: "Ingestion", label: "Phase 1: Ingestion", steps: ["Update Raw Data", "Download Daily Options (Flat File)", "Extract Options Tickers"] },
-    { id: "Features", label: "Phase 2: Features", steps: ["Update Features"] },
-    { id: "Analytics", label: "Phase 3: Analytics", steps: ["Minervini Scanner", "Markov Grid", "Markov Snapshots", "HMM Grid", "Backtest HMM", "GEX", "Expected Moves", "Expected Moves V2", "Skew & PCR", "Seasonality", "TSMOM", "GAF", "SMA/EMA Stack", "ADX/DMI", "Ichimoku", "PSAR", "VolatilityTermStructure", "AI Context Generation", "AI Daily Report"] }
-];
+// Pipeline phases are now fetched from /api/v1/system/pipeline/stages (driven by stages.yml)
 
 const StatusBadge = ({ status }) => {
     const s = (status || "UNKNOWN").toUpperCase();
@@ -86,6 +81,7 @@ const DataManagementPage = () => {
     const [contentSubTab, setContentSubTab] = useState('latest');
 
     // Data State
+    const [pipelinePhases, setPipelinePhases] = useState([]);
     const [auditData, setAuditData] = useState(null);
     const [historyData, setHistoryData] = useState([]);
     const [ohlcData, setOhlcData] = useState([]);
@@ -115,9 +111,20 @@ const DataManagementPage = () => {
     }, [activeTab, auditData?.status, token]);
 
 
+    const fetchPipelineStages = async () => {
+        try {
+            const res = await fetch(`/api/v1/system/pipeline/stages`, { headers });
+            if (res.ok) {
+                const json = await res.json();
+                setPipelinePhases(json.phases || []);
+            }
+        } catch (e) { console.error('Failed to fetch pipeline stages:', e); }
+    };
+
     const fetchAllData = () => {
         setLoading(true);
         Promise.all([
+            fetchPipelineStages(),
             fetchAudit(),
             fetchHistory(),
             fetchViewerData('ohlc', setOhlcData),
@@ -204,21 +211,14 @@ const DataManagementPage = () => {
     const renderAudit = () => {
         if (!auditData) return <div>Waiting for audit log...</div>;
         const stages = auditData.stages || {};
-        const getStage = (name) => {
-            const keys = Object.keys(stages);
-            const found = keys.find(k => k.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(k.toLowerCase()));
-            return found ? stages[found] : null;
-        };
         const isRunning = auditData.status === 'RUNNING';
 
         const formatDetails = (details) => {
             if (!details) return null;
             let d = details;
-            // Handle stringified JSON if applicable
             if (typeof d === 'string' && d.trim().startsWith('{')) {
                 try { d = JSON.parse(d); } catch (e) { }
             }
-            // If simple string, display as is (grey)
             if (typeof d === 'string') return <span style={{ color: '#666', fontSize: '0.8rem' }}>{d}</span>;
 
             const elems = [];
@@ -237,12 +237,24 @@ const DataManagementPage = () => {
             return <span style={{ fontSize: '0.8rem' }}>{elems}</span>;
         };
 
+        // Count completed/total for progress display
+        const totalStages = pipelinePhases.reduce((sum, p) => sum + p.stages.length, 0);
+        const getStageInfo = (s) => stages[s.id] || stages[s.name];
+        const completedStages = pipelinePhases.reduce((sum, p) =>
+            sum + p.stages.filter(s => {
+                const st = (getStageInfo(s)?.status || '').toUpperCase();
+                return st === 'COMPLETED' || st === 'SUCCESS' || st === 'WARNING';
+            }).length, 0);
+
         return (
             <div>
                 <div style={{ backgroundColor: '#162032', padding: '20px', borderRadius: '8px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
                     <div>
                         <h2>Pipeline Job: {auditData.job_name}</h2>
-                        <div style={{ color: '#888' }}>Started: {auditData.start_time ? new Date(auditData.start_time).toLocaleString() : '-'}</div>
+                        <div style={{ color: '#888' }}>
+                            Started: {auditData.start_time ? new Date(auditData.start_time).toLocaleString() : '-'}
+                            {isRunning && <span style={{ marginLeft: '15px', color: '#94a3b8' }}>Progress: {completedStages}/{totalStages}</span>}
+                        </div>
                     </div>
                     <div>
                         <StatusBadge status={auditData.status} />
@@ -263,26 +275,39 @@ const DataManagementPage = () => {
                         </button>
                     </div>
                 </div>
-                {PIPELINE_STEPS.map(phase => (
-                    <div key={phase.id} style={{ marginBottom: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #222' }}>
-                        <div style={{ padding: '10px 15px', backgroundColor: '#1a2639', fontWeight: 'bold' }}>{phase.label}</div>
-                        <div>
-                            {phase.steps.map(stepName => {
-                                const info = getStage(stepName);
-                                const status = info ? info.status : 'PENDING';
-                                return (
-                                    <div key={stepName} style={{ padding: '10px 15px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
-                                        <span>{stepName}</span>
-                                        <div style={{ display: 'flex', gap: '10px' }}>
-                                            {info && info.details && formatDetails(info.details)}
-                                            <StatusBadge status={status} />
+                {pipelinePhases.map(phase => {
+                    // Count completed in this phase
+                    const phaseComplete = phase.stages.filter(s => {
+                        const st = ((stages[s.id] || stages[s.name])?.status || '').toUpperCase();
+                        return st === 'COMPLETED' || st === 'SUCCESS' || st === 'WARNING';
+                    }).length;
+
+                    return (
+                        <div key={phase.label} style={{ marginBottom: '15px', backgroundColor: '#0e1525', borderRadius: '8px', border: '1px solid #222' }}>
+                            <div style={{ padding: '10px 15px', backgroundColor: '#1a2639', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>{phase.label}</span>
+                                <span style={{ color: '#94a3b8', fontWeight: 'normal', fontSize: '0.85rem' }}>{phaseComplete}/{phase.stages.length}</span>
+                            </div>
+                            <div>
+                                {phase.stages.map(stage => {
+                                    // Try exact ID match first (new format), fallback to name match (legacy)
+                                    let info = stages[stage.id];
+                                    if (!info) info = stages[stage.name];
+                                    const status = info ? info.status : 'PENDING';
+                                    return (
+                                        <div key={stage.id} style={{ padding: '10px 15px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
+                                            <span>{stage.name}</span>
+                                            <div style={{ display: 'flex', gap: '10px' }}>
+                                                {info && info.details && formatDetails(info.details)}
+                                                <StatusBadge status={status} />
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         );
     };

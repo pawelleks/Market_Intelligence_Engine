@@ -48,7 +48,7 @@ COPY config/ ./config/
 # 19:00 EST = 00:00 UTC (Standard)
 # 0 0 * * *
 RUN echo "0 0 * * * /app/cli/orchestrator.sh CRON >> /proc/1/fd/1 2>&1" > crontab && \
-    echo "10 0 * * * python /app/jobs/process_expected_moves_static.py >> /proc/1/fd/1 2>&1" >> crontab && \
+    echo "10 0 * * * curl -s -X POST http://mie-api:8000/api/v1/system/refresh-static-em >> /proc/1/fd/1 2>&1" >> crontab && \
     echo "30 0 * * * python /app/jobs/fetch_market_eod_chains.py >> /proc/1/fd/1 2>&1" >> crontab && \
     echo "35 0 * * * python /app/jobs/process_implied_probabilities.py >> /proc/1/fd/1 2>&1" >> crontab && \
     echo "0 3 * * * /app/scripts/economic_cron.sh >> /proc/1/fd/1 2>&1" >> crontab
